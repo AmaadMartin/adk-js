@@ -43,11 +43,14 @@ const FILE_EXTENSION_LOADER_MAP: Readonly<Record<string, esbuild.Loader>> = {
 };
 
 /**
- * Supported file extensions for JavaScript and TypeScript.
+ * Supported file extensions for JavaScript and TypeScript, most preferred
+ * first. The order is load bearing: where two entry points differ only by
+ * extension, the TypeScript source is the file a developer edits, so it wins
+ * over a compiled sibling.
  */
 // Not derived from FILE_EXTENSION_LOADER_MAP: .jsx/.tsx must never become
 // discoverable agent files.
-const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
+const JS_FILES_EXTENSIONS = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs'];
 
 /**
  * How many ancestor directories to search for a project's `node_modules`.
@@ -492,9 +495,17 @@ export class AgentFile {
  * - agents_dir/{agentOrAppName}/app.[js | ts | mjs | cjs]
  * - agents_dir/{agentOrAppName}/index.[js | ts | mjs | cjs]
  *
- * A directory that holds more than one of these resolves to the first match in
- * the order app, agent, index. A match that exports no agent is a helper
- * module of that name, so the loader tries the next one.
+ * A name that has more than one of these resolves by precedence, so the served
+ * agent never depends on directory order or on which build finishes first:
+ * - a top-level file beats a directory of the same name;
+ * - inside a directory, `app` beats `agent`, and `agent` beats `index`;
+ * - between two files that differ only by extension, TypeScript beats
+ *   JavaScript.
+ *
+ * The loader logs a warning for a name it resolves this way, and never builds
+ * the candidate it drops. The one exception is an entry point that exports no
+ * agent: it is a helper module of that name, so the loader tries the next
+ * name in the order.
  *
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
@@ -690,27 +701,27 @@ export class AgentLoader {
   }
 
   private async scanAgents(): Promise<void> {
-    const files = (await isFile(this.agentsDirPath))
+    const entries = (await isFile(this.agentsDirPath))
       ? [await getFileMetadata(this.agentsDirPath)]
       : await getDirFiles(this.agentsDirPath);
 
-    await Promise.all(
-      files.map(async (fileOrDir: FileMetadata) => {
-        if (fileOrDir.isFile && isJsFile(fileOrDir.ext)) {
-          return this.loadAgentFromFile(fileOrDir);
-        }
+    const entryFilesByName = groupEntryFilesByName(entries);
+    const directories = entries.filter(isAgentDirectory);
 
-        if (fileOrDir.isDirectory) {
-          if (
-            fileOrDir.name === 'node_modules' ||
-            fileOrDir.name.startsWith('.')
-          ) {
-            return;
-          }
-          return this.loadAgentFromDirectory(fileOrDir);
-        }
+    await Promise.all([
+      ...[...entryFilesByName].map(([name, [entryFile, ...ignored]]) => {
+        const shadowedDir = directories.find((dir) => dir.name === name);
+        warnShadowedEntries(name, entryFile.path, [
+          ...ignored.map((file) => file.path),
+          ...(shadowedDir ? [shadowedDir.path] : []),
+        ]);
+
+        return this.loadAgentFromFile(entryFile);
       }),
-    );
+      ...directories
+        .filter((dir) => !entryFilesByName.has(dir.name))
+        .map((dir) => this.loadAgentFromDirectory(dir)),
+    ]);
 
     this.agentsAlreadyPreloaded = true;
 
@@ -735,14 +746,15 @@ export class AgentLoader {
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
 
-    for (const entryName of DIRECTORY_ENTRY_FILE_NAMES) {
-      const entryFile = subFiles.find(
-        (f) => f.isFile && f.name === entryName && isJsFile(f.ext),
+    for (const [entryFile, ...ignored] of directoryEntryFiles(subFiles)) {
+      // `app` beating `agent` beating `index` is the documented layout, not an
+      // ambiguity, so only a same-named sibling counts as a dropped candidate
+      // here.
+      warnShadowedEntries(
+        dir.name,
+        entryFile.path,
+        ignored.map((file) => file.path),
       );
-
-      if (!entryFile) {
-        continue;
-      }
 
       const agentFile = new AgentFile(entryFile.path, this.options);
       try {
@@ -809,6 +821,83 @@ function findUnresolvedRelativeImports(metafile: esbuild.Metafile): string[] {
 
 function isJsFile(fileExt?: string): boolean {
   return !!fileExt && JS_FILES_EXTENSIONS.includes(fileExt);
+}
+
+/** A file the loader can build and import as an entry point. */
+type EntryFile = FileMetadata & {ext: string};
+
+function isEntryFile(file: FileMetadata): file is EntryFile {
+  return file.isFile && isJsFile(file.ext);
+}
+
+/** The entry points among `files`, most preferred extension first. */
+function sortEntryFiles(files: FileMetadata[]): EntryFile[] {
+  return files
+    .filter(isEntryFile)
+    .sort(
+      (a, b) =>
+        JS_FILES_EXTENSIONS.indexOf(a.ext) - JS_FILES_EXTENSIONS.indexOf(b.ext),
+    );
+}
+
+/**
+ * Top-level entry points grouped by the name they are served under, each group
+ * ordered by precedence.
+ */
+function groupEntryFilesByName(
+  files: FileMetadata[],
+): Map<string, EntryFile[]> {
+  const groups = new Map<string, EntryFile[]>();
+
+  for (const file of sortEntryFiles(files)) {
+    const group = groups.get(file.name) ?? [];
+    group.push(file);
+    groups.set(file.name, group);
+  }
+
+  return groups;
+}
+
+/**
+ * The entry points a directory offers, grouped by entry name and ordered by
+ * {@link DIRECTORY_ENTRY_FILE_NAMES}, so that an App wins over the agent it
+ * wraps. Each group holds the files of one name, most preferred extension
+ * first. A name the directory does not use has no group.
+ */
+function directoryEntryFiles(
+  subFiles: FileMetadata[],
+): Array<[EntryFile, ...EntryFile[]]> {
+  return DIRECTORY_ENTRY_FILE_NAMES.map((entryName) =>
+    sortEntryFiles(subFiles.filter((file) => file.name === entryName)),
+  ).filter((group): group is [EntryFile, ...EntryFile[]] => group.length > 0);
+}
+
+function isAgentDirectory(entry: FileMetadata): boolean {
+  return (
+    entry.isDirectory &&
+    entry.name !== 'node_modules' &&
+    !entry.name.startsWith('.')
+  );
+}
+
+/**
+ * Reports the candidates a name resolved away from. A duplicate definition is
+ * a misconfiguration the developer has to see, but it must not stop the
+ * winning agent from loading.
+ */
+function warnShadowedEntries(
+  name: string,
+  used: string,
+  ignored: string[],
+): void {
+  if (ignored.length === 0) {
+    return;
+  }
+
+  logger.warn(
+    `Agent '${name}' has more than one definition. Using ${used}; ` +
+      `ignoring ${ignored.join(', ')}.`,
+  );
 }
 
 async function getDirFiles(dir: string): Promise<FileMetadata[]> {
