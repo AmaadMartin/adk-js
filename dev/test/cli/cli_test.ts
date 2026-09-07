@@ -13,6 +13,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {getAbsolutePath} from '../../src/utils/file_utils.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -56,6 +57,22 @@ function findSubcommand(parent: Command, name: string): Command {
     expect.fail(`no subcommand named '${name}' under '${parent.name()}'`);
   }
   return subcommand;
+}
+
+/**
+ * Renders the full `--help` output of a command. `helpInformation()` omits
+ * text registered with `addHelpText`, which only `outputHelp()` emits.
+ */
+function renderHelp(command: Command): string {
+  let out = '';
+  command.configureOutput({writeOut: (text) => (out += text)});
+  command.outputHelp();
+  return out;
+}
+
+/** Joins the lines commander wraps, so a phrase can be matched as a whole. */
+function unwrap(help: string): string {
+  return help.replace(/\s+/g, ' ');
 }
 
 describe('CLI Entrypoint', () => {
@@ -475,9 +492,31 @@ describe('CLI Entrypoint', () => {
         'agent_engine',
       ).helpInformation();
 
-      expect(help).toContain('[agent_path]');
+      expect(help).toContain('[agent]');
       expect(help).toContain('The path to the agent source code folder');
       expect(help).not.toContain('directory of agents to serve');
+      expect(help).not.toContain('agents_dir');
+    });
+
+    it('should render the default as a phrase instead of the current path', () => {
+      const help = unwrap(
+        renderHelp(
+          findSubcommand(findSubcommand(program, 'deploy'), 'agent_engine'),
+        ),
+      );
+
+      expect(help).toContain('(default: the current directory)');
+      expect(help).not.toContain(process.cwd());
+    });
+
+    it('should show a worked example', () => {
+      const help = renderHelp(
+        findSubcommand(findSubcommand(program, 'deploy'), 'agent_engine'),
+      );
+
+      expect(help).toContain('Example:');
+      expect(help).toContain('adk deploy agent_engine --project=[project]');
+      expect(help).toContain('--repository=[repository]');
     });
 
     it('should default agentPath to the current directory', async () => {
@@ -485,6 +524,16 @@ describe('CLI Entrypoint', () => {
 
       expect(deployToAgentEngine).toHaveBeenCalledWith(
         expect.objectContaining({agentPath: process.cwd()}),
+      );
+    });
+
+    it('should pass an explicit agent path through', async () => {
+      await parse(['deploy', 'agent_engine', './my-agent-path']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: getAbsolutePath('./my-agent-path'),
+        }),
       );
     });
   });
@@ -523,17 +572,26 @@ describe('CLI Entrypoint', () => {
         'The path to the agent source code folder',
       );
     });
+
+    it('should name itself in its worked example', () => {
+      const help = renderHelp(
+        findSubcommand(findSubcommand(program, 'deploy'), 'reasoning_engine'),
+      );
+
+      expect(help).toContain('adk deploy reasoning_engine --project=');
+      expect(help).not.toContain('adk deploy agent_engine --project=');
+    });
   });
 
   describe('command: deploy', () => {
     it('should list a summary for each agent engine subcommand', () => {
-      const help = findSubcommand(program, 'deploy').helpInformation();
+      const help = unwrap(findSubcommand(program, 'deploy').helpInformation());
 
-      expect(help).toMatch(
-        /agent_engine \[options\] \[agent_path\]\s+Deploys an agent to Agent Engine\./,
+      expect(help).toContain(
+        'agent_engine [options] [agent] Deploys an agent to Agent Engine.',
       );
-      expect(help).toMatch(
-        /reasoning_engine \[options\] \[agent_path\]\s+Deploys an agent to Agent Engine\. Alias of `deploy agent_engine`\./,
+      expect(help).toContain(
+        'reasoning_engine [options] [agent] Deploys an agent to Agent Engine. Alias of `deploy agent_engine`.',
       );
     });
 
