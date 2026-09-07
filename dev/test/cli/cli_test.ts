@@ -163,7 +163,7 @@ describe('CLI Entrypoint', () => {
     it('reports an unsupported memory service uri and starts no server', async () => {
       const exit = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => undefined) as never);
+        .mockImplementation((() => undefined) as typeof process.exit);
 
       await parse(['web', '--memory_service_uri', 'redis://x']);
 
@@ -275,7 +275,7 @@ describe('CLI Entrypoint', () => {
       );
       const exit = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => undefined) as never);
+        .mockImplementation((() => undefined) as typeof process.exit);
 
       await parse(['run', '/nope/agent.ts']);
 
