@@ -261,6 +261,8 @@ async function* runPreProcessor(
       invocationContext,
       codeExecutionInput: {
         code: codeStr,
+        // This snippet is ADK's own pandas data file helper, not model output,
+        // so its language is fixed rather than read from a fence.
         language: CodeExecutionLanguage.PYTHON,
         inputFiles: [file],
         executionId,
@@ -336,13 +338,13 @@ async function* runPostProcessor(
   // [Step 1] Extract code from the model predict response and truncate the
   // content to the part with the first code block
   const responseContent = llmResponse.content;
-  const codeStr = extractCodeAndTruncateContent(
+  const extracted = extractCodeAndTruncateContent(
     responseContent,
     codeExecutor.codeBlockDelimiters,
   );
 
   // Terminal state: no code to execute
-  if (!codeStr) {
+  if (!extracted) {
     return;
   }
 
@@ -361,8 +363,8 @@ async function* runPostProcessor(
   const codeExecutionResult = await codeExecutor.executeCode({
     invocationContext,
     codeExecutionInput: {
-      code: codeStr,
-      language: CodeExecutionLanguage.PYTHON,
+      code: extracted.code,
+      language: extracted.language,
       inputFiles: codeExecutorContext.getInputFiles(),
       executionId,
     },
@@ -370,7 +372,7 @@ async function* runPostProcessor(
 
   codeExecutorContext.updateCodeExecutionResult({
     invocationId: invocationContext.invocationId,
-    code: codeStr,
+    code: extracted.code,
     resultStdout: codeExecutionResult.stdout,
     resultStderr: codeExecutionResult.stderr,
   });
