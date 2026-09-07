@@ -5,9 +5,8 @@
  */
 
 import {Schema, Type} from '@google/genai';
+import {NUMERIC_STRING_KEYS} from './genai_schema_to_json.js';
 
-/** A JSON Schema object, as produced by an MCP server or an OpenAPI spec. */
-type JsonSchemaObject = {[key: string]: unknown};
 type MCPTypeArrayItem = string | {type: string};
 
 /**
@@ -26,19 +25,6 @@ const SUPPORTED_FORMATS: Readonly<Record<string, readonly string[]>> = {
   number: ['int32', 'int64'],
   string: ['date-time', 'enum'],
 };
-
-/**
- * Bounds that JSON Schema carries as numbers and genai carries as strings.
- * The inverse list lives in `genai_schema_to_json.ts`.
- */
-const NUMERIC_STRING_KEYS = [
-  'minLength',
-  'maxLength',
-  'minItems',
-  'maxItems',
-  'minProperties',
-  'maxProperties',
-] as const;
 
 function isSupportedFormat(type: unknown, format: unknown): format is string {
   if (typeof type !== 'string' || typeof format !== 'string') {
@@ -86,9 +72,7 @@ const getTypeFromArrayItem = (
   return mcpType?.type?.toLowerCase?.();
 };
 
-export function toGeminiSchema(
-  mcpSchema?: JsonSchemaObject,
-): Schema | undefined {
+export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
   if (!mcpSchema) {
     return undefined;
   }

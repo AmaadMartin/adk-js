@@ -240,7 +240,7 @@ describe('OpenAPIToolset Integration', () => {
       format: 'int64',
     });
     // `format: binary` on the request body is what the Gemini API rejects.
-    expect(parameters?.properties?.['body']?.format).toBeUndefined();
+    expect(parameters?.properties?.['body']).toEqual({type: Type.STRING});
   });
 });
 
