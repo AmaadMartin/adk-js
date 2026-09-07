@@ -40,6 +40,14 @@ describe('hallucination', () => {
     expect(value.maybeHallucinatedValue).toBe('some-skill');
   });
 
+  it('freezes a confirmed value too', () => {
+    const value = confirmedNotHallucinated('some-skill');
+
+    expect(Object.isFrozen(value)).toBe(true);
+    expect(() => Object.assign(value, {confirmed: false})).toThrow(TypeError);
+    expect(value.confirmed).toBe(true);
+  });
+
   it('test_confirming_a_value_does_not_confirm_the_one_it_came_from', () => {
     const unconfirmed = maybeHallucinated('some-skill');
 
