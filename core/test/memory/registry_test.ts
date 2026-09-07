@@ -119,6 +119,23 @@ describe('getMemoryServiceFromUri', () => {
     ).to.throw(/Agent engine resource name is mal-formatted\./);
   });
 
+  it('rejects a resource name whose project and location are empty', () => {
+    expect(() =>
+      getMemoryServiceFromUri(
+        'agentengine://projects//locations//reasoningEngines/999',
+      ),
+    ).to.throw(/Agent engine resource name is mal-formatted\./);
+    expect(clientConstructor).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-numeric agent engine id in a resource name', () => {
+    expect(() =>
+      getMemoryServiceFromUri(
+        'agentengine://projects/p1/locations/us-central1/reasoningEngines/abc',
+      ),
+    ).to.throw(/Agent engine resource name is mal-formatted\./);
+  });
+
   it('rejects "rag://", which adk-js has no memory service for', () => {
     expect(() => getMemoryServiceFromUri('rag://my-corpus')).to.throw(
       'Unsupported memory service URI: rag://my-corpus',
