@@ -248,6 +248,23 @@ describe('skill loads on the execute_tool span', () => {
     );
   });
 
+  it('omits the additional tools when the frontmatter lists numbers', async () => {
+    process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
+
+    await recordToolExecution('load_skill', async () => {
+      const skill = loadedSkill();
+      // A number array is a valid span attribute, so only this module's own
+      // check can keep it off the span. A mixed array cannot pin that: the
+      // OpenTelemetry SDK rejects it whatever this module does.
+      skill.frontmatter.metadata = {adk_additional_tools: [1, 2]};
+      attachSkillTelemetry({kind: 'load', skillName: 'sample_skill', skill});
+    });
+
+    expect(tracing.onlySpan().attributes).not.toHaveProperty(
+      'adk.experimental.skill.additional_tools',
+    );
+  });
+
   it('omits the source URI when the skill does not name one', async () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
