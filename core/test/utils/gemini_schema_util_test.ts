@@ -527,6 +527,16 @@ describe('jsonSchemaToGeminiSchema', () => {
     });
   });
 
+  it('still types a null-only schema that carries other fields', () => {
+    expect(
+      jsonSchemaToGeminiSchema({type: 'null', description: 'nothing'}),
+    ).toEqual({
+      type: Type.OBJECT,
+      description: 'nothing',
+      nullable: true,
+    });
+  });
+
   it('drops a null field value', () => {
     expect(jsonSchemaToGeminiSchema({type: 'string', default: null})).toEqual({
       type: Type.STRING,
