@@ -724,6 +724,45 @@ describe('DatabaseSessionService', () => {
     );
   });
 
+  it('preserves the sub-second lastUpdateTime the session was written with', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'update-time-session',
+    });
+
+    // Both land inside one wall-clock second, so an update_time column with no
+    // fractional-seconds precision reports the wrong value for at least one.
+    const second = Math.floor(Date.now() / 1000) * 1000;
+    const lastTimestamp = second + 700;
+    for (const timestamp of [second + 100, lastTimestamp]) {
+      await service.appendEvent({
+        session,
+        event: createEvent({invocationId: `inv-${timestamp}`, timestamp}),
+      });
+    }
+
+    expect(session.lastUpdateTime).toBe(lastTimestamp);
+
+    const loaded = await service.getSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'update-time-session',
+    });
+
+    expect(loaded?.lastUpdateTime).toBe(lastTimestamp);
+
+    const listed = await service.listSessions({
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+
+    expect(
+      listed.sessions.find((s) => s.id === 'update-time-session')
+        ?.lastUpdateTime,
+    ).toBe(lastTimestamp);
+  });
+
   describe('listSessions pagination and sorting', () => {
     const appName = 'test-app';
     const userId = 'test-user';
