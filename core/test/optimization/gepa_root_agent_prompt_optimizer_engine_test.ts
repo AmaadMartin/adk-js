@@ -110,12 +110,14 @@ describe('GEPARootAgentPromptOptimizer engine resolution', () => {
       reflectionMinibatchSize: 2,
     }).optimize({initialAgent: createAgent(), sampler});
 
+    // The rewrite dominates the seed on every validation example, so the
+    // front holds it alone. gepaResult below keeps both.
     expect(
       result.optimizedAgents.map(({optimizedAgent}) =>
         requireStaticInstruction(optimizedAgent),
       ),
-    ).toEqual([SEED_INSTRUCTION, REWRITE]);
-    expect(result.optimizedAgents[1].overallScore).toBe(1);
+    ).toEqual([REWRITE]);
+    expect(result.optimizedAgents[0].overallScore).toBe(1);
     expect(result.gepaResult).toEqual({
       candidates: [
         {[AGENT_PROMPT_NAME]: SEED_INSTRUCTION},

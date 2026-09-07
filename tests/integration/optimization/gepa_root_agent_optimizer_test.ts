@@ -22,6 +22,7 @@ import {
   LlmAgent,
   LLMRegistry,
   requireStaticInstruction,
+  RootAgentGepaAdapter,
   skillComponentKey,
   SkillToolset,
   type BaseLlmConnection,
@@ -31,6 +32,9 @@ import {
   type LlmRequest,
   type LlmResponse,
 } from '@google/adk';
+import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {beforeAll, beforeEach, describe, expect, it} from 'vitest';
 import {
   CANDIDATE_INSTRUCTION,
@@ -38,6 +42,7 @@ import {
   PhraseCoverageSampler,
   refundSkill,
   rootAgent,
+  SAMPLE_METRIC_BUDGET,
   SKILL_NAME,
   startingAgent,
 } from '../../../samples/optimization/gepa_root_agent_optimizer/agent.js';
@@ -103,11 +108,10 @@ class ReflectingEngine implements GepaEngine {
   reflectiveDataset?: Record<string, Array<Record<string, unknown>>>;
 
   async optimize(params: GepaOptimizeParams): Promise<GepaRunResult> {
-    const {adapter, seedCandidate} = params;
-    if (!adapter.proposeNewTexts) {
-      return expect.unreachable('The adapter must propose new texts.');
-    }
-
+    const {seedCandidate} = params;
+    // The engine contract leaves `proposeNewTexts` optional, for an adapter
+    // that lets the engine reflect for it. This one always proposes.
+    const adapter = params.adapter as RootAgentGepaAdapter;
     const components = Object.keys(seedCandidate);
     const evalBatch = await adapter.evaluate(
       params.trainset,
@@ -135,7 +139,7 @@ class ReflectingEngine implements GepaEngine {
     return {
       candidates,
       valAggregateScores,
-      details: {rounds: 1, tried: candidates.length},
+      toDict: () => ({rounds: 1, tried: candidates.length}),
     };
   }
 }
@@ -225,18 +229,72 @@ describe('GEPARootAgentOptimizer end to end', () => {
     expect(engine.reflectiveDataset?.[AGENT_PROMPT_NAME]).toHaveLength(3);
   });
 
-  it('refuses a reflection reply that carries no fenced block', async () => {
+  it('takes a reflection reply that carries no fenced block whole', async () => {
     ScriptedReflectionLlm.omitFencedBlock = true;
 
-    await expect(
-      new GEPARootAgentOptimizer({
-        engine: new ReflectingEngine(),
+    const result = await new GEPARootAgentOptimizer({
+      engine: new ReflectingEngine(),
+      optimizerModel: REFLECTION_MODEL,
+    }).optimize({
+      initialAgent: createInitialAgent(),
+      sampler: new PhraseCoverageSampler(),
+    });
+
+    const [, rewritten] = result.optimizedAgents;
+    expect(requireStaticInstruction(rewritten.optimizedAgent)).toBe(
+      CANDIDATE_INSTRUCTION,
+    );
+    expect(skillInstructions(rewritten.optimizedAgent)).toBe(
+      CANDIDATE_SKILL_INSTRUCTIONS,
+    );
+  });
+
+  it('runs the bundled engine when no engine is configured', async () => {
+    const initialAgent = createInitialAgent();
+
+    const result = await new GEPARootAgentOptimizer({
+      optimizerModel: REFLECTION_MODEL,
+      maxMetricCalls: SAMPLE_METRIC_BUDGET,
+    }).optimize({initialAgent, sampler: new PhraseCoverageSampler()});
+
+    expect(
+      result.optimizedAgents.map(({optimizedAgent}) => [
+        requireStaticInstruction(optimizedAgent),
+        skillInstructions(optimizedAgent),
+      ]),
+      // The rewrite dominates the seed on the one validation example, so the
+      // front holds it alone. gepaResult keeps both.
+    ).toEqual([[CANDIDATE_INSTRUCTION, CANDIDATE_SKILL_INSTRUCTIONS]]);
+    expect(
+      result.optimizedAgents.map(({overallScore}) => overallScore),
+    ).toEqual([1]);
+    expect(result.gepaResult).toMatchObject({
+      valAggregateScores: [0.5, 1],
+      bestScore: 1,
+      totalMetricCalls: SAMPLE_METRIC_BUDGET,
+    });
+    expect(initialAgent.instruction).toBe(STARTING_INSTRUCTION);
+  });
+
+  it('writes gepa_result.json under a configured runDir', async () => {
+    const runDir = await mkdtemp(join(tmpdir(), 'adk-gepa-integration-'));
+    try {
+      const result = await new GEPARootAgentOptimizer({
         optimizerModel: REFLECTION_MODEL,
+        maxMetricCalls: SAMPLE_METRIC_BUDGET,
+        runDir,
       }).optimize({
         initialAgent: createInitialAgent(),
         sampler: new PhraseCoverageSampler(),
-      }),
-    ).rejects.toThrow(/no fenced block for component skill_instructions:/);
+      });
+
+      const written = JSON.parse(
+        await readFile(join(runDir, 'gepa_result.json'), 'utf8'),
+      );
+      expect(written).toEqual(result.gepaResult);
+    } finally {
+      await rm(runDir, {recursive: true, force: true});
+    }
   });
 
   it('runs the sample workflow without a model', async () => {
@@ -248,9 +306,7 @@ describe('GEPARootAgentOptimizer end to end', () => {
     });
 
     expect(finalOutput(allEvents(perTurn))).toBe(
-      'validation score 0.5: agent: Help the user with their order. | ' +
-        'skill refund_policy: Refund an order when the user asks.\n' +
-        'validation score 1: agent: Help the user with their order. Confirm ' +
+      'validation score 1: agent: Help the user with their order. Confirm ' +
         'the order id before you act. | skill refund_policy: Refund an order ' +
         'only inside the refund window, and say which window applied.',
     );

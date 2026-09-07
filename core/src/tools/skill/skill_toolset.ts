@@ -124,6 +124,7 @@ export class SkillToolset extends BaseToolset {
   public readonly scriptTimeoutSeconds: number;
   private readonly configuredSkillsFolder?: string;
   private readonly scriptOutputDir?: string;
+  private readonly allowInlineScripts?: boolean;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
   private tempOutputDir?: Promise<string>;
@@ -143,6 +144,7 @@ export class SkillToolset extends BaseToolset {
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
     this.scriptOutputDir = options.scriptOutputDir;
+    this.allowInlineScripts = options.allowInlineScripts;
     this.environment = options.environment;
     this.scriptTimeoutSeconds =
       options.scriptTimeoutSeconds ?? DEFAULT_SCRIPT_TIMEOUT_SECONDS;
@@ -174,7 +176,7 @@ export class SkillToolset extends BaseToolset {
 
     // Inline-script execution is opt-in: only expose the tool when explicitly
     // enabled, so agents are secure-by-default.
-    if (options.allowInlineScripts) {
+    if (this.allowInlineScripts) {
       this.tools.push(new RunSkillInlineScriptTool(this));
     }
 

@@ -182,7 +182,10 @@ describe('RootAgentGepaAdapter', () => {
 
   it('test_adapter_make_reflective_dataset', () => {
     const adapter = createAdapter();
-    const evalBatch: EvaluationBatch = {
+    const evalBatch: EvaluationBatch<
+      Record<string, unknown>,
+      Record<string, unknown>
+    > = {
       outputs: [{o: 1}, {o: 2}],
       scores: [0.9, 0.1],
       trajectories: [{t: 'uses my_skill'}, {t: 'does not use skill'}],
@@ -243,7 +246,7 @@ describe('RootAgentGepaAdapter', () => {
       'a new version of the agent core instructions',
     );
     expect(reflectionLm.prompts[0]).toContain('Old prompt');
-    expect(reflectionLm.prompts[0]).toContain('"score": 1');
+    expect(reflectionLm.prompts[0]).toContain('## score\n1');
     expect(reflectionLm.prompts[1]).toContain(
       `a skill named \`${SKILL_NAME}\``,
     );
@@ -261,7 +264,9 @@ describe('RootAgentGepaAdapter', () => {
     });
     const adapter = createAdapter(createAgent(), sampler);
 
-    let evalBatch: EvaluationBatch | undefined;
+    let evalBatch:
+      | EvaluationBatch<Record<string, unknown>, Record<string, unknown>>
+      | undefined;
     const warnings = await collectWarnings(async () => {
       evalBatch = await adapter.evaluate(TRAIN_IDS, {
         [AGENT_PROMPT_NAME]: 'New prompt',

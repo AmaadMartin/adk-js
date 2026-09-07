@@ -951,6 +951,8 @@ export type {
 export {requireStaticInstruction} from './optimization/gepa_utils.js';
 export {
   SKILL_KEY_PREFIX,
+  extractNewInstruction,
+  renderProposalPrompt,
   skillComponentKey,
 } from './optimization/instruction_proposal.js';
 export {

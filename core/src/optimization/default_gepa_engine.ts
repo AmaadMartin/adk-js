@@ -17,6 +17,9 @@ import type {
 /** The file {@link DefaultGepaEngine} writes into `runDir`. */
 const RESULT_FILE_NAME = 'gepa_result.json';
 
+/** Indentation of the JSON written into `runDir`. */
+const RESULT_INDENT = 2;
+
 /** Options for {@link DefaultGepaEngine}. */
 export interface DefaultGepaEngineOptions {
   /**
@@ -196,22 +199,29 @@ function validateSearchInputs({
   }
 }
 
-/** Builds the result the engine reports. */
+/**
+ * Builds the result the engine reports.
+ *
+ * `candidates` carries the Pareto front, which is what a caller acts on.
+ * `toDict` keeps every candidate the search explored, for a caller that wants
+ * more than the front.
+ */
 function buildRunResult(
   pool: PoolEntry[],
   totalMetricCalls: number,
 ): GepaRunResult {
-  const candidates = pool.map((entry) => entry.candidate);
-  const valAggregateScores = pool.map((entry) => entry.mean);
+  const explored = pool.map((entry) => entry.candidate);
+  const exploredScores = pool.map((entry) => entry.mean);
+  const front = paretoFront(pool);
   return {
-    candidates,
-    valAggregateScores,
-    details: {
-      candidates,
-      valAggregateScores,
-      bestScore: Math.max(...valAggregateScores),
+    candidates: front.map((entry) => entry.candidate),
+    valAggregateScores: front.map((entry) => entry.mean),
+    toDict: () => ({
+      candidates: explored,
+      valAggregateScores: exploredScores,
+      bestScore: Math.max(...exploredScores),
       totalMetricCalls,
-    },
+    }),
   };
 }
 
@@ -219,14 +229,15 @@ function buildRunResult(
  * The GEPA search engine ADK bundles.
  *
  * It scores the seed candidate on the validation set, then repeatedly picks a
- * parent, reflects over a training minibatch to propose a rewrite, and keeps a
- * child that beats its parent on that minibatch. Every evaluated example
- * counts as one metric call, and the search stops before it spends more than
- * `maxMetricCalls` of them.
+ * parent from the Pareto front, reflects over a training minibatch to propose
+ * a rewrite, and keeps a child that beats its parent on that minibatch. Every
+ * evaluated example counts as one metric call, and the search stops before it
+ * spends more than `maxMetricCalls` of them.
  *
  * adk-python delegates this to the PyPI package `gepa`, which npm has no
- * equivalent of, so the search here is an independent implementation of the
- * same loop rather than a port of that package.
+ * equivalent of. The search here is an independent implementation of the same
+ * loop rather than a port of that package: it carries neither `gepa`'s merge
+ * proposer nor its checkpoint format, so a run always starts from scratch.
  */
 export class DefaultGepaEngine implements GepaEngine {
   private readonly seed?: number;
@@ -327,7 +338,7 @@ export class DefaultGepaEngine implements GepaEngine {
       await mkdir(runDir, {recursive: true});
       await writeFile(
         join(runDir, RESULT_FILE_NAME),
-        JSON.stringify(result.details, null, 2),
+        JSON.stringify(result.toDict(), null, RESULT_INDENT),
       );
     }
     return result;

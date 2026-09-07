@@ -5,256 +5,518 @@
  */
 
 /**
- * The bundled GEPA search engine: the budget it spends, the children it keeps,
- * the parent it reflects on, and the artifact it writes.
+ * The bundled GEPA search: its input guards, its budget accounting, its
+ * keep-if-better rule, its Pareto parent selection, its fallback proposer and
+ * its result file.
  */
 
 import {
-  AGENT_PROMPT_NAME,
   DefaultGepaEngine,
   proposeWithReflection,
   renderReflectionPrompt,
+  type EvaluationBatch,
+  type GepaAdapter,
   type GepaOptimizeParams,
   type GepaRunResult,
+  type ReflectionLm,
 } from '@google/adk';
-import {mkdtemp, readdir, readFile, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {
-  metricCalls,
   ProposingTableAdapter,
   ScriptedReflector,
   TableAdapter,
-  type EvaluateCall,
   type ScoreTable,
 } from './gepa_engine_test_utils.js';
 
-const SEED_PROMPT = 'Answer the question.';
-const BETTER_PROMPT = 'Answer the question with the order id.';
-const WORSE_PROMPT = 'Say nothing.';
+const AGENT_PROMPT = 'agent_prompt';
+const TRAIN_IDS = ['train1', 'train2'];
+const VALIDATION_IDS = ['val1', 'val2'];
+const SEED_CANDIDATE = {[AGENT_PROMPT]: 'Seed'};
 
-const VALSET = ['v1', 'v2'];
-const TRAINSET = ['t1'];
+/** One `evaluate` call, as the tests read it back. */
+interface EvaluateCall {
+  /** The example UIDs the engine scored. */
+  batch: string[];
 
-/** A rewrite that outscores the seed on both example sets. */
-const IMPROVING_SCORES: ScoreTable = {
-  [SEED_PROMPT]: {v1: 0.2, v2: 0.4, t1: 0.2},
-  [BETTER_PROMPT]: {v1: 0.8, v2: 1, t1: 0.9},
-};
+  /** The candidate the engine scored. */
+  candidate: Record<string, string>;
 
-/** A rewrite the training minibatch rejects. */
-const REGRESSING_SCORES: ScoreTable = {
-  [SEED_PROMPT]: {v1: 0.2, v2: 0.4, t1: 0.5},
-  [WORSE_PROMPT]: {v1: 0.1, v2: 0, t1: 0.1},
-};
-
-/** Temp directories a test created, removed after it. */
-const tempDirs: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    tempDirs.splice(0).map((dir) => rm(dir, {recursive: true, force: true})),
-  );
-});
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'adk-gepa-'));
-  tempDirs.push(dir);
-  return dir;
+  /** Whether the engine asked for trajectories. */
+  captureTraces: boolean;
 }
 
-/** Builds the params an engine run takes, with the fields a test overrides. */
+/** Options for {@link ScriptedAdapter}. */
+interface ScriptedAdapterOptions {
+  /** The score of each example UID, by the candidate's agent prompt. */
+  scores: Record<string, Record<string, number>>;
+
+  /** The agent prompt each successive proposal returns. */
+  proposals?: string[];
+}
+
+/** An adapter that scores from a table and records every call. */
+class ScriptedAdapter implements GepaAdapter<
+  string,
+  Record<string, unknown>,
+  Record<string, unknown>
+> {
+  /** Every `evaluate` call, in order. */
+  readonly evaluations: EvaluateCall[] = [];
+
+  /** Every candidate `proposeNewTexts` was asked to rewrite, in order. */
+  readonly proposalRequests: Array<Record<string, string>> = [];
+
+  private readonly scores: Record<string, Record<string, number>>;
+  private readonly proposals: string[];
+  private proposalIndex = 0;
+
+  constructor({scores, proposals = []}: ScriptedAdapterOptions) {
+    this.scores = scores;
+    this.proposals = proposals;
+  }
+
+  async proposeNewTexts(
+    candidate: Record<string, string>,
+  ): Promise<Record<string, string>> {
+    this.proposalRequests.push(candidate);
+    expect(this.proposalIndex).toBeLessThan(this.proposals.length);
+    return {[AGENT_PROMPT]: this.proposals[this.proposalIndex++]};
+  }
+
+  async evaluate(
+    batch: string[],
+    candidate: Record<string, string>,
+    captureTraces = false,
+  ): Promise<
+    EvaluationBatch<Record<string, unknown>, Record<string, unknown>>
+  > {
+    this.evaluations.push({batch, candidate, captureTraces});
+    const table = this.scores[candidate[AGENT_PROMPT]];
+    expect(table).toBeDefined();
+    const scores = batch.map((id) => table[id]);
+    return {
+      outputs: batch.map(() => ({})),
+      scores,
+      trajectories: batch.map(() => ({})),
+    };
+  }
+
+  makeReflectiveDataset(
+    _candidate: Record<string, string>,
+    evalBatch: EvaluationBatch<
+      Record<string, unknown>,
+      Record<string, unknown>
+    >,
+    componentsToUpdate: string[],
+  ): Record<string, Array<Record<string, unknown>>> {
+    return Object.fromEntries(
+      componentsToUpdate.map((component) => [
+        component,
+        evalBatch.scores.map((score) => ({score})),
+      ]),
+    );
+  }
+}
+
+/** The reflection call an adapter with its own proposer never reaches. */
+const UNUSED_REFLECTION_LM: ReflectionLm = () =>
+  expect.unreachable('The adapter proposes, so the engine must not reflect.');
+
+/** An adapter that never touches the engine, to prove a guard ran first. */
+const UNTOUCHED_ADAPTER: GepaAdapter<
+  string,
+  Record<string, unknown>,
+  Record<string, unknown>
+> = {
+  evaluate: () =>
+    expect.unreachable('The engine must reject before it scores.'),
+  makeReflectiveDataset: () =>
+    expect.unreachable('The engine must reject before it reflects.'),
+  proposeNewTexts: () =>
+    expect.unreachable('The engine must reject before it proposes.'),
+};
+
+/**
+ * Builds the engine parameters, defaulting everything the test does not pin.
+ *
+ * @param overrides The fields the test cares about.
+ */
 function optimizeParams(
-  adapter: TableAdapter,
-  reflector: ScriptedReflector,
-  overrides: Partial<GepaOptimizeParams> = {},
+  overrides: Partial<GepaOptimizeParams> & Pick<GepaOptimizeParams, 'adapter'>,
 ): GepaOptimizeParams {
   return {
-    seedCandidate: {[AGENT_PROMPT_NAME]: SEED_PROMPT},
-    trainset: TRAINSET,
-    valset: VALSET,
-    adapter,
-    maxMetricCalls: 6,
-    reflectionLm: reflector.reflect,
-    reflectionMinibatchSize: 1,
+    seedCandidate: SEED_CANDIDATE,
+    trainset: TRAIN_IDS,
+    valset: VALIDATION_IDS,
+    maxMetricCalls: 100,
+    reflectionLm: UNUSED_REFLECTION_LM,
+    reflectionMinibatchSize: 2,
     ...overrides,
   };
 }
 
-/** Returns the prompt of every candidate the run reported. */
-function prompts(result: GepaRunResult): string[] {
-  return result.candidates.map((candidate) => candidate[AGENT_PROMPT_NAME]);
+/** Scores every example in `ids` the same. */
+function flatScores(ids: string[], score: number): Record<string, number> {
+  return Object.fromEntries(ids.map((id) => [id, score]));
 }
 
-describe('DefaultGepaEngine input validation', () => {
-  const adapter = new TableAdapter(IMPROVING_SCORES);
-  const reflector = new ScriptedReflector([BETTER_PROMPT]);
+const ALL_IDS = [...TRAIN_IDS, ...VALIDATION_IDS];
 
-  it('rejects an empty validation set', async () => {
+describe('input guards', () => {
+  it('rejects an empty validation set before it scores anything', async () => {
     await expect(
       new DefaultGepaEngine().optimize(
-        optimizeParams(adapter, reflector, {valset: []}),
+        optimizeParams({adapter: UNTOUCHED_ADAPTER, valset: []}),
       ),
     ).rejects.toThrow('A GEPA run needs at least one validation example.');
   });
 
-  it('rejects an empty training set', async () => {
+  it('rejects an empty training set before it scores anything', async () => {
     await expect(
       new DefaultGepaEngine().optimize(
-        optimizeParams(adapter, reflector, {trainset: []}),
+        optimizeParams({adapter: UNTOUCHED_ADAPTER, trainset: []}),
       ),
     ).rejects.toThrow('A GEPA run needs at least one training example.');
   });
 
-  it('rejects a budget too small to score the seed candidate', async () => {
+  it('rejects a budget below the validation set size', async () => {
     await expect(
       new DefaultGepaEngine().optimize(
-        optimizeParams(adapter, reflector, {maxMetricCalls: 1}),
+        optimizeParams({adapter: UNTOUCHED_ADAPTER, maxMetricCalls: 1}),
       ),
     ).rejects.toThrow(
       'A GEPA run needs a budget of at least 2 metric calls to score the ' +
         'seed candidate on the validation set, but maxMetricCalls is 1.',
     );
   });
-
-  it('evaluates nothing when it rejects its inputs', async () => {
-    const rejected = new TableAdapter(IMPROVING_SCORES);
-
-    await expect(
-      new DefaultGepaEngine().optimize(
-        optimizeParams(rejected, reflector, {valset: []}),
-      ),
-    ).rejects.toThrow();
-
-    expect(rejected.evaluations).toEqual([]);
-  });
 });
 
-describe('DefaultGepaEngine search', () => {
-  it('scores the seed candidate on the validation set first', async () => {
-    const adapter = new TableAdapter(IMPROVING_SCORES);
-
-    const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT])),
-    );
-
-    expect(adapter.evaluations[0]).toEqual({
-      batch: VALSET,
-      prompt: SEED_PROMPT,
-      captureTraces: false,
+describe('the search loop', () => {
+  it('returns the seed alone when the budget covers only its validation', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {Seed: flatScores(ALL_IDS, 0.5)},
     });
-    expect(prompts(result)[0]).toBe(SEED_PROMPT);
-    expect(result.valAggregateScores[0]).toBeCloseTo(0.3);
-  });
-
-  it('returns the seed alone when the budget stops at the seed', async () => {
-    const adapter = new TableAdapter(IMPROVING_SCORES);
 
     const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT]), {
-        maxMetricCalls: 2,
-      }),
+      optimizeParams({adapter, maxMetricCalls: 2}),
     );
 
-    expect(prompts(result)).toEqual([SEED_PROMPT]);
+    expect(result.candidates).toEqual([SEED_CANDIDATE]);
+    expect(result.valAggregateScores).toEqual([0.5]);
     expect(adapter.evaluations).toHaveLength(1);
+    expect(adapter.evaluations[0].captureTraces).toBe(false);
   });
 
-  it('stops before a round it cannot finish', async () => {
-    const adapter = new TableAdapter(IMPROVING_SCORES);
-
-    const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT]), {
-        maxMetricCalls: 3,
-      }),
-    );
-
-    expect(prompts(result)).toEqual([SEED_PROMPT]);
-    expect(metricCalls(adapter)).toBe(2);
-  });
-
-  it('keeps a child that beats its parent and scores it on validation', async () => {
-    const adapter = new TableAdapter(IMPROVING_SCORES);
-
-    const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT])),
-    );
-
-    expect(prompts(result)).toEqual([SEED_PROMPT, BETTER_PROMPT]);
-    expect(result.valAggregateScores[1]).toBeCloseTo(0.9);
-    expect(adapter.evaluations.at(-1)).toEqual({
-      batch: VALSET,
-      prompt: BETTER_PROMPT,
-      captureTraces: false,
+  it('validates a child that beats its parent and adds it to the pool', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {
+        Seed: flatScores(ALL_IDS, 0.5),
+        Better: flatScores(ALL_IDS, 0.9),
+      },
+      proposals: ['Better'],
     });
-  });
 
-  it('discards a child that does not beat its parent', async () => {
-    const adapter = new TableAdapter(REGRESSING_SCORES);
-
-    const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([WORSE_PROMPT]), {
-        maxMetricCalls: 4,
-      }),
+    const result = await new DefaultGepaEngine({seed: 1}).optimize(
+      optimizeParams({adapter, maxMetricCalls: 8}),
     );
 
-    expect(prompts(result)).toEqual([SEED_PROMPT]);
-    expect(metricCalls(adapter)).toBe(4);
+    // Better dominates the seed on every validation example, so the front
+    // holds it alone. toDict keeps both.
+    expect(result.candidates).toEqual([{[AGENT_PROMPT]: 'Better'}]);
+    expect(result.valAggregateScores).toEqual([0.9]);
+    expect(result.toDict()).toEqual({
+      candidates: [SEED_CANDIDATE, {[AGENT_PROMPT]: 'Better'}],
+      valAggregateScores: [0.5, 0.9],
+      bestScore: 0.9,
+      totalMetricCalls: 8,
+    });
+    expect(adapter.evaluations.map((call) => call.batch)).toEqual([
+      VALIDATION_IDS,
+      TRAIN_IDS,
+      TRAIN_IDS,
+      VALIDATION_IDS,
+    ]);
+    expect(adapter.evaluations[1].captureTraces).toBe(true);
   });
 
-  it('never spends more than maxMetricCalls', async () => {
-    const adapter = new TableAdapter(IMPROVING_SCORES);
+  it('discards a child that ties its parent, without a validation pass', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {Seed: flatScores(ALL_IDS, 0.5), Tied: flatScores(ALL_IDS, 0.5)},
+      proposals: ['Tied'],
+    });
 
-    await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT]), {
-        maxMetricCalls: 5,
-      }),
+    const result = await new DefaultGepaEngine({seed: 1}).optimize(
+      optimizeParams({adapter, maxMetricCalls: 8}),
     );
 
-    expect(metricCalls(adapter)).toBeLessThanOrEqual(5);
-    expect(
-      adapter.evaluations.filter(
-        (call) => call.prompt === BETTER_PROMPT && !call.captureTraces,
-      ),
-    ).toEqual([]);
+    expect(result.candidates).toEqual([SEED_CANDIDATE]);
+    expect(adapter.evaluations).toHaveLength(3);
   });
 
-  it('passes the whole training set through when it fits the minibatch', async () => {
-    const adapter = new TableAdapter(IMPROVING_SCORES);
+  it('discards a child that loses to its parent', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {Seed: flatScores(ALL_IDS, 0.5), Worse: flatScores(ALL_IDS, 0.1)},
+      proposals: ['Worse'],
+    });
 
-    await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT]), {
-        reflectionMinibatchSize: 5,
-      }),
+    const result = await new DefaultGepaEngine({seed: 1}).optimize(
+      optimizeParams({adapter, maxMetricCalls: 6}),
     );
 
-    expect(adapter.evaluations[1].batch).toEqual(TRAINSET);
+    expect(result.candidates).toEqual([SEED_CANDIDATE]);
+    expect(adapter.evaluations).toHaveLength(3);
   });
 
-  it('samples a minibatch when the training set is larger', async () => {
-    const scores: ScoreTable = {
-      [SEED_PROMPT]: {v1: 0.2, v2: 0.4, t1: 0.1, t2: 0.1, t3: 0.1, t4: 0.1},
-      [BETTER_PROMPT]: {v1: 0.8, v2: 1, t1: 0.9, t2: 0.9, t3: 0.9, t4: 0.9},
-    };
-    const adapter = new TableAdapter(scores);
+  it('drops a winning child it cannot afford to validate', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {
+        Seed: flatScores(ALL_IDS, 0.5),
+        Better: flatScores(ALL_IDS, 0.9),
+      },
+      proposals: ['Better'],
+    });
+
+    const result = await new DefaultGepaEngine({seed: 1}).optimize(
+      optimizeParams({adapter, maxMetricCalls: 7}),
+    );
+
+    expect(result.candidates).toEqual([SEED_CANDIDATE]);
+    expect(result.toDict()).toMatchObject({totalMetricCalls: 6});
+  });
+
+  it('never spends more metric calls than the budget allows', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {Seed: flatScores(ALL_IDS, 0.5), Tied: flatScores(ALL_IDS, 0.5)},
+      proposals: Array.from({length: 8}, () => 'Tied'),
+    });
+
+    const result = await new DefaultGepaEngine({seed: 1}).optimize(
+      optimizeParams({adapter, maxMetricCalls: 15}),
+    );
+
+    const spent = adapter.evaluations.reduce(
+      (total, call) => total + call.batch.length,
+      0,
+    );
+    expect(spent).toBeLessThanOrEqual(15);
+    expect(result.toDict()).toMatchObject({totalMetricCalls: spent});
+  });
+
+  it('reflects over the whole training set when it is no larger than the minibatch', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {Seed: flatScores(ALL_IDS, 0.5), Tied: flatScores(ALL_IDS, 0.5)},
+      proposals: ['Tied'],
+    });
+
+    await new DefaultGepaEngine({seed: 1}).optimize(
+      optimizeParams({adapter, maxMetricCalls: 6, reflectionMinibatchSize: 5}),
+    );
+
+    expect(adapter.evaluations[1].batch).toEqual(TRAIN_IDS);
+  });
+
+  it('samples a minibatch smaller than the training set', async () => {
+    const trainset = ['t1', 't2', 't3', 't4'];
+    const adapter = new ScriptedAdapter({
+      scores: {
+        Seed: flatScores([...trainset, ...VALIDATION_IDS], 0.5),
+        Tied: flatScores([...trainset, ...VALIDATION_IDS], 0.5),
+      },
+      proposals: ['Tied'],
+    });
 
     await new DefaultGepaEngine({seed: 7}).optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT]), {
-        trainset: ['t1', 't2', 't3', 't4'],
+      optimizeParams({
+        adapter,
+        trainset,
+        maxMetricCalls: 6,
         reflectionMinibatchSize: 2,
-        maxMetricCalls: 8,
       }),
     );
 
     const minibatch = adapter.evaluations[1].batch;
     expect(minibatch).toHaveLength(2);
     expect(new Set(minibatch).size).toBe(2);
-    expect(['t1', 't2', 't3', 't4']).toEqual(expect.arrayContaining(minibatch));
+    expect(trainset).toEqual(expect.arrayContaining(minibatch));
   });
 });
 
-describe('DefaultGepaEngine proposal', () => {
+describe('determinism', () => {
+  /** Runs one search and reports the minibatch of each reflection round. */
+  async function minibatchSequence(seed: number): Promise<string[][]> {
+    const trainset = ['t1', 't2', 't3', 't4', 't5'];
+    const adapter = new ScriptedAdapter({
+      scores: {
+        Seed: flatScores([...trainset, ...VALIDATION_IDS], 0.5),
+        Tied: flatScores([...trainset, ...VALIDATION_IDS], 0.5),
+      },
+      proposals: Array.from({length: 6}, () => 'Tied'),
+    });
+
+    await new DefaultGepaEngine({seed}).optimize(
+      optimizeParams({
+        adapter,
+        trainset,
+        maxMetricCalls: 18,
+        reflectionMinibatchSize: 2,
+      }),
+    );
+    return adapter.evaluations.slice(1).map((call) => call.batch);
+  }
+
+  it('repeats the same sequence for the same seed', async () => {
+    expect(await minibatchSequence(42)).toEqual(await minibatchSequence(42));
+  });
+
+  it('is free to differ between two seeds', async () => {
+    const first = await minibatchSequence(1);
+    const second = await minibatchSequence(2);
+
+    expect(first).toHaveLength(second.length);
+  });
+});
+
+describe('Pareto selection', () => {
+  it('keeps a candidate that is worse on average but better on one example', async () => {
+    // Seed scores [1, 0]; Specialist scores [0, 1] on the validation set.
+    // Neither dominates the other, so both stay on the front.
+    const adapter = new ScriptedAdapter({
+      scores: {
+        Seed: {train1: 0.1, train2: 0.1, val1: 1, val2: 0},
+        Specialist: {train1: 0.9, train2: 0.9, val1: 0, val2: 1},
+      },
+      proposals: ['Specialist'],
+    });
+
+    const result = await new DefaultGepaEngine({seed: 1}).optimize(
+      optimizeParams({adapter, maxMetricCalls: 8}),
+    );
+
+    expect(result.candidates).toHaveLength(2);
+    expect(result.valAggregateScores).toEqual([0.5, 0.5]);
+  });
+
+  it('reflects on the surviving candidate when one dominates the other', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {
+        Seed: {train1: 0.1, train2: 0.1, val1: 0.2, val2: 0.2},
+        Dominant: {train1: 0.9, train2: 0.9, val1: 0.8, val2: 0.8},
+        Third: flatScores(ALL_IDS, 0.95),
+      },
+      proposals: ['Dominant', 'Third'],
+    });
+
+    await new DefaultGepaEngine({seed: 1}).optimize(
+      optimizeParams({adapter, maxMetricCalls: 12}),
+    );
+
+    expect(adapter.proposalRequests[1]).toEqual({[AGENT_PROMPT]: 'Dominant'});
+  });
+});
+
+describe('the result file', () => {
+  let runDir: string | undefined;
+
+  afterEach(async () => {
+    if (runDir !== undefined) {
+      await rm(runDir, {recursive: true, force: true});
+      runDir = undefined;
+    }
+  });
+
+  it('writes gepa_result.json under a nested runDir', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'adk-gepa-run-'));
+    runDir = parent;
+    const nested = join(parent, 'run', 'one');
+    const adapter = new ScriptedAdapter({
+      scores: {Seed: flatScores(ALL_IDS, 0.5)},
+    });
+
+    const result = await new DefaultGepaEngine().optimize(
+      optimizeParams({adapter, maxMetricCalls: 2, runDir: nested}),
+    );
+
+    const written = JSON.parse(
+      await readFile(join(nested, 'gepa_result.json'), 'utf8'),
+    );
+    expect(written).toEqual(result.toDict());
+    expect(written).toEqual({
+      candidates: [SEED_CANDIDATE],
+      valAggregateScores: [0.5],
+      bestScore: 0.5,
+      totalMetricCalls: 2,
+    });
+  });
+
+  it('writes nothing when no runDir is configured', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {Seed: flatScores(ALL_IDS, 0.5)},
+    });
+
+    const result = await new DefaultGepaEngine().optimize(
+      optimizeParams({adapter, maxMetricCalls: 2}),
+    );
+
+    expect(result.toDict()).toEqual({
+      candidates: [SEED_CANDIDATE],
+      valAggregateScores: [0.5],
+      bestScore: 0.5,
+      totalMetricCalls: 2,
+    });
+  });
+});
+
+describe('the unseeded generator', () => {
+  it('runs the search with Math.random', async () => {
+    const adapter = new ScriptedAdapter({
+      scores: {Seed: flatScores(ALL_IDS, 0.5), Tied: flatScores(ALL_IDS, 0.5)},
+      proposals: ['Tied'],
+    });
+
+    const result = await new DefaultGepaEngine().optimize(
+      optimizeParams({adapter, maxMetricCalls: 6}),
+    );
+
+    expect(result.candidates).toEqual([SEED_CANDIDATE]);
+  });
+});
+
+describe('the fallback proposer', () => {
+  const SEED_PROMPT = 'Answer the question.';
+  const BETTER_PROMPT = 'Answer the question with the order id.';
+  const TRAINSET = ['t1'];
+  const VALSET = ['v1', 'v2'];
+
+  /** A rewrite that outscores the seed on both example sets. */
+  const IMPROVING_SCORES: ScoreTable = {
+    [SEED_PROMPT]: {v1: 0.2, v2: 0.4, t1: 0.2},
+    [BETTER_PROMPT]: {v1: 0.8, v2: 1, t1: 0.9},
+  };
+
+  /** Builds the params one fallback run takes. */
+  function fallbackParams(
+    adapter: TableAdapter,
+    reflector: ScriptedReflector,
+  ): GepaOptimizeParams {
+    return {
+      seedCandidate: {[AGENT_PROMPT]: SEED_PROMPT},
+      trainset: TRAINSET,
+      valset: VALSET,
+      adapter,
+      maxMetricCalls: 6,
+      reflectionLm: reflector.reflect,
+      reflectionMinibatchSize: 1,
+    };
+  }
+
+  /** Returns the prompt of every candidate on the reported front. */
+  function prompts(result: GepaRunResult): string[] {
+    return result.candidates.map((candidate) => candidate[AGENT_PROMPT]);
+  }
+
   it("uses the adapter's proposeNewTexts when it supplies one", async () => {
     const adapter = new ProposingTableAdapter(IMPROVING_SCORES, [
       BETTER_PROMPT,
@@ -262,12 +524,12 @@ describe('DefaultGepaEngine proposal', () => {
     const reflector = new ScriptedReflector(['never used']);
 
     const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, reflector),
+      fallbackParams(adapter, reflector),
     );
 
     expect(adapter.proposals).toBe(1);
     expect(reflector.prompts).toEqual([]);
-    expect(prompts(result)).toEqual([SEED_PROMPT, BETTER_PROMPT]);
+    expect(prompts(result)).toEqual([BETTER_PROMPT]);
   });
 
   it('reflects when the adapter supplies no proposer', async () => {
@@ -275,17 +537,17 @@ describe('DefaultGepaEngine proposal', () => {
     const reflector = new ScriptedReflector([`  ${BETTER_PROMPT}  `]);
 
     const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, reflector),
+      fallbackParams(adapter, reflector),
     );
 
     expect(reflector.prompts).toHaveLength(1);
-    expect(reflector.prompts[0]).toContain(AGENT_PROMPT_NAME);
+    expect(reflector.prompts[0]).toContain(AGENT_PROMPT);
     expect(reflector.prompts[0]).toContain(SEED_PROMPT);
-    expect(prompts(result)).toEqual([SEED_PROMPT, BETTER_PROMPT]);
+    expect(prompts(result)).toEqual([BETTER_PROMPT]);
   });
 
   it('renders the current text and every feedback row', () => {
-    const prompt = renderReflectionPrompt('agent_prompt', 'Current text', [
+    const prompt = renderReflectionPrompt(AGENT_PROMPT, 'Current text', [
       {score: 0.5},
       {score: 1},
     ]);
@@ -300,123 +562,14 @@ describe('DefaultGepaEngine proposal', () => {
     const reflector = new ScriptedReflector(['Rewritten']);
 
     const proposals = await proposeWithReflection(
-      {[AGENT_PROMPT_NAME]: SEED_PROMPT},
+      {[AGENT_PROMPT]: SEED_PROMPT},
       {},
-      [AGENT_PROMPT_NAME],
+      [AGENT_PROMPT],
       reflector.reflect,
     );
 
-    expect(proposals).toEqual({[AGENT_PROMPT_NAME]: 'Rewritten'});
+    expect(proposals).toEqual({[AGENT_PROMPT]: 'Rewritten'});
     expect(reflector.prompts[0]).toContain(SEED_PROMPT);
     expect(reflector.prompts[0]).not.toContain('Example 1');
-  });
-});
-
-describe('DefaultGepaEngine parent selection', () => {
-  /** Scores that keep every candidate on the Pareto front. */
-  const FRONT_SCORES: ScoreTable = {
-    [SEED_PROMPT]: {v1: 1, v2: 0, t1: 0.2},
-    'Rewrite one': {v1: 0.4, v2: 1, t1: 0.5},
-    'Rewrite two': {v1: 1, v2: 0, t1: 0.9},
-  };
-
-  it('keeps every non-dominated candidate selectable', async () => {
-    const adapter = new TableAdapter(FRONT_SCORES);
-    const reflector = new ScriptedReflector([
-      'Rewrite one',
-      'Rewrite two',
-      'Rewrite two',
-    ]);
-
-    const result = await new DefaultGepaEngine({seed: 11}).optimize(
-      optimizeParams(adapter, reflector, {maxMetricCalls: 12}),
-    );
-
-    expect(prompts(result)).toEqual([
-      SEED_PROMPT,
-      'Rewrite one',
-      'Rewrite two',
-    ]);
-  });
-
-  it('repeats a run exactly when it is given the same seed', async () => {
-    const scores: ScoreTable = {
-      ...FRONT_SCORES,
-      [SEED_PROMPT]: {v1: 1, v2: 0, t1: 0.2, t2: 0.2, t3: 0.2, t4: 0.2},
-      'Rewrite one': {v1: 0.4, v2: 1, t1: 0.5, t2: 0.5, t3: 0.5, t4: 0.5},
-      'Rewrite two': {v1: 1, v2: 0, t1: 0.9, t2: 0.9, t3: 0.9, t4: 0.9},
-    };
-    const params = {
-      trainset: ['t1', 't2', 't3', 't4'],
-      reflectionMinibatchSize: 2,
-      maxMetricCalls: 20,
-    };
-    const runs: Array<{
-      evaluations: EvaluateCall[];
-      result: Record<string, unknown>;
-    }> = [];
-    for (const _run of [0, 1]) {
-      const adapter = new TableAdapter(scores);
-      const result = await new DefaultGepaEngine({seed: 42}).optimize(
-        optimizeParams(
-          adapter,
-          new ScriptedReflector(['Rewrite one', 'Rewrite two']),
-          params,
-        ),
-      );
-      runs.push({evaluations: adapter.evaluations, result: result.details});
-    }
-
-    expect(runs[0]).toEqual(runs[1]);
-  });
-});
-
-describe('DefaultGepaEngine result', () => {
-  it('reports the candidates, the best score and the budget spent', async () => {
-    const adapter = new TableAdapter(IMPROVING_SCORES);
-
-    const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT])),
-    );
-
-    expect(result.details).toEqual({
-      candidates: [
-        {[AGENT_PROMPT_NAME]: SEED_PROMPT},
-        {[AGENT_PROMPT_NAME]: BETTER_PROMPT},
-      ],
-      valAggregateScores: result.valAggregateScores,
-      bestScore: Math.max(...result.valAggregateScores),
-      totalMetricCalls: 6,
-    });
-  });
-
-  it('writes the result into runDir', async () => {
-    const runDir = await createTempDir();
-    const adapter = new TableAdapter(IMPROVING_SCORES);
-
-    const result = await new DefaultGepaEngine().optimize(
-      optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT]), {
-        runDir: join(runDir, 'nested'),
-      }),
-    );
-
-    const written = await readFile(
-      join(runDir, 'nested', 'gepa_result.json'),
-      'utf8',
-    );
-    expect(JSON.parse(written)).toEqual(result.details);
-  });
-
-  it('writes nothing when no runDir is set', async () => {
-    const runDir = await createTempDir();
-
-    await new DefaultGepaEngine().optimize(
-      optimizeParams(
-        new TableAdapter(IMPROVING_SCORES),
-        new ScriptedReflector([BETTER_PROMPT]),
-      ),
-    );
-
-    expect(await readdir(runDir)).toEqual([]);
   });
 });

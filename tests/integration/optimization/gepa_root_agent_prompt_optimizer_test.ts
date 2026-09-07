@@ -189,7 +189,7 @@ class HillClimbingEngine implements GepaEngine {
     return {
       candidates,
       valAggregateScores,
-      details: {rounds: this.rounds, tried: candidates.length},
+      toDict: () => ({rounds: this.rounds, tried: candidates.length}),
     };
   }
 }
@@ -301,10 +301,10 @@ describe('GEPARootAgentPromptOptimizer on the bundled engine', () => {
       result.optimizedAgents.map(({optimizedAgent}) =>
         requireStaticInstruction(optimizedAgent),
       ),
-    ).toEqual([STARTING_INSTRUCTION, BUNDLED_REWRITE]);
+    ).toEqual([BUNDLED_REWRITE]);
     expect(
       result.optimizedAgents.map(({overallScore}) => overallScore),
-    ).toEqual([0.5, 1]);
+    ).toEqual([1]);
     expect(result.gepaResult).toMatchObject({
       bestScore: 1,
       totalMetricCalls: sampler.examplesScored,
@@ -316,9 +316,6 @@ describe('GEPARootAgentPromptOptimizer on the bundled engine', () => {
   it('runs the sample without a caller-written engine', async () => {
     const lines = await optimizeWithBundledEngine(BUNDLED_REFLECTION_MODEL);
 
-    expect(lines).toEqual([
-      `validation score 0.5: ${STARTING_INSTRUCTION}`,
-      `validation score 1: ${BUNDLED_REWRITE}`,
-    ]);
+    expect(lines).toEqual([`validation score 1: ${BUNDLED_REWRITE}`]);
   });
 });

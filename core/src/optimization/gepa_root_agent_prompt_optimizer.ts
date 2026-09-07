@@ -289,7 +289,7 @@ export class GEPARootAgentPromptOptimizer extends AgentOptimizer<
         }),
         overallScore: valAggregateScores[index],
       })),
-      gepaResult: engineResult.details,
+      gepaResult: engineResult.toDict(),
     };
   }
 }
