@@ -7,6 +7,7 @@
 import {
   ApigeeLlm,
   BaseLlm,
+  createLlmCapabilities,
   Gemini,
   getLogger,
   LlmCapabilities,
@@ -23,6 +24,7 @@ import {
   MockInstance,
   vi,
 } from 'vitest';
+import {ZodError} from 'zod';
 
 const ENTERPRISE_ENV_VAR = 'GOOGLE_GENAI_USE_ENTERPRISE';
 /** Consulted as a deprecated fallback when the preferred variable is absent. */
@@ -54,6 +56,14 @@ function newGemini(model: string): Gemini {
     project: 'test-project',
     location: 'test-location',
   });
+}
+
+/**
+ * Produces capability values the compiler never checked, the way a parsed
+ * configuration file does. This is the input the runtime validation exists for.
+ */
+function fromConfigFile(json: string): Partial<LlmCapabilities> {
+  return JSON.parse(json);
 }
 
 let warn: MockInstance<Logger['warn']>;
@@ -92,6 +102,58 @@ describe('LlmCapabilities', () => {
     expect(first).not.toBe(second);
     expect(first).toEqual(second);
   });
+
+  // The cases below are ported from adk-python
+  // tests/unittests/models/test_capabilities.py (main). The reference test
+  // names are kept verbatim as `it()` titles.
+
+  it('test_capabilities_are_immutable', () => {
+    const capabilities = createLlmCapabilities();
+
+    expect(Object.isFrozen(capabilities)).toBe(true);
+    // `Object.assign` writes the property the way an assignment would, without
+    // a cast that would defeat the `readonly` field.
+    expect(() =>
+      Object.assign(capabilities, {outputSchemaAndTools: true}),
+    ).toThrow(TypeError);
+    expect(capabilities.outputSchemaAndTools).toBe(false);
+  });
+
+  it('test_unknown_capability_is_rejected', () => {
+    expect(() =>
+      createLlmCapabilities(fromConfigFile('{"noSuchCapability": true}')),
+    ).toThrow(ZodError);
+  });
+
+  it('test_model_copy_silently_ignores_an_unknown_capability', () => {
+    // The reference asserts that pydantic's `model_copy(update=...)` skips
+    // validation. That half has no TypeScript analogue. The half that carries
+    // over is the documented override: building a new snapshot from an old one
+    // validates the misspelling instead of attaching it.
+    expect(() =>
+      createLlmCapabilities({
+        ...createLlmCapabilities(),
+        ...fromConfigFile('{"outputSchemaWithTools": true}'),
+      }),
+    ).toThrow(ZodError);
+  });
+
+  it('defaults outputSchemaAndTools to false', () => {
+    expect(createLlmCapabilities().outputSchemaAndTools).toBe(false);
+  });
+
+  it('keeps an explicitly granted capability', () => {
+    const capabilities = createLlmCapabilities({outputSchemaAndTools: true});
+
+    expect(capabilities.outputSchemaAndTools).toBe(true);
+    expect(Object.isFrozen(capabilities)).toBe(true);
+  });
+
+  it('rejects a wrong-typed capability value', () => {
+    expect(() =>
+      createLlmCapabilities(fromConfigFile('{"outputSchemaAndTools": "yes"}')),
+    ).toThrow(ZodError);
+  });
 });
 
 describe('BaseLlm name-based fallback', () => {
@@ -108,6 +170,15 @@ describe('BaseLlm name-based fallback', () => {
         'Override BaseLlm.capabilities to declare it explicitly; this ' +
         'fallback will be removed in a future release.',
     );
+  });
+
+  it('grants a Gemini 1.x name, which carries no version floor', () => {
+    vi.stubEnv(ENTERPRISE_ENV_VAR, '1');
+    class LegacyNamedLlm extends BareLlm {}
+
+    expect(
+      new LegacyNamedLlm('gemini-1.5-pro').capabilities.outputSchemaAndTools,
+    ).toBe(true);
   });
 
   it('warns once per class, not once per access', () => {
@@ -158,8 +229,8 @@ describe('BaseLlm name-based fallback', () => {
     },
     {
       model: 'gemini-1.5-pro',
-      enterpriseMode: '1',
-      why: 'Gemini 1.x is below the 2.0 floor',
+      enterpriseMode: '0',
+      why: 'a Gemini 1.x name still needs enterprise mode',
     },
   ];
 

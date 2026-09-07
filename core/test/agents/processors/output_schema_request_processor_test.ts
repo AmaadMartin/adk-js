@@ -224,7 +224,24 @@ describe('OutputSchemaRequestProcessor', () => {
     expect(toolContext.actions.setModelResponse).toEqual({answer: '42'});
   });
 
-  it('applies the workaround on Vertex AI with a pre-2.0 model', async () => {
+  it('applies the workaround on Vertex AI with a non-Gemini model', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, 'true');
+
+    const {llmRequest} = await run(
+      llmAgent({
+        model: 'claude-3-7-sonnet',
+        withOutputSchema: true,
+        withTools: true,
+      }),
+    );
+
+    expect(llmRequest.toolsDict).toHaveProperty('set_model_response');
+    expect(llmRequest.config?.systemInstruction).toBe(
+      SET_MODEL_RESPONSE_INSTRUCTION,
+    );
+  });
+
+  it('leaves the request untouched on Vertex AI with a Gemini 1.x model', async () => {
     vi.stubEnv(VERTEX_ENV_VAR, 'true');
 
     const {llmRequest} = await run(
@@ -235,10 +252,8 @@ describe('OutputSchemaRequestProcessor', () => {
       }),
     );
 
-    expect(llmRequest.toolsDict).toHaveProperty('set_model_response');
-    expect(llmRequest.config?.systemInstruction).toBe(
-      SET_MODEL_RESPONSE_INSTRUCTION,
-    );
+    expect(llmRequest.toolsDict).toEqual({});
+    expect(llmRequest.config).toBeUndefined();
   });
 
   it('applies the workaround to a live invocation', async () => {

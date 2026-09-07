@@ -825,6 +825,7 @@ export type {
   CacheMetadata,
   FingerprintCacheMetadata,
 } from './models/cache_metadata.js';
+export {createLlmCapabilities} from './models/capabilities.js';
 export type {LlmCapabilities} from './models/capabilities.js';
 export {GeminiContextCacheManager} from './models/gemini_context_cache_manager.js';
 export type {

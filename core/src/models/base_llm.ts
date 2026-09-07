@@ -9,7 +9,7 @@ import {logger} from '../utils/logger.js';
 import {geminiOutputSchemaAndTools} from '../utils/output_schema_utils.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
-import {LlmCapabilities} from './capabilities.js';
+import {createLlmCapabilities, LlmCapabilities} from './capabilities.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
 
@@ -73,10 +73,13 @@ export abstract class BaseLlm {
    * }
    * ```
    *
-   * @return A fresh snapshot of the resolved capabilities.
+   * @return A fresh snapshot of the resolved capabilities, frozen by
+   *     {@link createLlmCapabilities}.
    */
   get capabilities(): LlmCapabilities {
-    return {outputSchemaAndTools: this.legacyOutputSchemaAndTools()};
+    return createLlmCapabilities({
+      outputSchemaAndTools: this.legacyOutputSchemaAndTools(),
+    });
   }
 
   /**
