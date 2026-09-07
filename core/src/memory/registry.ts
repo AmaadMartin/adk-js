@@ -19,14 +19,8 @@ import {
 const AGENT_ENGINE_SCHEME = 'agentengine://';
 
 /**
- * Resolves an `agentengine://` memory URI into Memory Bank options.
- *
- * `uri` must carry the `agentengine://` scheme, which `getMemoryServiceFromUri`
- * checks before it calls this. What follows the scheme is either a bare
- * resource id (`123`), in which case `GOOGLE_CLOUD_PROJECT` and
- * `GOOGLE_CLOUD_LOCATION` must both be set, or a fully qualified
- * `projects/{project}/locations/{location}/reasoningEngines/{id}` name, which
- * needs no environment.
+ * Resolves an `agentengine://` memory URI into Memory Bank options. Accepts a
+ * bare resource id or a full `projects/.../reasoningEngines/...` name.
  */
 export function parseAgentEngineMemoryUri(
   uri: string,
