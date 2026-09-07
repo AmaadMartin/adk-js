@@ -234,7 +234,7 @@ describe('OpenAPIToolset Integration', () => {
     const parameters = uploadFileTool._getDeclaration()?.parameters;
 
     expect(parameters?.type).toBe(Type.OBJECT);
-    expect(parameters?.title).toBeUndefined();
+    expect(parameters?.title).toBe('uploadFile_Arguments');
     expect(parameters?.properties?.['pet_id']).toEqual({
       type: Type.INTEGER,
       format: 'int64',

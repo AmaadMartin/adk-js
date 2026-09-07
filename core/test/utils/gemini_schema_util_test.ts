@@ -590,7 +590,7 @@ describe('toGeminiSchema', () => {
   it('drops a bound, a pattern and a propertyOrdering of the wrong type', () => {
     const schema = toGeminiSchema({
       type: 'object',
-      minProperties: '2',
+      minProperties: {},
       pattern: 7,
       minimum: 'low',
       maximum: 'high',
@@ -607,14 +607,18 @@ describe('toGeminiSchema', () => {
     });
   });
 
-  it('drops the synthetic title an OpenAPI operation carries', () => {
+  it('carries the synthetic title an OpenAPI operation adds', () => {
     const schema = toGeminiSchema({
       type: 'object',
       title: 'upload_file_Arguments',
       properties: {},
     });
 
-    expect(schema).toEqual({type: Type.OBJECT, properties: {}});
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      title: 'upload_file_Arguments',
+      properties: {},
+    });
   });
 
   it('keeps a property named format and drops that property own format', () => {
@@ -639,5 +643,134 @@ describe('toGeminiSchema', () => {
       type: Type.OBJECT,
       properties: {properties: {type: Type.STRING, format: 'date-time'}},
     });
+  });
+});
+
+describe('toGeminiSchema nullable collapse', () => {
+  it('keeps the siblings of a scalar anyOf branch', () => {
+    const schema = toGeminiSchema({
+      anyOf: [{type: 'string'}, {type: 'null'}],
+      description: 'd',
+      title: 't',
+    });
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      nullable: true,
+      description: 'd',
+      title: 't',
+    });
+  });
+
+  it('keeps the siblings of an object anyOf branch', () => {
+    const schema = toGeminiSchema({
+      anyOf: [
+        {type: 'object', properties: {id: {type: 'string'}}},
+        {type: 'null'},
+      ],
+      description: 'd',
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      nullable: true,
+      description: 'd',
+      properties: {id: {type: Type.STRING}},
+    });
+  });
+
+  it('lets the surviving branch win over a sibling of the same name', () => {
+    const schema = toGeminiSchema({
+      anyOf: [{type: 'string', description: 'branch'}, {type: 'null'}],
+      description: 'parent',
+    });
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      nullable: true,
+      description: 'branch',
+    });
+  });
+
+  it('keeps the siblings of a collapsed type union', () => {
+    const schema = toGeminiSchema({
+      type: ['string', 'null'],
+      description: 'd',
+      minLength: 2,
+    });
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      nullable: true,
+      description: 'd',
+      minLength: '2',
+    });
+  });
+});
+
+describe('toGeminiSchema field allowlist', () => {
+  it('carries a title through', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      title: 'list_alerts_by_caseArguments',
+      properties: {case_id: {type: 'string', title: 'Case Id'}},
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      title: 'list_alerts_by_caseArguments',
+      properties: {case_id: {type: Type.STRING, title: 'Case Id'}},
+    });
+  });
+
+  it('drops a title that is not a string', () => {
+    expect(toGeminiSchema({type: 'string', title: 7})).toEqual({
+      type: Type.STRING,
+    });
+  });
+
+  it('carries a bound that is already a string through unchanged', () => {
+    const schema = toGeminiSchema({
+      type: 'array',
+      minItems: '2',
+      maxItems: '9',
+      items: {type: 'string'},
+    });
+
+    expect(schema).toEqual({
+      type: Type.ARRAY,
+      minItems: '2',
+      maxItems: '9',
+      items: {type: Type.STRING},
+    });
+  });
+
+  it('drops a null default', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {token: {type: 'string', default: null}},
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {token: {type: Type.STRING}},
+    });
+  });
+
+  it('carries a zero minimum and a zero maximum through', () => {
+    const schema = toGeminiSchema({type: 'integer', minimum: 0, maximum: 0});
+
+    expect(schema).toEqual({type: Type.INTEGER, minimum: 0, maximum: 0});
+  });
+
+  it('drops an example and an additionalProperties', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      example: {a: 1},
+      additionalProperties: false,
+      properties: {},
+    });
+
+    expect(schema).toEqual({type: Type.OBJECT, properties: {}});
   });
 });
