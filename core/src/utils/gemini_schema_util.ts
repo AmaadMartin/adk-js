@@ -5,7 +5,6 @@
  */
 
 import {Schema, Type} from '@google/genai';
-import {camelCase} from './case_utils.js';
 import {NUMERIC_STRING_KEYS} from './genai_schema_to_json.js';
 
 type MCPToolSchema = {
@@ -224,10 +223,7 @@ function resolveSchemaType(rawType: unknown): {
   const named = entries.find(
     (entry): entry is string => typeof entry === 'string' && entry !== 'null',
   );
-  if (named !== undefined) {
-    return {jsonType: named, nullable};
-  }
-  return nullable ? {jsonType: 'object', nullable} : {nullable};
+  return {jsonType: named ?? (nullable ? 'object' : undefined), nullable};
 }
 
 function isSupportedFormat(
@@ -252,8 +248,7 @@ function isSupportedFormat(
  *   a vendor extension) is dropped;
  * - a `format` the declared type does not support is dropped;
  * - a type union becomes one type plus `nullable: true`;
- * - a count or length bound is stringified, which is how genai encodes it;
- * - a snake_case field name is normalized, while a property name is preserved.
+ * - a count or length bound is stringified, which is how genai encodes it.
  *
  * The function never throws and never mutates its argument. A node it cannot
  * make sense of degrades to an object rather than failing the whole toolset.
@@ -276,12 +271,11 @@ export function jsonSchemaToGeminiSchema(
     if (value === null || value === undefined) {
       continue;
     }
-    const field = camelCase(key);
-    if (!isSupportedField(field)) {
+    if (!isSupportedField(key)) {
       continue;
     }
 
-    switch (field) {
+    switch (key) {
       case 'type':
         break;
       case 'items':
@@ -312,10 +306,10 @@ export function jsonSchemaToGeminiSchema(
         }
         break;
       default:
-        // The allow-list makes `field` a `keyof Schema`, but each field has its
+        // The allow-list makes `key` a `keyof Schema`, but each field has its
         // own value type, so a keyed write cannot be checked against one union.
-        (draft as Record<string, unknown>)[field] =
-          NUMERIC_STRING_KEYS.has(field) && typeof value === 'number'
+        (draft as Record<string, unknown>)[key] =
+          NUMERIC_STRING_KEYS.has(key) && typeof value === 'number'
             ? String(value)
             : value;
     }

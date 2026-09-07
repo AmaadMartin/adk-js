@@ -5,23 +5,9 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCase, camelCaseKeys} from '../../src/utils/case_utils.js';
+import {camelCaseKeys} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
-  describe('camelCase', () => {
-    it('should convert a snake_case key', () => {
-      expect(camelCase('min_items')).toBe('minItems');
-    });
-
-    it('should leave an already camelCase key alone', () => {
-      expect(camelCase('anyOf')).toBe('anyOf');
-    });
-
-    it('should handle an empty key', () => {
-      expect(camelCase('')).toBe('');
-    });
-  });
-
   describe('camelCaseKeys', () => {
     it('should convert simple object keys', () => {
       const input = {

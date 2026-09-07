@@ -608,25 +608,10 @@ describe('jsonSchemaToGeminiSchema', () => {
     });
   });
 
-  it('normalizes a snake_case field name', () => {
-    expect(
-      jsonSchemaToGeminiSchema({
-        type: 'array',
-        items: {type: 'string'},
-        min_items: 2,
-      }),
-    ).toEqual({
-      type: Type.ARRAY,
-      items: {type: Type.STRING},
-      minItems: '2',
-    });
-  });
-
-  it('normalizes a field name but never a property name', () => {
+  it('never rewrites a property name', () => {
     const schema = jsonSchemaToGeminiSchema({
       type: 'object',
       properties: {snake_case_key: {type: 'string'}, camelCaseKey: {}},
-      min_properties: 1,
     });
 
     expect(schema).toEqual({
@@ -635,7 +620,6 @@ describe('jsonSchemaToGeminiSchema', () => {
         snake_case_key: {type: Type.STRING},
         camelCaseKey: {type: Type.OBJECT},
       },
-      minProperties: '1',
     });
     expect(schema.properties).not.toHaveProperty('snakeCaseKey');
   });
