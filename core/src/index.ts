@@ -234,6 +234,14 @@ export * from './integrations/firestore/firestore_session_service.js';
 export * from './integrations/gcs/index.js';
 export * from './integrations/langchain/langchain_tool.js';
 export * from './integrations/parameter_manager/parameter_client.js';
+// Also available as `@google/adk/integrations/redis`. Exported here rather than
+// from `common.ts`, which also feeds the web build: node-redis is Node-only.
+export {RedisSessionService} from './integrations/redis/redis_session_service.js';
+export type {
+  RedisClientLike,
+  RedisGetUserStateRequest,
+  RedisSessionServiceOptions,
+} from './integrations/redis/redis_session_service.js';
 export * from './integrations/secret_manager/secret_client.js';
 export * from './telemetry/agent_engine.js';
 export * from './telemetry/agent_engine_metric_exporter.js';

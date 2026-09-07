@@ -137,6 +137,7 @@ describe('core/package.json subpath exports', () => {
       './artifacts/gcs',
       './integrations/bigquery',
       './integrations/e2b',
+      './integrations/redis',
       './plugins/bigquery',
       './sessions/database',
       './telemetry/gcp',

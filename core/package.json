@@ -61,6 +61,12 @@
       "require": "./dist/cjs/integrations/firestore/firestore_session_service.js",
       "default": "./dist/esm/integrations/firestore/firestore_session_service.js"
     },
+    "./integrations/redis": {
+      "types": "./dist/types/integrations/redis/redis_session_service.d.ts",
+      "import": "./dist/esm/integrations/redis/redis_session_service.js",
+      "require": "./dist/cjs/integrations/redis/redis_session_service.js",
+      "default": "./dist/esm/integrations/redis/redis_session_service.js"
+    },
     "./plugins/bigquery": {
       "types": "./dist/types/plugins/bigquery_agent_analytics_plugin.d.ts",
       "import": "./dist/esm/plugins/bigquery_agent_analytics_plugin.js",
@@ -197,6 +203,7 @@
     "oci-generativeaiinference": "^2.140.1",
     "openai": "^7.10.0",
     "openapi-types": "^12.1.3",
+    "redis": "^6.2.1",
     "sqlite3": "^5.1.7",
     "undici": "^7.29.0"
   },
@@ -229,6 +236,7 @@
     "oci-common": "^2.140.1",
     "oci-generativeaiinference": "^2.140.1",
     "openai": "^6.9.1 || ^7.10.0",
+    "redis": "^5.0.0 || ^6.0.0",
     "sqlite3": "^5.1.7",
     "undici": "^7.29.0"
   },
@@ -315,6 +323,9 @@
       "optional": true
     },
     "openai": {
+      "optional": true
+    },
+    "redis": {
       "optional": true
     },
     "sqlite3": {
