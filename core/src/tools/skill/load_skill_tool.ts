@@ -6,6 +6,11 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import {requireAgent} from '../../agents/invocation_context.js';
+import {
+  confirmedNotHallucinated,
+  maybeHallucinated,
+} from '../../telemetry/_hallucination.js';
+import {trackSkillLoad} from '../../telemetry/_skill_instrumentation.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
@@ -48,6 +53,8 @@ export class LoadSkillTool extends BaseTool {
       };
     }
 
+    const skillTelemetry = trackSkillLoad(maybeHallucinated(skillName));
+
     let skill;
     try {
       skill = await this.toolset.getOrFetchSkill(
@@ -67,6 +74,10 @@ export class LoadSkillTool extends BaseTool {
         error_code: 'SKILL_NOT_FOUND',
       };
     }
+
+    skillTelemetry.skill = skill;
+    // The registry can resolve an alias, so the resolved skill names itself.
+    skillTelemetry.skillName = confirmedNotHallucinated(skill.frontmatter.name);
 
     // Record skill activation in agent state
     const agentName = requireAgent(toolContext.invocationContext).name;

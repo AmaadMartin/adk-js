@@ -12,6 +12,11 @@ import {
   File,
 } from '../../code_executors/code_execution_utils.js';
 import {Script, Skill} from '../../skills/skill.js';
+import {
+  confirmedNotHallucinated,
+  maybeHallucinated,
+} from '../../telemetry/_hallucination.js';
+import {trackSkillScriptExecution} from '../../telemetry/_skill_instrumentation.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -79,6 +84,11 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
+    const skillTelemetry = trackSkillScriptExecution(
+      maybeHallucinated(skillName),
+      maybeHallucinated(scriptPath),
+    );
+
     let skill;
     try {
       skill = await this.toolset.getOrFetchSkill(
@@ -99,6 +109,10 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
+    skillTelemetry.skill = skill;
+    // The registry can resolve an alias, so the resolved skill names itself.
+    skillTelemetry.skillName = confirmedNotHallucinated(skill.frontmatter.name);
+
     const relScriptPath = scriptPath.startsWith('scripts/')
       ? scriptPath.substring('scripts/'.length)
       : scriptPath;
@@ -113,6 +127,8 @@ export class RunSkillScriptTool extends BaseTool {
         errorCode: 'SCRIPT_NOT_FOUND',
       };
     }
+
+    skillTelemetry.scriptPath = confirmedNotHallucinated(scriptPath);
 
     let codeExecutor = this.toolset.codeExecutor;
     if (!codeExecutor) {
@@ -140,6 +156,7 @@ export class RunSkillScriptTool extends BaseTool {
           args: scriptArgs,
         },
       });
+      skillTelemetry.scriptExitCode = result.exitCode;
 
       // Output file names are chosen by the executed script, so they are
       // materialized into a dedicated output directory rather than being
