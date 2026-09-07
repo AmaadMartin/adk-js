@@ -92,12 +92,14 @@ export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
 
       if (nonNullTypes.length === 1) {
         const nonNullType = nonNullTypes[0];
-        if (typeof nonNullType === 'object') {
-          mcp = nonNullType;
-        } else {
-          const {type: _removed, anyOf: _removedAnyOf, ...rest} = mcp;
-          mcp = {...rest, type: nonNullType};
-        }
+        const {type: _removed, anyOf: _removedAnyOf, ...rest} = mcp;
+        // The surviving branch wins, but the siblings of `anyOf` survive with
+        // it: a Pydantic `Optional[str]` carries its `description` and `title`
+        // beside the union, not inside it.
+        mcp =
+          typeof nonNullType === 'object'
+            ? {...rest, ...nonNullType}
+            : {...rest, type: nonNullType};
       } else if (nonNullTypes.length === 0 && isNullable) {
         const {type: _removed, anyOf: _removedAnyOf, ...rest} = mcp;
         mcp = {...rest, type: 'null'};

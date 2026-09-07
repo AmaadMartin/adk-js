@@ -641,3 +641,63 @@ describe('toGeminiSchema', () => {
     });
   });
 });
+
+describe('toGeminiSchema nullable collapse', () => {
+  it('keeps the siblings of a scalar anyOf branch', () => {
+    const schema = toGeminiSchema({
+      anyOf: [{type: 'string'}, {type: 'null'}],
+      description: 'd',
+    });
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      nullable: true,
+      description: 'd',
+    });
+  });
+
+  it('keeps the siblings of an object anyOf branch', () => {
+    const schema = toGeminiSchema({
+      anyOf: [
+        {type: 'object', properties: {id: {type: 'string'}}},
+        {type: 'null'},
+      ],
+      description: 'd',
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      nullable: true,
+      description: 'd',
+      properties: {id: {type: Type.STRING}},
+    });
+  });
+
+  it('lets the surviving branch win over a sibling of the same name', () => {
+    const schema = toGeminiSchema({
+      anyOf: [{type: 'string', description: 'branch'}, {type: 'null'}],
+      description: 'parent',
+    });
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      nullable: true,
+      description: 'branch',
+    });
+  });
+
+  it('keeps the siblings of a collapsed type union', () => {
+    const schema = toGeminiSchema({
+      type: ['string', 'null'],
+      description: 'd',
+      minLength: 2,
+    });
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      nullable: true,
+      description: 'd',
+      minLength: '2',
+    });
+  });
+});
