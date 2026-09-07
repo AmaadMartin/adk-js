@@ -198,6 +198,11 @@ describe('extractNewInstruction', () => {
       expected: 'A\n```\nmiddle\n```\nB',
     },
     {
+      name: 'reads an inline fenced span that carries no newline',
+      reply: '```New instruction```',
+      expected: 'New instruction',
+    },
+    {
       name: 'drops the prose surrounding a fenced block',
       reply: 'Here you go:\n```\nNew instruction\n```\nHope that helps.',
       expected: 'New instruction',
