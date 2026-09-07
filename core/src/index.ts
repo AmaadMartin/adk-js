@@ -38,6 +38,7 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {getMemoryServiceFromUri} from './memory/registry.js';
 export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.js';
 export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
 export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';

@@ -14,6 +14,10 @@ import {
 } from './base_memory_service.js';
 import {MemoryEntry} from './memory_entry.js';
 
+export function isInMemoryConnectionString(uri: string): boolean {
+  return uri === 'memory://';
+}
+
 /**
  * An in-memory memory service for prototyping purpose only.
  *
