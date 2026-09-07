@@ -18,16 +18,22 @@ import {
 const AGENT_ENGINE_SCHEME = 'agentengine://';
 
 /**
- * Resolves the `agentengine://` remainder into Memory Bank options.
+ * Resolves an `agentengine://` memory URI into Memory Bank options.
  *
- * The remainder is either a bare resource id (`123`), in which case
- * `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` must both be set, or a
- * fully qualified `projects/{project}/locations/{location}/reasoningEngines/{id}`
- * name, which needs no environment.
+ * `uri` must carry the `agentengine://` scheme, which `getMemoryServiceFromUri`
+ * checks before it calls this. What follows the scheme is either a bare
+ * resource id (`123`), in which case `GOOGLE_CLOUD_PROJECT` and
+ * `GOOGLE_CLOUD_LOCATION` must both be set, or a fully qualified
+ * `projects/{project}/locations/{location}/reasoningEngines/{id}` name, which
+ * needs no environment.
  */
-function parseAgentEngineOptions(
-  resource: string,
+export function parseAgentEngineMemoryUri(
+  uri: string,
 ): VertexAiMemoryBankServiceOptions {
+  // Sliced rather than split on '://' so a resource id containing '://'
+  // cannot truncate the value.
+  const resource = uri.slice(AGENT_ENGINE_SCHEME.length);
+
   if (!resource) {
     throw new Error(
       'Agent engine resource name or resource id cannot be empty.',
@@ -67,11 +73,7 @@ export function getMemoryServiceFromUri(uri: string): BaseMemoryService {
   }
 
   if (uri.startsWith(AGENT_ENGINE_SCHEME)) {
-    // Sliced rather than split on '://' so a resource id containing '://'
-    // cannot truncate the value.
-    return new VertexAiMemoryBankService(
-      parseAgentEngineOptions(uri.slice(AGENT_ENGINE_SCHEME.length)),
-    );
+    return new VertexAiMemoryBankService(parseAgentEngineMemoryUri(uri));
   }
 
   throw new Error(`Unsupported memory service URI: ${redactUriPassword(uri)}`);
