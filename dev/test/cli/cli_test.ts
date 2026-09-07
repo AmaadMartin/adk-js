@@ -65,6 +65,14 @@ function isCleanCommanderExit(error: unknown): boolean {
   );
 }
 
+function findSubcommand(parent: Command, name: string): Command {
+  const subcommand = parent.commands.find((cmd) => cmd.name() === name);
+  if (!subcommand) {
+    expect.fail(`no subcommand named '${name}' under '${parent.name()}'`);
+  }
+  return subcommand;
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -571,6 +579,39 @@ describe('CLI Entrypoint', () => {
         stagingBucket: 'my-bucket',
       });
     });
+
+    it('should summarise the command', () => {
+      const agentEngine = findSubcommand(
+        findSubcommand(program, 'deploy'),
+        'agent_engine',
+      );
+
+      expect(agentEngine.description()).toBe(
+        'Deploys an agent to Agent Engine.',
+      );
+      expect(agentEngine.helpInformation()).toContain(
+        'Deploys an agent to Agent Engine.',
+      );
+    });
+
+    it('should document the positional argument as a single agent path', () => {
+      const help = findSubcommand(
+        findSubcommand(program, 'deploy'),
+        'agent_engine',
+      ).helpInformation();
+
+      expect(help).toContain('[agent_path]');
+      expect(help).toContain('The path to the agent source code folder');
+      expect(help).not.toContain('directory of agents to serve');
+    });
+
+    it('should default agentPath to the current directory', async () => {
+      await parse(['deploy', 'agent_engine']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledWith(
+        expect.objectContaining({agentPath: process.cwd()}),
+      );
+    });
   });
 
   describe('command: deploy reasoning_engine', () => {
@@ -605,6 +646,43 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         stagingBucket: 'my-bucket',
       });
+    });
+
+    it('should summarise the command as an alias of agent_engine', () => {
+      const reasoningEngine = findSubcommand(
+        findSubcommand(program, 'deploy'),
+        'reasoning_engine',
+      );
+
+      expect(reasoningEngine.description()).toBe(
+        'Deploys an agent to Agent Engine. Alias of `deploy agent_engine`.',
+      );
+      expect(reasoningEngine.helpInformation()).toContain(
+        'The path to the agent source code folder',
+      );
+    });
+  });
+
+  describe('command: deploy', () => {
+    it('should list a summary for each agent engine subcommand', () => {
+      const help = findSubcommand(program, 'deploy').helpInformation();
+
+      expect(help).toMatch(
+        /agent_engine \[options\] \[agent_path\]\s+Deploys an agent to Agent Engine\./,
+      );
+      expect(help).toMatch(
+        /reasoning_engine \[options\] \[agent_path\]\s+Deploys an agent to Agent Engine\. Alias of `deploy agent_engine`\./,
+      );
+    });
+
+    it('should leave the cloud_run help text unchanged', () => {
+      const help = findSubcommand(
+        findSubcommand(program, 'deploy'),
+        'cloud_run',
+      ).helpInformation();
+
+      expect(help).toContain('[agents_dir]');
+      expect(help).toContain('directory of agents to serve');
     });
   });
 });
