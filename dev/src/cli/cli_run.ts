@@ -47,7 +47,11 @@ import {
 } from '../utils/timeout_utils.js';
 import {isRecord, toMessage} from '../utils/value_utils.js';
 import {printEvent, renderUserInputRequest} from './event_printer.js';
-import {loadRunInputFile, RunInputFile} from './run_input_file.js';
+import {
+  loadRunInputFile,
+  loadSavedSession,
+  RunInputFile,
+} from './run_input_file.js';
 
 const REQUEST_CONFIRMATION = 'adk_request_confirmation';
 const REQUEST_INPUT = 'adk_request_input';
@@ -373,26 +377,27 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
         filePath: options.inputFile,
       });
     } else if (options.savedSessionFile) {
-      const loadedSession = await loadFileData<Session>(
-        options.savedSessionFile,
-      );
-      if (loadedSession) {
-        for (const event of loadedSession.events) {
-          await sessionService.appendEvent({session, event});
-          printEvent(event, {
-            announcePauses: false,
-            jsonl: options.jsonl,
-            sessionId: session.id,
-          });
-        }
+      const loadedSession = await loadSavedSession(options.savedSessionFile);
+      // The resumed conversation carries the state it was saved with, as
+      // adk-python's cli.py does.
+      session = await sessionService.createSession({
+        appName,
+        userId,
+        state: loadedSession.state,
+      });
+      for (const event of loadedSession.events) {
+        await sessionService.appendEvent({session, event});
+        printEvent(event, {
+          announcePauses: false,
+          jsonl: options.jsonl,
+          sessionId: session.id,
+        });
+      }
 
-        // Only the pauses the transcript never answered are still live, and
-        // they are what the prompt below is waiting on.
-        for (const request of getPendingUserInputRequests(
-          loadedSession.events,
-        )) {
-          console.log(renderUserInputRequest(request));
-        }
+      // Only the pauses the transcript never answered are still live, and
+      // they are what the prompt below is waiting on.
+      for (const request of getPendingUserInputRequests(loadedSession.events)) {
+        console.log(renderUserInputRequest(request));
       }
 
       await runInteractively({

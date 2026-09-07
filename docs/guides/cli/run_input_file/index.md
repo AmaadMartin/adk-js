@@ -60,8 +60,35 @@ and one message. The message names the file and every field that failed.
 Malformed JSON and a missing file are reported the same way, under
 `Failed to read or parse file <path>`.
 
-## Related options
+## The saved session file
 
 `--resume <file>` reads a session saved by `--save_session` and lets you keep
 talking to the agent. It is the interactive counterpart of `--replay`, and its
-file is a saved session rather than the document described here.
+file is a saved session rather than the document described above.
+
+```shell
+adk run agent.ts --resume old-session.session.json
+```
+
+The CLI starts a new session with the saved state, replays every event in the
+file into it, prints the transcript, then hands you the prompt. It reads two
+fields.
+
+| Field    | Type             | Meaning                                 |
+| -------- | ---------------- | --------------------------------------- |
+| `state`  | object           | The state the new session starts with.  |
+| `events` | array of objects | The transcript to replay, oldest first. |
+
+Both fields are optional and default to an empty object and an empty array, as
+they do in adk-python's `Session` model. Every other field the file carries,
+such as `id` and `appName`, is left alone. The contents of an event are not
+checked, because `--save_session` writes whatever the running ADK version
+produced.
+
+A document that is not an object, or whose `state` or `events` has the wrong
+type, ends the run with exit code 1 and a message naming the file and the
+field.
+
+```
+[ADK CLI] Error running agent: Invalid saved session file /tmp/old.json: events: Invalid input: expected array, received string
+```

@@ -11,7 +11,10 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
-import {loadRunInputFile} from '../../src/cli/run_input_file.js';
+import {
+  loadRunInputFile,
+  loadSavedSession,
+} from '../../src/cli/run_input_file.js';
 import {createTempDir} from '../../src/utils/file_utils.js';
 
 describe('loadRunInputFile', () => {
@@ -108,6 +111,117 @@ describe('loadRunInputFile', () => {
     const filePath = path.join(dir, 'absent.json');
 
     await expect(loadRunInputFile(filePath)).rejects.toThrow(
+      `Failed to read or parse file ${filePath}`,
+    );
+  });
+});
+
+describe('loadSavedSession', () => {
+  let dir = '';
+
+  beforeEach(async () => {
+    dir = await createTempDir('adk_saved_session_test');
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, {recursive: true, force: true});
+  });
+
+  async function writeSessionFile(contents: string): Promise<string> {
+    const filePath = path.join(dir, 'session.json');
+    await fs.writeFile(filePath, contents, {encoding: 'utf-8'});
+    return filePath;
+  }
+
+  it('returns the state and the events of a saved session', async () => {
+    const filePath = await writeSessionFile(
+      JSON.stringify({
+        state: {city: 'Paris'},
+        events: [{author: 'user', content: {parts: [{text: 'hi'}]}}],
+      }),
+    );
+
+    const saved = await loadSavedSession(filePath);
+
+    expect(saved.state).toEqual({city: 'Paris'});
+    expect(saved.events).toEqual([
+      {author: 'user', content: {parts: [{text: 'hi'}]}},
+    ]);
+  });
+
+  it('accepts the document --save_session writes', async () => {
+    const filePath = await writeSessionFile(
+      JSON.stringify({
+        id: 'old-session',
+        appName: 'test-agent',
+        userId: 'test_user',
+        state: {},
+        events: [{author: 'model'}],
+        lastUpdateTime: 1700000000,
+      }),
+    );
+
+    const saved = await loadSavedSession(filePath);
+
+    expect(saved.events).toEqual([{author: 'model'}]);
+  });
+
+  it('defaults the state and the events a document omits', async () => {
+    const filePath = await writeSessionFile(JSON.stringify({id: 'only-an-id'}));
+
+    const saved = await loadSavedSession(filePath);
+
+    expect(saved).toEqual({state: {}, events: []});
+  });
+
+  it('rejects a document whose events field is not an array', async () => {
+    const filePath = await writeSessionFile(JSON.stringify({events: 'hi'}));
+
+    await expect(loadSavedSession(filePath)).rejects.toThrow(
+      `Invalid saved session file ${filePath}: events: Invalid input: expected array, received string`,
+    );
+  });
+
+  it('rejects a document whose events hold a value that is not an object', async () => {
+    const filePath = await writeSessionFile(
+      JSON.stringify({events: [{author: 'user'}, 'hi']}),
+    );
+
+    await expect(loadSavedSession(filePath)).rejects.toThrow(
+      `Invalid saved session file ${filePath}: events.1: expected an event object`,
+    );
+  });
+
+  it('rejects a document whose state field is not an object', async () => {
+    const filePath = await writeSessionFile(JSON.stringify({state: 'hi'}));
+
+    await expect(loadSavedSession(filePath)).rejects.toThrow(
+      `Invalid saved session file ${filePath}: state: Invalid input: expected record, received string`,
+    );
+  });
+
+  it('names every failing field when more than one is wrong', async () => {
+    const filePath = await writeSessionFile(
+      JSON.stringify({state: 7, events: 7}),
+    );
+
+    await expect(loadSavedSession(filePath)).rejects.toThrow(
+      /state: .*; events: /,
+    );
+  });
+
+  it('rejects a document that is not an object', async () => {
+    const filePath = await writeSessionFile(JSON.stringify(null));
+
+    await expect(loadSavedSession(filePath)).rejects.toThrow(
+      `Invalid saved session file ${filePath}: Invalid input: expected object, received null`,
+    );
+  });
+
+  it('rejects a file that does not exist', async () => {
+    const filePath = path.join(dir, 'absent.json');
+
+    await expect(loadSavedSession(filePath)).rejects.toThrow(
       `Failed to read or parse file ${filePath}`,
     );
   });
