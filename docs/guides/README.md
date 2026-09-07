@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Memory
+
+- [Selecting a memory service from the CLI](memory/memory_service_uri/index.md) - Choosing a memory backend with `--memory_service_uri`, and resolving the same URI in your own code.
+
 ### Tools
 
 #### Retrieval
