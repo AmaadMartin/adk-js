@@ -16,6 +16,7 @@ import {
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {AgentOptimizer, type OptimizeParams} from './agent_optimizer.js';
+import {DefaultGepaEngine} from './default_gepa_engine.js';
 import type {
   AgentWithScores,
   OptimizerResult,
@@ -46,13 +47,6 @@ import type {ExampleSet, Sampler} from './sampler.js';
  */
 const MISSING_EXAMPLE_SCORE = 0;
 
-/** Thrown when an optimization runs without a GEPA engine. */
-const MISSING_ENGINE_MESSAGE =
-  'GEPARootAgentOptimizer requires a GEPA engine, which ADK does not ' +
-  'bundle. GEPA is an external search algorithm, so applications that do ' +
-  'not optimize prompts are not made to carry it. Pass an implementation of ' +
-  'the GepaEngine interface as `config.engine`.';
-
 /** Configuration options for {@link GEPARootAgentOptimizer}. */
 export interface GEPARootAgentOptimizerConfig {
   /** The model that reads the eval results and rewrites the instructions. */
@@ -71,8 +65,8 @@ export interface GEPARootAgentOptimizerConfig {
   runDir?: string;
 
   /**
-   * The GEPA search engine. ADK bundles none, so an optimization run without
-   * one throws.
+   * The GEPA search engine, overriding the bundled
+   * {@link DefaultGepaEngine}.
    */
   engine?: GepaEngine;
 }
@@ -291,7 +285,6 @@ export class RootAgentGepaAdapter implements GepaAdapter<
       );
       newTexts[component] = extractNewInstruction(
         await this.reflectionLm(prompt),
-        component,
       );
     }
     return newTexts;
@@ -313,7 +306,8 @@ export class RootAgentGepaAdapter implements GepaAdapter<
  * An optimizer that rewrites a root agent's instruction and the instructions
  * of every skill it exposes, in one GEPA search.
  *
- * ADK bundles no GEPA engine, so the caller supplies one as `config.engine`.
+ * The search runs on the bundled {@link DefaultGepaEngine}. Pass
+ * `config.engine` to drive a different one.
  */
 @experimental
 export class GEPARootAgentOptimizer extends AgentOptimizer<
@@ -321,12 +315,16 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
   AgentWithScores
 > {
   private readonly config: GEPARootAgentOptimizerConfig & typeof DEFAULT_CONFIG;
+  private readonly engine: GepaEngine;
   private readonly llmClass: BaseLlmType;
   private llm?: BaseLlm;
 
   constructor(config: GEPARootAgentOptimizerConfig = {}) {
     super();
     this.config = {...DEFAULT_CONFIG, ...config};
+    // Built per instance rather than shared through DEFAULT_CONFIG, so two
+    // optimizers never drive one engine.
+    this.engine = config.engine ?? new DefaultGepaEngine();
     this.llmClass = LLMRegistry.resolve(this.config.optimizerModel);
   }
 
@@ -348,18 +346,12 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
    * @param params The agent to start from, and the sampler that scores
    *     candidates. Sub-agent instructions are left alone.
    * @returns The Pareto front of rebuilt agents, plus the raw engine result.
-   * @throws If no GEPA engine is configured, or if the initial instruction is
-   *     not a static string.
+   * @throws If the initial instruction is not a static string.
    */
   override async optimize({
     initialAgent,
     sampler,
   }: OptimizeParams<UnstructuredSamplingResult>): Promise<GEPARootAgentOptimizerResult> {
-    const engine = this.config.engine;
-    if (!engine) {
-      throw new Error(MISSING_ENGINE_MESSAGE);
-    }
-
     if (initialAgent.subAgents.length > 0) {
       logger.warn(
         'The GEPARootAgentOptimizer will not optimize prompts for sub-agents.',
@@ -386,7 +378,7 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
         prompt,
       });
 
-    const engineResult = await engine.optimize({
+    const engineResult = await this.engine.optimize({
       seedCandidate: buildSeedCandidate(initialAgent, seedInstruction),
       trainset: trainIds,
       valset: valIds,

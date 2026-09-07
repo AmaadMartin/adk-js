@@ -229,6 +229,12 @@ export type {
   SamplingResult,
   UnstructuredSamplingResult,
 } from './optimization/data_types.js';
+export {
+  DefaultGepaEngine,
+  proposeWithReflection,
+  renderReflectionPrompt,
+} from './optimization/default_gepa_engine.js';
+export type {DefaultGepaEngineOptions} from './optimization/default_gepa_engine.js';
 export type {
   EvaluationBatch,
   GepaAdapter,
@@ -250,7 +256,10 @@ export {requireStaticInstruction} from './optimization/gepa_utils.js';
 export {
   AGENT_PROMPT_NAME,
   SKILL_KEY_PREFIX,
+  extractNewInstruction,
+  renderProposalPrompt,
   skillComponentKey,
+  validateProposalTemplate,
 } from './optimization/instruction_proposal.js';
 export {Sampler, isSampler} from './optimization/sampler.js';
 export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
