@@ -639,6 +639,28 @@ describe('VertexAiSessionService', () => {
       });
     });
 
+    it('leaves the first page response array untouched', async () => {
+      const firstPageEvents = [{name: 'e1', timestamp: '2026-04-09T13:00:00Z'}];
+      mockClient.events.listInternal
+        .mockResolvedValueOnce({
+          sessionEvents: firstPageEvents,
+          nextPageToken: 'token-page-2',
+        })
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e2', timestamp: '2026-04-09T13:01:00Z'}],
+        });
+
+      await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      expect(firstPageEvents).toEqual([
+        {name: 'e1', timestamp: '2026-04-09T13:00:00Z'},
+      ]);
+    });
+
     it('slices numRecentEvents across all pages', async () => {
       mockClient.events.listInternal
         .mockResolvedValueOnce({
