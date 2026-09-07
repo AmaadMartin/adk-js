@@ -20,9 +20,10 @@ const AGENT_ENGINE_SCHEME = 'agentengine://';
 /**
  * Resolves the `agentengine://` remainder into Memory Bank options.
  *
- * The remainder is either a bare resource id (`123`), in which case the
- * project and location come from the environment, or a fully qualified
- * `projects/{project}/locations/{location}/reasoningEngines/{id}` name.
+ * The remainder is either a bare resource id (`123`), in which case
+ * `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` must both be set, or a
+ * fully qualified `projects/{project}/locations/{location}/reasoningEngines/{id}`
+ * name, which needs no environment.
  */
 function parseAgentEngineOptions(
   resource: string,
@@ -34,11 +35,15 @@ function parseAgentEngineOptions(
   }
 
   if (!resource.includes('/')) {
-    return {
-      projectId: process.env.GOOGLE_CLOUD_PROJECT,
-      location: process.env.GOOGLE_CLOUD_LOCATION,
-      agentEngineId: resource,
-    };
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT;
+    const location = process.env.GOOGLE_CLOUD_LOCATION;
+    // Without both, the Vertex client either fails with a message that names
+    // neither variable, or silently resolves to the global endpoint and misses
+    // a Memory Bank that lives in a region.
+    if (!projectId || !location) {
+      throw new Error('GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION not set.');
+    }
+    return {projectId, location, agentEngineId: resource};
   }
 
   const parts = resource.split('/');

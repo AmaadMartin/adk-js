@@ -158,7 +158,7 @@ const ARTIFACT_SERVICE_URI_OPTION = new Option(
 );
 const MEMORY_SERVICE_URI_OPTION = new Option(
   '--memory_service_uri <string>',
-  'Optional. The URI of the memory service. Supported URIs: memory:// for the in-memory memory service, agentengine://<agent_engine> for Vertex AI Agent Engine Memory Bank, where <agent_engine> is either the resource id 123 or the fully qualified name projects/abc/locations/us-central1/reasoningEngines/123.',
+  'Optional. The URI of the memory service. Supported URIs: memory:// for the in-memory memory service, agentengine://<agent_engine> for Vertex AI Agent Engine Memory Bank, where <agent_engine> is either the resource id 123, which requires GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION to be set, or the fully qualified name projects/abc/locations/us-central1/reasoningEngines/123.',
 );
 const OTEL_TO_CLOUD_OPTION = new Option(
   '--otel_to_cloud [boolean]',
