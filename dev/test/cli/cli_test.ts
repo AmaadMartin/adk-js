@@ -149,14 +149,14 @@ describe('CLI Entrypoint', () => {
     it('defaults the memory service when no memory service uri is given', async () => {
       await parse(['web']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
 
     it('should handle memory service uri', async () => {
       await parse(['web', '--memory_service_uri', 'memory://']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
 
@@ -222,7 +222,7 @@ describe('CLI Entrypoint', () => {
     it('should handle memory service uri', async () => {
       await parse(['api_server', '--memory_service_uri', 'memory://']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
   });
@@ -400,7 +400,7 @@ describe('CLI Entrypoint', () => {
     it('should pass memoryServiceUri to deployToCloudRun', async () => {
       await parse(['deploy', 'cloud_run', '--memory_service_uri', 'memory://']);
 
-      expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
+      expect(vi.mocked(deployToCloudRun).mock.calls[0][0]).toMatchObject({
         memoryServiceUri: 'memory://',
       });
     });
@@ -488,7 +488,7 @@ describe('CLI Entrypoint', () => {
         'memory://',
       ]);
 
-      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+      expect(vi.mocked(deployToAgentEngine).mock.calls[0][0]).toMatchObject({
         memoryServiceUri: 'memory://',
       });
     });
