@@ -11,6 +11,7 @@ import {
   VertexAiMemoryBankService,
 } from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {parseAgentEngineMemoryUri} from '../../src/memory/registry.js';
 
 const clientConstructor = vi.hoisted(() => vi.fn());
 
@@ -128,5 +129,29 @@ describe('getMemoryServiceFromUri', () => {
     expect(() => getMemoryServiceFromUri('redis://cache')).to.throw(
       'Unsupported memory service URI: redis://cache',
     );
+  });
+});
+
+describe('parseAgentEngineMemoryUri', () => {
+  it('parses a short id, taking the project and location from the environment', () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'us-central1');
+
+    expect(parseAgentEngineMemoryUri('agentengine://456')).toEqual({
+      projectId: 'test-project',
+      location: 'us-central1',
+      agentEngineId: '456',
+    });
+  });
+
+  it('parses a full resource name in preference to the environment', () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-location');
+
+    expect(
+      parseAgentEngineMemoryUri(
+        'agentengine://projects/p/locations/l/reasoningEngines/456',
+      ),
+    ).toEqual({projectId: 'p', location: 'l', agentEngineId: '456'});
   });
 });
