@@ -7,6 +7,10 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 import {injectSessionState} from '../../agents/instructions.js';
 import {requireAgent} from '../../agents/invocation_context.js';
+import {
+  attachSkillTelemetry,
+  SkillLoadTelemetry,
+} from '../../telemetry/_skill_instrumentation.js';
 import {experimental} from '../../utils/experimental.js';
 import {RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
@@ -55,6 +59,9 @@ export class LoadSkillTool extends SkillTool {
       };
     }
 
+    const skillTelemetry: SkillLoadTelemetry = {kind: 'load', skillName};
+    attachSkillTelemetry(skillTelemetry);
+
     let skill;
     try {
       skill = await this.toolset.getOrFetchSkill(
@@ -74,6 +81,10 @@ export class LoadSkillTool extends SkillTool {
         error_code: SkillErrorCode.SKILL_NOT_FOUND,
       };
     }
+
+    skillTelemetry.skill = skill;
+    // The registry can resolve an alias, so the resolved skill names itself.
+    skillTelemetry.skillName = skill.frontmatter.name;
 
     // Record skill activation in agent state
     const agentName = requireAgent(toolContext.invocationContext).name;

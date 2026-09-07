@@ -165,6 +165,7 @@ Instructions content`,
 
       const skill = await loadSkillFromDir(skillDir);
       expect(skill.uri).toBe(pathToFileURL(path.resolve(skillDir)).href);
+      expect(skill.uri?.startsWith('file://')).toBe(true);
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });

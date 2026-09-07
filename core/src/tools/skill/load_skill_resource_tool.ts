@@ -7,6 +7,10 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 import path from 'node:path';
 import {getAsset, getReference, getScript} from '../../skills/skill.js';
+import {
+  attachSkillTelemetry,
+  SkillResourceLoadTelemetry,
+} from '../../telemetry/_skill_instrumentation.js';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {RunAsyncToolRequest, ToolProcessLlmRequest} from '../base_tool.js';
@@ -79,6 +83,13 @@ export class LoadSkillResourceTool extends SkillTool {
 
     resourcePath = path.posix.normalize(resourcePath);
 
+    const skillTelemetry: SkillResourceLoadTelemetry = {
+      kind: 'resourceLoad',
+      skillName,
+      resourcePath,
+    };
+    attachSkillTelemetry(skillTelemetry);
+
     let skill;
     try {
       skill = await this.toolset.getOrFetchSkill(
@@ -98,6 +109,10 @@ export class LoadSkillResourceTool extends SkillTool {
         error_code: SkillErrorCode.SKILL_NOT_FOUND,
       };
     }
+
+    skillTelemetry.skill = skill;
+    // The registry can resolve an alias, so the resolved skill names itself.
+    skillTelemetry.skillName = skill.frontmatter.name;
 
     let content: string | Buffer | undefined;
 

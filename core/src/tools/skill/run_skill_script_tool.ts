@@ -16,6 +16,10 @@ import {
 import {BaseEnvironment} from '../../environment/base_environment.js';
 import {getScript, Skill} from '../../skills/skill.js';
 import {
+  attachSkillTelemetry,
+  SkillScriptExecutionTelemetry,
+} from '../../telemetry/_skill_instrumentation.js';
+import {
   asRecord,
   formatError,
   isFileNotFoundError,
@@ -195,6 +199,13 @@ export class RunSkillScriptTool extends SkillTool {
       scriptArgv = buildScriptArgv(args);
     }
 
+    const skillTelemetry: SkillScriptExecutionTelemetry = {
+      kind: 'scriptExecution',
+      skillName,
+      scriptPath,
+    };
+    attachSkillTelemetry(skillTelemetry);
+
     let skill;
     try {
       skill = await this.toolset.getOrFetchSkill(
@@ -214,6 +225,10 @@ export class RunSkillScriptTool extends SkillTool {
         SkillErrorCode.SKILL_NOT_FOUND,
       );
     }
+
+    skillTelemetry.skill = skill;
+    // The registry can resolve an alias, so the resolved skill names itself.
+    skillTelemetry.skillName = skill.frontmatter.name;
 
     const relScriptPath = scriptPath.startsWith('scripts/')
       ? scriptPath.substring('scripts/'.length)
@@ -314,6 +329,9 @@ export class RunSkillScriptTool extends SkillTool {
           args: scriptArgv,
         },
       });
+      // An executor that cannot report a status returns null, which the span
+      // records the same way as a missing status.
+      skillTelemetry.scriptExitCode = result.exitCode ?? undefined;
 
       // Output file names are chosen by the executed script, so they are
       // materialized into a dedicated output directory rather than being
