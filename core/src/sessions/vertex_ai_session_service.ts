@@ -30,10 +30,10 @@ import {logger} from '../utils/logger.js';
 import {
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
   getExpressModeApiKey,
+  REASONING_ENGINE_NAME_PATTERN,
 } from '../utils/vertex_ai_utils.js';
 
 import {partialCopy} from '../utils/partial_copy.js';
-import {REASONING_ENGINE_NAME_PATTERN} from '../utils/vertex_ai_utils.js';
 import {
   AppendEventRequest,
   BaseSessionService,
