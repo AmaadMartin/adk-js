@@ -18,6 +18,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 declare global {
@@ -372,6 +373,21 @@ describe('deployToAgentEngine', () => {
         },
       },
     });
+  });
+
+  it('should write memoryServiceUri into the generated Dockerfile', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      memoryServiceUri: 'agentengine://123',
+    });
+
+    const dockerfile = vi
+      .mocked(saveToFile)
+      .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+    if (!dockerfile) {
+      expect.fail('no Dockerfile was written');
+    }
+    expect(dockerfile[1]).toContain("--memory_service_uri='agentengine://123'");
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {
