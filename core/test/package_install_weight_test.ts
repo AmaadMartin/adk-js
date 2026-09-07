@@ -62,6 +62,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   'e2b',
   'express',
   'openai',
+  'redis',
   'sqlite3',
 ];
 
@@ -100,6 +101,7 @@ describe('core/package.json install weight', () => {
     'e2b',
     'express',
     'openai',
+    'redis',
     'sqlite3',
   ])(
     '%s is still a devDependency so the repo can build and test against it',
