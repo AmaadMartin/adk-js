@@ -6,6 +6,8 @@
 
 export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
+export {inferAgentOrigin, stampAgentOrigin} from './agents/agent_origin.js';
+export type {AgentOrigin} from './agents/agent_origin.js';
 export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
@@ -69,6 +71,10 @@ export {StreamingMode} from './agents/run_config.js';
 export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
+export {
+  canTransferBetweenAgents,
+  getTransferTargets,
+} from './agents/transfer_utils.js';
 export {
   getPendingUserInputRequests,
   getUserInputRequests,

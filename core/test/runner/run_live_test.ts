@@ -198,7 +198,7 @@ describe('Runner.runLive', () => {
     }).rejects.toThrow('liveRequestQueue is required');
   });
 
-  it('creates the session when it does not exist', async () => {
+  it('creates the session when it does not exist and autoCreateSession is set', async () => {
     const llm = new FakeLiveLlm([]);
     const agent = new LlmAgent({name: 'agent', model: llm});
     const runner = new Runner({
@@ -206,6 +206,7 @@ describe('Runner.runLive', () => {
       agent,
       sessionService,
       artifactService,
+      autoCreateSession: true,
     });
     const queue = new LiveRequestQueue();
     queue.close();
