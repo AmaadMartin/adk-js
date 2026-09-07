@@ -245,7 +245,7 @@ describe('the search loop', () => {
     });
 
     const result = await new DefaultGepaEngine({seed: 1}).optimize(
-      optimizeParams({adapter, maxMetricCalls: 6}),
+      optimizeParams({adapter, maxMetricCalls: 8}),
     );
 
     expect(result.candidates).toEqual([SEED_CANDIDATE]);
