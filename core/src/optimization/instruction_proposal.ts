@@ -10,16 +10,17 @@
  *
  * adk-python delegates the rendering and the extraction to the `gepa`
  * package's `InstructionProposalSignature`. npm has no equivalent, so this
- * module reimplements that class's `validate_prompt_template`,
- * `prompt_renderer` and `output_extractor` algorithms. The two prompt
+ * module reimplements that class's `prompt_renderer` and `output_extractor`
+ * algorithms. The two prompt
  * templates are verbatim from adk-python: their wording steers the reflection
  * model, so it is behaviour rather than style.
  *
  * Two parts of `InstructionProposalSignature` are left out. It also collects
  * image values and returns an OpenAI-shaped message list; adk-python never
  * reaches that path, because it casts the prompt to a string and sends one
- * text part. Its two `TypeError` guards are unreachable from a typed
- * TypeScript caller.
+ * text part. Its `validate_prompt_template` and its two `TypeError` guards
+ * are unreachable here: this module picks the template itself, from two
+ * constants that both carry every placeholder.
  */
 
 /** The GEPA component key holding the root agent's instruction. */
@@ -45,12 +46,6 @@ const SIDE_INFO_PLACEHOLDER = '<side_info>';
 
 /** Where the skill's name is substituted into the skill template. */
 const SKILL_NAME_PLACEHOLDER = '{skill_name}';
-
-/** The placeholders every instruction-updater template must carry. */
-const REQUIRED_PLACEHOLDERS = [
-  CURRENT_TEXT_PLACEHOLDER,
-  SIDE_INFO_PLACEHOLDER,
-] as const;
 
 /** The markdown fence both templates ask the reflection model to answer in. */
 const FENCE = '```';
@@ -132,24 +127,6 @@ function templateFor(component: string): string {
 }
 
 /**
- * Rejects an instruction-updater template that cannot be substituted into.
- *
- * @param template The template to check.
- * @throws If the template lacks a required placeholder, naming every one it
- *     is missing in the order they are declared.
- */
-export function validateProposalTemplate(template: string): void {
-  const missing = REQUIRED_PLACEHOLDERS.filter(
-    (placeholder) => !template.includes(placeholder),
-  );
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing placeholder(s) in prompt template: ${missing.join(', ')}`,
-    );
-  }
-}
-
-/**
  * Renders one reflective-dataset value as markdown.
  *
  * @param value The value to render.
@@ -207,7 +184,6 @@ export function renderProposalPrompt(
   dataset: Array<Record<string, unknown>>,
 ): string {
   const template = templateFor(component);
-  validateProposalTemplate(template);
   const sideInfo = renderDataset(dataset);
   // The current text is substituted first, so a placeholder the model wrote
   // into the previous instruction is not itself substituted into.

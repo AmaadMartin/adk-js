@@ -89,7 +89,7 @@ const DEFAULT_CONFIG: Required<
 /** The final result of a {@link GEPARootAgentOptimizer} run. */
 export interface GEPARootAgentOptimizerResult extends OptimizerResult<AgentWithScores> {
   /** The raw result the GEPA engine reported. */
-  gepaResult?: Record<string, unknown>;
+  gepaResult: Record<string, unknown>;
 }
 
 /** Parameters for the {@link RootAgentGepaAdapter} constructor. */
@@ -384,7 +384,6 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
       valset: valIds,
       adapter: new RootAgentGepaAdapter({initialAgent, sampler, reflectionLm}),
       maxMetricCalls: this.config.maxMetricCalls,
-      reflectionLm,
       reflectionMinibatchSize: this.config.reflectionMinibatchSize,
       runDir: this.config.runDir,
     });

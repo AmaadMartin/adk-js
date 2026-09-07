@@ -2,8 +2,8 @@
 
 `GEPARootAgentOptimizer` rewrites a root agent's instruction and the
 instructions of every skill it exposes, in one GEPA search. It hands a search
-engine an adapter over your agent and your `Sampler`, and returns the candidate
-agents the search kept, each with its validation score. Reach for it when an
+engine an adapter over your agent and your `Sampler`, and returns the Pareto
+front of candidate agents, each with its validation score. Reach for it when an
 agent's quality depends on its skills as much as on its instruction, and tuning
 the two by hand has stopped paying off.
 
@@ -47,6 +47,10 @@ reflect over a training minibatch, keep a child that beats its parent, then
 validate it — without that package's merge proposer or its checkpoint format.
 A run always starts from scratch.
 
+`optimizedAgents` carries the front: the candidates no other candidate beats on
+every validation example. `gepaResult` carries every candidate the search
+explored, with `valAggregateScores`, `bestScore` and `totalMetricCalls`.
+
 Nothing runs at request time. Optimization is an offline batch job whose output
 is an in-memory agent. Copying its instruction and its skill instructions back
 into your source is manual.
@@ -78,8 +82,10 @@ const result = await new GEPARootAgentOptimizer({
   sampler: new PhraseCoverageSampler(),
 });
 
-// result.optimizedAgents[1].overallScore is 1, and its optimizedAgent carries
-// both the rewritten instruction and the rewritten skill instructions.
+// The rewrite beats the seed on the one validation example, so the front holds
+// it alone: result.optimizedAgents[0].overallScore is 1, and its
+// optimizedAgent carries both the rewritten instruction and the rewritten
+// skill instructions.
 ```
 
 The sample names its own offline model so it runs with no credentials. A real
@@ -158,11 +164,8 @@ the prompt for a skill component names that skill and tells the model to leave
 the core instruction alone. Both prompts render the reflective dataset as
 markdown, matching the `gepa` package's `InstructionProposalSignature`. The
 reply is read as the span between its first and last ``` fence; a reply with no
-fence is taken whole. This member is optional on `GepaAdapter`, so an engine
-that has its own proposer can ignore it.
-
-`params.reflectionLm(prompt)` sends any prompt to `optimizerModel` and returns
-the response text with the model's thoughts removed.
+fence is taken whole. Every `GepaAdapter` supplies this member, so an engine
+never needs a proposer of its own.
 
 ## Failure modes
 

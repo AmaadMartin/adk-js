@@ -248,11 +248,7 @@ export type {
   SamplingResult,
   UnstructuredSamplingResult,
 } from './optimization/data_types.js';
-export {
-  DefaultGepaEngine,
-  proposeWithReflection,
-  renderReflectionPrompt,
-} from './optimization/default_gepa_engine.js';
+export {DefaultGepaEngine} from './optimization/default_gepa_engine.js';
 export type {DefaultGepaEngineOptions} from './optimization/default_gepa_engine.js';
 export type {
   EvaluationBatch,
@@ -278,7 +274,6 @@ export {
   extractNewInstruction,
   renderProposalPrompt,
   skillComponentKey,
-  validateProposalTemplate,
 } from './optimization/instruction_proposal.js';
 export {Sampler, isSampler} from './optimization/sampler.js';
 export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';

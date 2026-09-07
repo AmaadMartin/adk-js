@@ -419,10 +419,20 @@ describe('the reflection model', () => {
       initialAgent: createAgent(),
       sampler: createSampler(),
     });
-    const {reflectionLm} = onlyOptimizeCall(engine);
-    expect(await reflectionLm('Rewrite it.')).toBe(fenced('Rewritten'));
-    expect(await reflectionLm('Rewrite it again.')).toBe(fenced('Rewritten'));
+    const {adapter} = onlyOptimizeCall(engine);
+    const first = await adapter.proposeNewTexts(
+      {[AGENT_PROMPT_NAME]: 'Old prompt'},
+      {[AGENT_PROMPT_NAME]: []},
+      [AGENT_PROMPT_NAME],
+    );
+    const second = await adapter.proposeNewTexts(
+      {[AGENT_PROMPT_NAME]: 'Old prompt'},
+      {[AGENT_PROMPT_NAME]: []},
+      [AGENT_PROMPT_NAME],
+    );
 
+    expect(first).toEqual({[AGENT_PROMPT_NAME]: 'Rewritten'});
+    expect(second).toEqual(first);
     expect(CountingReflectionLlm.constructions).toBe(before + 1);
   });
 });

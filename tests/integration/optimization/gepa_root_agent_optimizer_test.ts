@@ -108,10 +108,6 @@ class ReflectingEngine implements GepaEngine {
 
   async optimize(params: GepaOptimizeParams): Promise<GepaRunResult> {
     const {adapter, seedCandidate} = params;
-    if (!adapter.proposeNewTexts) {
-      return expect.unreachable('The adapter must propose new texts.');
-    }
-
     const components = Object.keys(seedCandidate);
     const evalBatch = await adapter.evaluate(
       params.trainset,
@@ -262,14 +258,14 @@ describe('GEPARootAgentOptimizer end to end', () => {
         requireStaticInstruction(optimizedAgent),
         skillInstructions(optimizedAgent),
       ]),
-    ).toEqual([
-      [STARTING_INSTRUCTION, refundSkill.instructions],
-      [CANDIDATE_INSTRUCTION, CANDIDATE_SKILL_INSTRUCTIONS],
-    ]);
+      // The rewrite dominates the seed on the one validation example, so the
+      // front holds it alone. gepaResult keeps both.
+    ).toEqual([[CANDIDATE_INSTRUCTION, CANDIDATE_SKILL_INSTRUCTIONS]]);
     expect(
       result.optimizedAgents.map(({overallScore}) => overallScore),
-    ).toEqual([0.5, 1]);
+    ).toEqual([1]);
     expect(result.gepaResult).toMatchObject({
+      valAggregateScores: [0.5, 1],
       bestScore: 1,
       totalMetricCalls: SAMPLE_METRIC_BUDGET,
     });
@@ -306,9 +302,7 @@ describe('GEPARootAgentOptimizer end to end', () => {
     });
 
     expect(finalOutput(allEvents(perTurn))).toBe(
-      'validation score 0.5: agent: Help the user with their order. | ' +
-        'skill refund_policy: Refund an order when the user asks.\n' +
-        'validation score 1: agent: Help the user with their order. Confirm ' +
+      'validation score 1: agent: Help the user with their order. Confirm ' +
         'the order id before you act. | skill refund_policy: Refund an order ' +
         'only inside the refund window, and say which window applied.',
     );
