@@ -11,6 +11,7 @@ import {
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
   EventMetadata,
+  ListAgentEngineSessionEventsConfig,
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
@@ -250,7 +251,7 @@ export class VertexAiSessionService extends BaseSessionService {
           name: sessionResourceName,
         })) as VertexAiSession;
       } else {
-        const listConfig: Record<string, string> = {};
+        const listConfig: ListAgentEngineSessionEventsConfig = {};
         if (config && config.afterTimestamp) {
           listConfig.filter = `timestamp>="${new Date(
             config.afterTimestamp,
@@ -267,15 +268,13 @@ export class VertexAiSessionService extends BaseSessionService {
         getSessionResponse = sessionRes as VertexAiSession;
 
         let eventsPage = eventsRes;
-        eventsIterator = eventsPage.sessionEvents || [];
+        eventsIterator = [...(eventsPage.sessionEvents || [])];
         while (eventsPage.nextPageToken) {
           eventsPage = await this.sessions.events.listInternal({
             name: sessionResourceName,
             config: {...listConfig, pageToken: eventsPage.nextPageToken},
           });
-          eventsIterator = eventsIterator.concat(
-            eventsPage.sessionEvents || [],
-          );
+          eventsIterator.push(...(eventsPage.sessionEvents || []));
         }
       }
 
