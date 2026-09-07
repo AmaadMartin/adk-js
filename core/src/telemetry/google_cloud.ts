@@ -40,10 +40,8 @@ import {
 } from '../utils/mtls_utils.js';
 import {version} from '../version.js';
 
-import {
-  buildRequestDrivenMetrics,
-  MIN_EXPORT_INTERVAL_MS,
-} from './agent_engine_metric_exporter.js';
+import {getAgentEngineMetricsSetup} from './agent_engine.js';
+import {MIN_EXPORT_INTERVAL_MS} from './gcp_metric_exporter.js';
 import {OtelExportersConfig, OTelHooks} from './setup.js';
 
 const GCP_PROJECT_ERROR_MESSAGE =
@@ -263,6 +261,11 @@ async function getGcpSpanExporter(
  * span processor that drives it: the runtime throttles CPU between requests, so
  * a periodic reader's timer is starved. Everywhere else it is a periodic reader
  * at the shared minimum interval.
+ *
+ * The request-driven reader comes from `./agent_engine.js` rather than from
+ * here, because the request middleware installed by the API server drives that
+ * same reader. It is built over the OTLP exporter below, so metrics leave for
+ * telemetry.googleapis.com like every other signal.
  */
 async function getGcpMetricHooks(authClient: AuthClient): Promise<OTelHooks> {
   const exporter: PushMetricExporter = new OTLPMetricExporter(
@@ -272,7 +275,10 @@ async function getGcpMetricHooks(authClient: AuthClient): Promise<OTelHooks> {
       DEFAULT_MTLS_TELEMETRY_METRICS_ENDPOINT,
     ),
   );
-  if (!process.env[AGENT_ENGINE_ID_ENV]) {
+  const agentEngine = await getAgentEngineMetricsSetup(() =>
+    Promise.resolve(exporter),
+  );
+  if (agentEngine === undefined) {
     return {
       metricReaders: [
         new PeriodicExportingMetricReader({
@@ -282,8 +288,10 @@ async function getGcpMetricHooks(authClient: AuthClient): Promise<OTelHooks> {
       ],
     };
   }
-  const {reader, spanProcessor} = buildRequestDrivenMetrics(exporter);
-  return {metricReaders: [reader], spanProcessors: [spanProcessor]};
+  return {
+    metricReaders: [agentEngine.reader],
+    spanProcessors: [agentEngine.spanProcessor],
+  };
 }
 
 /** Builds the log record processor that exports to telemetry.googleapis.com. */

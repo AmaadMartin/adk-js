@@ -60,6 +60,9 @@ const INTERVAL_ENV = 'OTEL_METRIC_EXPORT_INTERVAL';
 const FLOOR_ENV =
   'GOOGLE_CLOUD_AGENT_ENGINE_METRICS_COLLECTION_INTERVAL_FLOOR_MS';
 
+/** Semantic-convention attribute carrying the GenAI operation name. */
+const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
+
 /** Lets every queued microtask run, so a fire-and-forget collect reaches the exporter. */
 function flushPendingWork(): Promise<void> {
   return new Promise<void>((resolve) => setImmediate(resolve));
@@ -604,6 +607,48 @@ describe('buildRequestDrivenMetrics span processor', () => {
     const tracer = createTracer(state.spanProcessor).getTracer('test');
 
     tracer.startSpan('call_llm').end();
+    await flushPendingWork();
+
+    expect(exporter.exports).toEqual([]);
+    await meterProvider.shutdown();
+  });
+
+  it('collects on a generate_content span without being configured for it', async () => {
+    const {exporter, state, meterProvider} = createOverdueReader();
+    const tracer = createTracer(state.spanProcessor).getTracer('test');
+
+    // The span the GenAI SDK's own instrumentation opens, which an agent can
+    // have alongside the `call_llm` span this reader defaults to.
+    tracer.startSpan('generate_content gemini-2.0-flash').end();
+    await flushPendingWork();
+
+    expect(exporter.exports).toHaveLength(1);
+    await meterProvider.shutdown();
+  });
+
+  it('collects on a span attributed generate_content', async () => {
+    const {exporter, state, meterProvider} = createOverdueReader();
+    const tracer = createTracer(state.spanProcessor).getTracer('test');
+
+    // A name the processor does not match, so only the attribute can fire it.
+    tracer
+      .startSpan('chat', {
+        attributes: {[GEN_AI_OPERATION_NAME]: 'generate_content'},
+      })
+      .end();
+    await flushPendingWork();
+
+    expect(exporter.exports).toHaveLength(1);
+    await meterProvider.shutdown();
+  });
+
+  it('ignores a span attributed another GenAI operation', async () => {
+    const {exporter, state, meterProvider} = createOverdueReader();
+    const tracer = createTracer(state.spanProcessor).getTracer('test');
+
+    tracer
+      .startSpan('tool_call', {attributes: {[GEN_AI_OPERATION_NAME]: 'chat'}})
+      .end();
     await flushPendingWork();
 
     expect(exporter.exports).toEqual([]);

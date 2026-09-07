@@ -12,7 +12,12 @@
  * readers apart, and mocks only the credentials lookup.
  */
 
-import {OTelHooks, getGcpExporters} from '@google/adk';
+import {
+  OTelHooks,
+  clearAgentEngineMetricsSetupCache,
+  getAgentEngineMetricsSetup,
+  getGcpExporters,
+} from '@google/adk';
 import {MeterProvider} from '@opentelemetry/sdk-metrics';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
@@ -48,6 +53,9 @@ function dispose(hooks: OTelHooks): Promise<void> {
 
 describe('getGcpExporters metric reader selection', () => {
   afterEach(() => {
+    // The request-driven state is memoized, so without this one test's
+    // decision is served to the next.
+    clearAgentEngineMetricsSetupCache();
     vi.unstubAllEnvs();
   });
 
@@ -88,6 +96,21 @@ describe('getGcpExporters metric reader selection', () => {
     });
 
     expect(hooks.spanProcessors).toHaveLength(2);
+    await dispose(hooks);
+  });
+
+  it('hands the request middleware the reader it installed', async () => {
+    vi.stubEnv(
+      AGENT_ENGINE_ID_ENV,
+      'projects/p/locations/l/reasoningEngines/1',
+    );
+
+    const hooks = await getGcpExporters({enableMetrics: true});
+
+    // The middleware reads the same memoized state, so the reader it drives is
+    // the one bound to the MeterProvider.
+    const state = await getAgentEngineMetricsSetup();
+    expect(state?.reader).toBe(hooks.metricReaders![0]);
     await dispose(hooks);
   });
 

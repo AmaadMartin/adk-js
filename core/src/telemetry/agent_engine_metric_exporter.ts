@@ -45,8 +45,8 @@
  * The reader collects nothing on its own: apart from the collect at shutdown,
  * every collect starts from a request hook, and point 4 needs a request in
  * flight. The host must therefore note each request. `getGcpExporters` installs
- * the reader on Agent Engine, but the request middleware that drives it is not
- * part of this module.
+ * the reader on Agent Engine, and the request middleware that drives it lives
+ * in `./agent_engine.js`.
  *
  * ```ts
  * const {reader, spanProcessor} = buildRequestDrivenMetrics(exporter);
@@ -69,6 +69,12 @@ import {
 import {Span, SpanProcessor} from '@opentelemetry/sdk-trace-base';
 
 import {logger} from '../utils/logger.js';
+import {MIN_EXPORT_INTERVAL_MS} from './gcp_metric_exporter.js';
+
+// The floor lives with the exporter both readers share, so the periodic reader
+// in `./google_cloud.js` does not import it from the Agent Engine feature. It
+// is re-exported here because it is this reader's floor as well.
+export {MIN_EXPORT_INTERVAL_MS};
 
 /** Env var overriding the hard floor on collect spacing (I2), in milliseconds. */
 const AGENT_ENGINE_METRICS_FLOOR_ENV =
@@ -94,21 +100,25 @@ const OVERDUE_PERIOD_FACTOR = 1.5;
  *
  * adk-js opens one `call_llm` span per model call, in `LlmAgent`. adk-python
  * matches `generate_content` instead, because there the GenAI SDK's own
- * instrumentation supplies the span; adk-js emits no such span. Callers that do
- * have one can say so through {@link RequestDrivenMetricsOptions.inferenceSpanName}.
+ * instrumentation supplies the span. A caller that has such a span can say so
+ * through {@link RequestDrivenMetricsOptions.inferenceSpanName}, and the
+ * GenAI convention below is matched in any case.
  */
 const DEFAULT_INFERENCE_SPAN_NAME = 'call_llm';
 
+/** Semantic-convention attribute carrying the GenAI operation name. */
+const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
+
 /**
- * The minimum spacing between two metric exports to Cloud Monitoring, shared by
- * every ADK metric reader.
+ * The GenAI operation whose span starts also drive point 4.
  *
- * The backend currently accepts points sent more frequently than this, but only
- * to absorb drift from a reader that fires slightly early. Exporting faster
- * than this interval risks points being rejected or throttled, so keep new
- * readers at or above it.
+ * A span carries it either as its {@link GEN_AI_OPERATION_NAME} attribute or as
+ * its name, which is how the GenAI SDK's own instrumentation reports a model
+ * call. It is matched whatever
+ * {@link RequestDrivenMetricsOptions.inferenceSpanName} says, so an agent that
+ * gets its inference span from that instrumentation needs no configuration.
  */
-export const MIN_EXPORT_INTERVAL_MS = 5000;
+const GENERATE_CONTENT_OPERATION = 'generate_content';
 
 /** Overrides for a {@link RequestDrivenMetricReader}'s timings. */
 export interface RequestDrivenMetricReaderOptions {
@@ -132,6 +142,23 @@ export interface RequestDrivenMetricsOptions extends RequestDrivenMetricReaderOp
    * span instead.
    */
   inferenceSpanName?: string;
+}
+
+/**
+ * The hooks the request path calls to decide whether a collect is warranted.
+ *
+ * The request middleware in `./agent_engine.js` takes this interface rather
+ * than the concrete reader, so a test can drive it with a spy.
+ */
+export interface RequestDrivenMetricReaderHooks {
+  /** Called when a request enters. Returns true when a collect is warranted. */
+  noteRequestStart(): boolean;
+  /** Called when a request ends. Returns true when a collect is warranted. */
+  noteRequestEnd(): boolean;
+  /** Called on an inference span start (point 4). */
+  noteGenerateContentStart(): boolean;
+  /** Runs a committed collect, or returns undefined during shutdown. */
+  submitCollect(): Promise<void> | undefined;
 }
 
 /** The metric-export handles an application wires up. */
@@ -187,7 +214,10 @@ function exportMetrics(
  * on a worker thread. Here they run on the event loop, so every decision hook
  * is a synchronous critical section and no lock exists.
  */
-export class RequestDrivenMetricReader extends MetricReader {
+export class RequestDrivenMetricReader
+  extends MetricReader
+  implements RequestDrivenMetricReaderHooks
+{
   private readonly exporter: PushMetricExporter;
   private readonly now: () => number;
   private readonly periodMs: number;
@@ -415,16 +445,32 @@ export class RequestDrivenMetricReader extends MetricReader {
 /** Fires a fire-and-forget collect on each inference span start. */
 class MetricsFlushingSpanProcessor implements SpanProcessor {
   constructor(
-    private readonly reader: RequestDrivenMetricReader,
+    private readonly reader: RequestDrivenMetricReaderHooks,
     private readonly spanName: string,
   ) {}
+
+  /**
+   * True when the span reports a model call.
+   *
+   * Two conventions report one. adk-js names the span after
+   * {@link RequestDrivenMetricsOptions.inferenceSpanName}, `call_llm` by
+   * default. The GenAI SDK's own instrumentation names it, or attributes it,
+   * `generate_content`.
+   */
+  private isInferenceSpan(span: Span): boolean {
+    return (
+      span.name.startsWith(this.spanName) ||
+      span.name.startsWith(GENERATE_CONTENT_OPERATION) ||
+      span.attributes[GEN_AI_OPERATION_NAME] === GENERATE_CONTENT_OPERATION
+    );
+  }
 
   onStart(span: Span): void {
     // onStart runs inside span creation on the inference path, so a metrics
     // failure must never break the span it observes.
     try {
       if (
-        span.name.startsWith(this.spanName) &&
+        this.isInferenceSpan(span) &&
         this.reader.noteGenerateContentStart()
       ) {
         void this.reader.submitCollect();
