@@ -15,7 +15,6 @@ import {
   extractNewInstruction,
   renderProposalPrompt,
   skillComponentKey,
-  validateProposalTemplate,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -131,26 +130,6 @@ describe('renderProposalPrompt', () => {
   it('rejects a component that is neither the prompt nor a skill', () => {
     expect(() => renderProposalPrompt('mystery', 'text', [])).toThrow(
       'Unknown component type for update: mystery',
-    );
-  });
-});
-
-describe('validateProposalTemplate', () => {
-  it('accepts a template carrying both placeholders', () => {
-    expect(() =>
-      validateProposalTemplate('a <curr_param> b <side_info> c'),
-    ).not.toThrow();
-  });
-
-  it('names every missing placeholder in order', () => {
-    expect(() => validateProposalTemplate('nothing here')).toThrow(
-      'Missing placeholder(s) in prompt template: <curr_param>, <side_info>',
-    );
-  });
-
-  it('names only the placeholder the template lacks', () => {
-    expect(() => validateProposalTemplate('only <curr_param>')).toThrow(
-      'Missing placeholder(s) in prompt template: <side_info>',
     );
   });
 });

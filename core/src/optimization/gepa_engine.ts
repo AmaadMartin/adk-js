@@ -62,15 +62,12 @@ export interface GepaAdapter<DataInstT, TrajectoryT, OutputT> {
   /**
    * Rewrites the requested components.
    *
-   * Optional: an engine falls back to its own proposer when an adapter does
-   * not supply one.
-   *
    * @param candidate The candidate holding each component's current text.
    * @param reflectiveDataset The records `makeReflectiveDataset` produced.
    * @param componentsToUpdate The component names the engine wants rewritten.
    * @returns The new text of each requested component.
    */
-  proposeNewTexts?(
+  proposeNewTexts(
     candidate: Record<string, string>,
     reflectiveDataset: Record<string, Array<Record<string, unknown>>>,
     componentsToUpdate: string[],
@@ -97,9 +94,6 @@ export interface GepaOptimizeParams {
 
   /** The maximum number of evaluations the search may make. */
   maxMetricCalls: number;
-
-  /** The model call the engine uses to propose a rewrite. */
-  reflectionLm: ReflectionLm;
 
   /** The number of examples the engine reflects over at a time. */
   reflectionMinibatchSize: number;
