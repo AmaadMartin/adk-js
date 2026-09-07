@@ -162,6 +162,10 @@ export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
       geminiSchema.format = mcp.format;
     }
 
+    if (typeof mcp.title === 'string') {
+      geminiSchema.title = mcp.title;
+    }
+
     if (typeof mcp.pattern === 'string') {
       geminiSchema.pattern = mcp.pattern;
     }
@@ -174,9 +178,12 @@ export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
       geminiSchema.maximum = mcp.maximum;
     }
 
+    // A bound arrives as a number from JSON Schema and as a string from a
+    // genai-dialect schema. Both are kept; genai sends int64 on the wire.
     for (const key of NUMERIC_STRING_KEYS) {
-      if (typeof mcp[key] === 'number') {
-        geminiSchema[key] = String(mcp[key]);
+      const bound: unknown = mcp[key];
+      if (typeof bound === 'number' || typeof bound === 'string') {
+        geminiSchema[key] = String(bound);
       }
     }
 
@@ -184,7 +191,9 @@ export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
       geminiSchema.propertyOrdering = mcp.propertyOrdering;
     }
 
-    if (mcp.default !== undefined) {
+    // A Pydantic `Optional[str] = None` field emits `default: null`. Gemini
+    // reads that as "the default is null", so drop it, as adk-python does.
+    if (mcp.default !== undefined && mcp.default !== null) {
       geminiSchema.default = mcp.default;
     }
 

@@ -178,6 +178,81 @@ describe('toGeminiSchema format sanitization parity', () => {
       description: 'A single date string.',
     });
   });
+
+  it('test_sanitize_schema_formats_for_gemini', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      description: 'Test schema',
+      properties: {
+        valid_int: {type: 'integer', format: 'int32'},
+        invalid_format_prop: {type: 'integer', format: 'unsigned'},
+        valid_string: {type: 'string', format: 'date-time'},
+        camelCaseKey: {type: 'string'},
+        prop_with_extra_key: {
+          type: 'boolean',
+          unknownInternalKey: 'discard_this_value',
+        },
+      },
+      required: ['valid_int'],
+      additionalProperties: false,
+      unknownTopLevelKey: 'discard_me_too',
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      description: 'Test schema',
+      properties: {
+        valid_int: {type: Type.INTEGER, format: 'int32'},
+        invalid_format_prop: {type: Type.INTEGER},
+        valid_string: {type: Type.STRING, format: 'date-time'},
+        camelCaseKey: {type: Type.STRING},
+        prop_with_extra_key: {type: Type.BOOLEAN},
+      },
+      required: ['valid_int'],
+    });
+  });
+
+  it('test_sanitize_schema_formats_for_gemini_nullable', () => {
+    // adk-python keeps the union as `any_of`; adk-js collapses it to a
+    // nullable type. Both keep the siblings of the union.
+    const schema = toGeminiSchema({
+      properties: {
+        case_id: {
+          description: 'The ID of the case.',
+          title: 'Case Id',
+          type: 'string',
+        },
+        next_page_token: {
+          anyOf: [{type: 'string'}, {type: 'null'}],
+          default: null,
+          description: 'The nextPageToken to fetch the next page of results.',
+          title: 'Next Page Token',
+        },
+      },
+      required: ['case_id'],
+      title: 'list_alerts_by_caseArguments',
+      type: 'object',
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      title: 'list_alerts_by_caseArguments',
+      required: ['case_id'],
+      properties: {
+        case_id: {
+          type: Type.STRING,
+          title: 'Case Id',
+          description: 'The ID of the case.',
+        },
+        next_page_token: {
+          type: Type.STRING,
+          nullable: true,
+          title: 'Next Page Token',
+          description: 'The nextPageToken to fetch the next page of results.',
+        },
+      },
+    });
+  });
 });
 
 describe('toGeminiSchema divergences from adk-python', () => {
