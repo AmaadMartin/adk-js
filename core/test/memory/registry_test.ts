@@ -51,16 +51,38 @@ describe('getMemoryServiceFromUri', () => {
     });
   });
 
-  it('accepts a short id with no project or location in the environment', () => {
+  it('rejects a short id when GOOGLE_CLOUD_PROJECT is not set', () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'us-central1');
+
+    expect(() => getMemoryServiceFromUri('agentengine://1234567890')).to.throw(
+      'GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION not set.',
+    );
+    expect(clientConstructor).not.toHaveBeenCalled();
+  });
+
+  it('rejects a short id when GOOGLE_CLOUD_LOCATION is not set', () => {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
+
+    expect(() => getMemoryServiceFromUri('agentengine://1234567890')).to.throw(
+      'GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION not set.',
+    );
+    expect(clientConstructor).not.toHaveBeenCalled();
+  });
+
+  it('accepts a full resource name with no project or location in the environment', () => {
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
 
-    const service = getMemoryServiceFromUri('agentengine://1234567890');
+    const service = getMemoryServiceFromUri(
+      'agentengine://projects/p1/locations/us-central1/reasoningEngines/999',
+    );
 
     expect(service).to.be.instanceOf(VertexAiMemoryBankService);
     expect(clientConstructor).toHaveBeenCalledWith({
-      project: undefined,
-      location: undefined,
+      project: 'p1',
+      location: 'us-central1',
     });
   });
 
