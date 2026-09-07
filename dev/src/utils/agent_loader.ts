@@ -387,8 +387,9 @@ export class AgentFile {
  * exports none hands the name to the directory. A file that fails to load
  * keeps the name, and the loader records the failure against it.
  *
- * The loader logs a warning for a name it resolves this way, and never builds
- * the candidate it drops.
+ * The loader warns when two definitions compete for a name, and never builds
+ * the candidate it drops. `app` beating `agent` in one directory is the
+ * documented layout rather than a duplicate, so it is silent.
  *
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
