@@ -161,7 +161,7 @@ export class TwoCandidateEngine implements GepaEngine {
     return {
       candidates,
       valAggregateScores,
-      toDict: () => ({tried: candidates.length}),
+      details: {tried: candidates.length},
     };
   }
 }

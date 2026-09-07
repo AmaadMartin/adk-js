@@ -135,7 +135,7 @@ class ReflectingEngine implements GepaEngine {
     return {
       candidates,
       valAggregateScores,
-      toDict: () => ({rounds: 1, tried: candidates.length}),
+      details: {rounds: 1, tried: candidates.length},
     };
   }
 }

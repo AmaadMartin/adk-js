@@ -915,6 +915,12 @@ export type {
   SamplingResult,
   UnstructuredSamplingResult,
 } from './optimization/data_types.js';
+export {
+  DefaultGepaEngine,
+  proposeWithReflection,
+  renderReflectionPrompt,
+} from './optimization/default_gepa_engine.js';
+export type {DefaultGepaEngineOptions} from './optimization/default_gepa_engine.js';
 export type {
   EvaluationBatch,
   GepaAdapter,

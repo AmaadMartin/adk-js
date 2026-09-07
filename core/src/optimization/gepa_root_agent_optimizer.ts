@@ -172,11 +172,7 @@ function buildSeedCandidate(
  * delegates the scoring to the caller's {@link Sampler}, and asks the
  * reflection model for the next text of each component.
  */
-export class RootAgentGepaAdapter implements GepaAdapter<
-  string,
-  Record<string, unknown>,
-  Record<string, unknown>
-> {
+export class RootAgentGepaAdapter implements GepaAdapter {
   private readonly initialAgent: LlmAgent;
   private readonly sampler: Sampler<UnstructuredSamplingResult>;
   private readonly reflectionLm: ReflectionLm;
@@ -199,9 +195,7 @@ export class RootAgentGepaAdapter implements GepaAdapter<
     batch: string[],
     candidate: Record<string, string>,
     captureTraces = false,
-  ): Promise<
-    EvaluationBatch<Record<string, unknown>, Record<string, unknown>>
-  > {
+  ): Promise<EvaluationBatch> {
     logger.debug(`Evaluating agent on batch [${batch}]`);
 
     const result = await this.sampler.sampleAndScore({
@@ -231,10 +225,7 @@ export class RootAgentGepaAdapter implements GepaAdapter<
 
   makeReflectiveDataset(
     candidate: Record<string, string>,
-    evalBatch: EvaluationBatch<
-      Record<string, unknown>,
-      Record<string, unknown>
-    >,
+    evalBatch: EvaluationBatch,
     componentsToUpdate: string[],
   ): Record<string, Array<Record<string, unknown>>> {
     const {scores, trajectories} = evalBatch;
@@ -411,7 +402,7 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
         optimizedAgent: createAgentFromCandidate(initialAgent, candidate),
         overallScore: valAggregateScores[index],
       })),
-      gepaResult: engineResult.toDict(),
+      gepaResult: engineResult.details,
     };
   }
 }

@@ -77,20 +77,68 @@ export class FakeGepaEngine implements GepaEngine {
  *
  * @param candidates The candidates on the Pareto front.
  * @param valAggregateScores One validation score per candidate.
- * @param dict What `toDict` reports.
+ * @param details What the engine reports beyond the front.
  */
 export function runResult(
   candidates: Array<Record<string, string>>,
   valAggregateScores: number[],
-  dict: Record<string, unknown> = {},
+  details: Record<string, unknown> = {},
 ): GepaRunResult {
-  return {candidates, valAggregateScores, toDict: () => dict};
+  return {candidates, valAggregateScores, details};
 }
 
 /** Returns the single `optimize` call the engine received. */
 export function onlyOptimizeCall(engine: FakeGepaEngine): GepaOptimizeParams {
   expect(engine.calls).toHaveLength(1);
   return engine.calls[0];
+}
+
+/** What {@link collectLogs} captured. */
+export interface CollectedLogs {
+  /** Every message logged at `debug`, in order. */
+  debugs: string[];
+
+  /** Every message logged at `info`, in order. */
+  infos: string[];
+
+  /** Every message logged at `warn`, in order. */
+  warnings: string[];
+}
+
+/** Joins one log call's arguments the way the real logger renders them. */
+function renderLogCall(args: unknown[]): string {
+  return args.map((arg) => String(arg)).join(' ');
+}
+
+/**
+ * Runs `body` with a logger that collects what it logs.
+ *
+ * @returns The messages logged while `body` ran, per level, in order.
+ */
+export async function collectLogs(
+  body: () => Promise<void>,
+): Promise<CollectedLogs> {
+  const collected: CollectedLogs = {debugs: [], infos: [], warnings: []};
+  setLogger({
+    setLogLevel: () => {},
+    log: () => {},
+    debug: (...args: unknown[]) => {
+      collected.debugs.push(renderLogCall(args));
+    },
+    info: (...args: unknown[]) => {
+      collected.infos.push(renderLogCall(args));
+    },
+    warn: (...args: unknown[]) => {
+      collected.warnings.push(renderLogCall(args));
+    },
+    error: () => {},
+  });
+  try {
+    await body();
+  } finally {
+    resetLogger();
+  }
+  return collected;
 }
 
 /**
@@ -101,21 +149,5 @@ export function onlyOptimizeCall(engine: FakeGepaEngine): GepaOptimizeParams {
 export async function collectWarnings(
   body: () => Promise<void>,
 ): Promise<string[]> {
-  const warnings: string[] = [];
-  setLogger({
-    setLogLevel: () => {},
-    log: () => {},
-    debug: () => {},
-    info: () => {},
-    warn: (...args: unknown[]) => {
-      warnings.push(args.map((arg) => String(arg)).join(' '));
-    },
-    error: () => {},
-  });
-  try {
-    await body();
-  } finally {
-    resetLogger();
-  }
-  return warnings;
+  return (await collectLogs(body)).warnings;
 }
