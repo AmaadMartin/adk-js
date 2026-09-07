@@ -48,6 +48,7 @@ import {
 
 import {Skill} from '../skills/skill.js';
 import {getBooleanEnvVar} from '../utils/env_aware_utils.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {
   ADK_EXPERIMENTAL_SKILL_ADDITIONAL_TOOLS,
@@ -272,12 +273,8 @@ export function dispatchSkillTelemetry(
         return;
     }
   } catch (e: unknown) {
-    logger.warn(`Failed to record skill telemetry: ${errorMessage(e)}`);
+    logger.warn(`Failed to record skill telemetry: ${formatError(e)}`);
   }
-}
-
-function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 function traceSkillLoad(span: Span, skillTelemetry: SkillLoadTelemetry): void {
