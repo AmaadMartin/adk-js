@@ -695,9 +695,14 @@ export async function handleFunctionCallList({
     // A tool that defers its response supplies the matching FunctionResponse
     // later by design, so it skips the same way without being marked long
     // running.
+    //
+    // A tool that threw has no response to defer, so it reports the error
+    // below even when it is long-running. adk-python re-raises out of the tool
+    // call and so never reaches its own deferral check.
     if (
       (tool.isLongRunning || tool.defersResponse) &&
-      functionResponse == null
+      functionResponse == null &&
+      !functionResponseError
     ) {
       // The tool's response will arrive later, but any actions it recorded on
       // the tool context (state/artifact deltas, auth or confirmation
