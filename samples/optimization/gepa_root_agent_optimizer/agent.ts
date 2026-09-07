@@ -8,40 +8,40 @@
  * GEPARootAgentOptimizer: rewriting a root agent's instruction and the
  * instructions of every skill it exposes, in one search.
  *
- * ADK bundles no GEPA search engine, so the optimizer takes one as
- * `config.engine`. This sample supplies a two-candidate engine and scores with
- * phrase coverage, so it runs offline with no credentials.
+ * The search runs on the bundled DefaultGepaEngine, so no engine is
+ * configured here. Scoring is phrase coverage over four hardcoded examples.
  *
- * The engine here never reflects, which is why no model is ever called. A real
- * engine calls `adapter.proposeNewTexts` or `params.reflectionLm` to have
- * `config.optimizerModel` write the next candidate.
+ * A real run names a hosted model in `optimizerModel`, which needs
+ * credentials. This sample registers an offline stand-in instead, so it runs
+ * with none.
  *
  * Run (offline, no API key):
  *   npm run sample -- samples/optimization/gepa_root_agent_optimizer/agent.ts
  *
- * This file is the one copy of the demo sampler and engine. The guide and
- * `tests/integration/optimization/gepa_root_agent_optimizer_test.ts` both point
- * at it, and that test imports these classes and drives the workflow below, so
- * the suite executes the sample rather than only type-checking it.
+ * This file is the one copy of the demo sampler and reflection model. The
+ * guide and `tests/integration/optimization/gepa_root_agent_optimizer_test.ts`
+ * both point at it, and that test imports these classes and drives the
+ * workflow below, so the suite executes the sample rather than only
+ * type-checking it.
  */
 
 import {
-  AGENT_PROMPT_NAME,
+  BaseLlm,
   GEPARootAgentOptimizer,
   isSkillToolset,
   LlmAgent,
+  LLMRegistry,
   node,
   NodeContext,
   requireStaticInstruction,
   SampleAndScoreParams,
   Sampler,
-  skillComponentKey,
   SkillToolset,
   UnstructuredSamplingResult,
   Workflow,
-  type GepaEngine,
-  type GepaOptimizeParams,
-  type GepaRunResult,
+  type BaseLlmConnection,
+  type LlmRequest,
+  type LlmResponse,
   type Skill,
 } from '@google/adk';
 
@@ -82,10 +82,6 @@ function scoreText(text: string, exampleId: string): number {
   const phrases = EXPECTED_PHRASES[exampleId];
   const hits = phrases.filter((phrase) => text.includes(phrase)).length;
   return hits / phrases.length;
-}
-
-function mean(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
 /** A sampler over four hardcoded examples. A real one runs the agent. */
@@ -135,34 +131,39 @@ export class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
   }
 }
 
-/** A stand-in engine that scores the seed and one fixed rewrite. */
-export class TwoCandidateEngine implements GepaEngine {
-  async optimize(params: GepaOptimizeParams): Promise<GepaRunResult> {
-    const candidates = [
-      params.seedCandidate,
-      {
-        [skillComponentKey(SKILL_NAME)]: CANDIDATE_SKILL_INSTRUCTIONS,
-        [AGENT_PROMPT_NAME]: CANDIDATE_INSTRUCTION,
-      },
-    ];
+/** The model name the sample's offline reflection stand-in answers to. */
+export const SAMPLE_REFLECTION_MODEL = 'gepa-sample-offline-reflector';
 
-    const valAggregateScores: number[] = [];
-    for (const candidate of candidates) {
-      const {scores} = await params.adapter.evaluate(
-        params.valset,
-        candidate,
-        false,
-      );
-      valAggregateScores.push(mean(scores));
-    }
+/**
+ * Answers each reflection with the rewrite that component wants.
+ *
+ * It reads the prompt to tell a skill rewrite from an agent rewrite, because
+ * the optimizer renders a different template for each.
+ */
+export class OfflineReflectionLlm extends BaseLlm {
+  static override readonly supportedModels: Array<string | RegExp> = [
+    SAMPLE_REFLECTION_MODEL,
+  ];
 
-    return {
-      candidates,
-      valAggregateScores,
-      toDict: () => ({tried: candidates.length}),
+  override async *generateContentAsync(
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    const prompt = llmRequest.contents[0].parts?.[0].text ?? '';
+    const rewrite = prompt.includes(`a skill named \`${SKILL_NAME}\``)
+      ? CANDIDATE_SKILL_INSTRUCTIONS
+      : CANDIDATE_INSTRUCTION;
+
+    yield {
+      content: {role: 'model', parts: [{text: `\`\`\`\n${rewrite}\n\`\`\``}]},
     };
   }
+
+  override async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('The offline reflection model has no live connection.');
+  }
 }
+
+LLMRegistry.register(OfflineReflectionLlm);
 
 /** The skill whose instructions the optimizer rewrites alongside the agent's. */
 export const refundSkill: Skill = {
@@ -194,10 +195,17 @@ function describeAgent(agent: LlmAgent): string {
   return lines.join(' | ');
 }
 
+/**
+ * Budget for one reflection round: the seed's validation pass, the parent and
+ * the child over the three training examples, and the child's validation pass.
+ */
+export const SAMPLE_METRIC_BUDGET = 8;
+
 const optimizeAgent = node(
   async (_ctx: NodeContext) => {
     const {optimizedAgents} = await new GEPARootAgentOptimizer({
-      engine: new TwoCandidateEngine(),
+      optimizerModel: SAMPLE_REFLECTION_MODEL,
+      maxMetricCalls: SAMPLE_METRIC_BUDGET,
     }).optimize({
       initialAgent: startingAgent,
       sampler: new PhraseCoverageSampler(),
