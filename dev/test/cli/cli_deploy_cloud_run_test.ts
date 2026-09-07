@@ -330,7 +330,7 @@ describe('deployToCloudRun', () => {
     });
   });
 
-  it('should write all three service URIs into the generated Dockerfile', async () => {
+  it('should not drop sessionServiceUri and artifactServiceUri when building the Dockerfile', async () => {
     await deployToCloudRun({
       ...defaultOptions,
       sessionServiceUri: 'postgresql://db.example/adk',
