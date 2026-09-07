@@ -266,9 +266,9 @@ describe('GEPARootAgentOptimizer end to end', () => {
       [STARTING_INSTRUCTION, refundSkill.instructions],
       [CANDIDATE_INSTRUCTION, CANDIDATE_SKILL_INSTRUCTIONS],
     ]);
-    expect(result.optimizedAgents.map(({overallScore}) => overallScore)).toEqual(
-      [0.5, 1],
-    );
+    expect(
+      result.optimizedAgents.map(({overallScore}) => overallScore),
+    ).toEqual([0.5, 1]);
     expect(result.gepaResult).toMatchObject({
       bestScore: 1,
       totalMetricCalls: SAMPLE_METRIC_BUDGET,

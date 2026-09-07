@@ -16,12 +16,12 @@ import {
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {AgentOptimizer, type OptimizeParams} from './agent_optimizer.js';
-import {DefaultGepaEngine} from './default_gepa_engine.js';
 import type {
   AgentWithScores,
   OptimizerResult,
   UnstructuredSamplingResult,
 } from './data_types.js';
+import {DefaultGepaEngine} from './default_gepa_engine.js';
 import type {
   EvaluationBatch,
   GepaAdapter,
