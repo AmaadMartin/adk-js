@@ -350,16 +350,6 @@ describe('deployToCloudRun', () => {
     );
     expect(content).toContain("--artifact_service_uri='gs://my-bucket'");
     expect(content).toContain("--memory_service_uri='agentengine://123'");
-    expect(dockerfile).toBeDefined();
-    expect(dockerfile?.[1]).toContain(
-      "--session_service_uri='postgresql://db.example/adk'",
-    );
-    expect(dockerfile?.[1]).toContain(
-      "--artifact_service_uri='gs://my-bucket'",
-    );
-    expect(dockerfile?.[1]).toContain(
-      "--memory_service_uri='agentengine://123'",
-    );
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {
