@@ -998,6 +998,62 @@ describe('AgentLoader', () => {
         await loader.disposeAll();
       });
 
+      /**
+       * adk-python's `_load_from_module_or_package` returns `None` when the
+       * module holds no `root_agent`, and `_perform_load` then tries
+       * `_load_from_submodule`. Reference:
+       * `tests/unittests/cli/utils/test_agent_loader.py` at commit `7b51ae97`.
+       */
+      it('falls back to the directory when the flat file exports no agent', async () => {
+        const warnings = spyOnWarnings();
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'helper.js'),
+          'exports.foo = "bar";',
+        );
+        await fs.mkdir(path.join(tempAgentsDir, 'helper'));
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'helper', 'agent.js'),
+          namedAgentJsContent('helper_submodule_version'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const agents = await loader.listAgents();
+
+        expect(agents).toContain('helper');
+        expect((await (await loader.getAgentFile('helper')).load()).name).toBe(
+          'helper_submodule_version',
+        );
+        expect(shadowedDefinitions(warnings)).toEqual([]);
+        warnings.mockRestore();
+        await loader.disposeAll();
+      });
+
+      it('keeps the failure against the flat file instead of falling back', async () => {
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'broken_dupe.js'),
+          `throw new Error('boom from the flat file');`,
+        );
+        await fs.mkdir(path.join(tempAgentsDir, 'broken_dupe'));
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'broken_dupe', 'agent.js'),
+          namedAgentJsContent('broken_dupe_submodule_version'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const failures = await loader.listLoadFailures();
+
+        expect(failures).toHaveLength(1);
+        expect(failures[0].name).toBe('broken_dupe');
+        expect(failures[0].filePath).toBe(
+          path.join(tempAgentsDir, 'broken_dupe.js'),
+        );
+        expect(await loader.listAgents()).not.toContain('broken_dupe');
+        await expect(loader.getAgentFile('broken_dupe')).rejects.toThrow(
+          /boom from the flat file/,
+        );
+        await loader.disposeAll();
+      });
+
       it('does not build the shadowed directory', async () => {
         await fs.writeFile(
           path.join(tempAgentsDir, 'shadowed.js'),

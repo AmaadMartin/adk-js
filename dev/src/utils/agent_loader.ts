@@ -383,8 +383,13 @@ export class AgentFile {
  * - between two files that differ only by extension, TypeScript beats
  *   JavaScript.
  *
- * The loader logs a warning for a name it resolves this way, and never builds
- * the candidate it drops.
+ * A top-level file only claims the name if it holds an agent. A file that
+ * exports none hands the name to the directory. A file that fails to load
+ * keeps the name, and the loader records the failure against it.
+ *
+ * The loader warns when two definitions compete for a name, and never builds
+ * the candidate it drops. `app` beating `agent` in one directory is the
+ * documented layout rather than a duplicate, so it is silent.
  *
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
@@ -558,14 +563,18 @@ export class AgentLoader {
     const directories = entries.filter(isAgentDirectory);
 
     await Promise.all([
-      ...[...entryFilesByName].map(([name, [entryFile, ...ignored]]) => {
+      ...[...entryFilesByName].map(async ([name, [entryFile, ...ignored]]) => {
         const shadowedDir = directories.find((dir) => dir.name === name);
+        const fileClaimsName = await this.loadAgentFromFile(entryFile);
+
         warnShadowedEntries(name, entryFile.path, [
           ...ignored.map((file) => file.path),
-          ...(shadowedDir ? [shadowedDir.path] : []),
+          ...(shadowedDir && fileClaimsName ? [shadowedDir.path] : []),
         ]);
 
-        return this.loadAgentFromFile(entryFile);
+        if (!fileClaimsName && shadowedDir) {
+          await this.loadAgentFromDirectory(shadowedDir);
+        }
       }),
       ...directories
         .filter((dir) => !entryFilesByName.has(dir.name))
@@ -581,13 +590,18 @@ export class AgentLoader {
     return;
   }
 
-  private async loadAgentFromFile(file: FileMetadata): Promise<void> {
+  /**
+   * Loads `file` as the agent named after it. Returns whether the file claims
+   * the name, which is false only when the file holds no agent at all.
+   */
+  private async loadAgentFromFile(file: FileMetadata): Promise<boolean> {
     try {
       const agentFile = new AgentFile(file.path, this.options);
       await agentFile.load();
       this.preloadedAgents[file.name] = agentFile;
+      return true;
     } catch (e) {
-      this.recordLoadFailure(file.name, file.path, e);
+      return this.recordLoadFailure(file.name, file.path, e);
     }
   }
 
@@ -617,10 +631,18 @@ export class AgentLoader {
   /**
    * Propagating here would reject the `Promise.all` in `preloadAgents`, failing
    * every endpoint that lists or resolves agents — so record instead of throw.
+   *
+   * Returns whether the failure belongs to `name`. An
+   * {@link AgentFileLoadingError} means the file is not an agent file, so the
+   * name is still free for another candidate.
    */
-  private recordLoadFailure(name: string, filePath: string, e: unknown): void {
+  private recordLoadFailure(
+    name: string,
+    filePath: string,
+    e: unknown,
+  ): boolean {
     if (e instanceof AgentFileLoadingError) {
-      return;
+      return false;
     }
 
     const error = e instanceof Error ? e : new Error(String(e));
@@ -629,6 +651,7 @@ export class AgentLoader {
       `Failed to load agent '${name}' from ${filePath}: ${error.message}. ` +
         `Skipping it; the other agents are unaffected.`,
     );
+    return true;
   }
 }
 
