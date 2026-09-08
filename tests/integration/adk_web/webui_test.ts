@@ -59,6 +59,20 @@ describe('WebUI Integration Test', () => {
         }
       }, SERVER_STOP_TIMEOUT);
 
+      it('redirects the root straight to /dev-ui/', async () => {
+        const response = await fetch(`${url}/`, {redirect: 'manual'});
+
+        expect(response.status).toBe(302);
+        expect(response.headers.get('location')).toBe('/dev-ui/');
+      });
+
+      it('redirects /dev-ui to /dev-ui/', async () => {
+        const response = await fetch(`${url}/dev-ui`, {redirect: 'manual'});
+
+        expect(response.status).toBe(301);
+        expect(response.headers.get('location')).toBe('/dev-ui/');
+      });
+
       it('should load the WebUI correctly while running the agent from adk CLI', async () => {
         return new Promise<void>((resolve, reject) => {
           http
