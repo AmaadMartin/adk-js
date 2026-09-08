@@ -271,6 +271,7 @@ export type {
   ListSessionsRequest,
   ListSessionsResponse,
 } from './sessions/base_session_service.js';
+export {StaleSessionError, isStaleSessionError} from './sessions/errors.js';
 export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
