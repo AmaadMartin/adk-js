@@ -4,15 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {CacheMetadata} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import type {CacheMetadata} from '../../src/index.js';
 import {
   cacheExpireSoon,
   cacheMetadataToString,
   createCacheMetadata,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+  isActiveCacheMetadata,
+} from '../../src/index.js';
 
 const CACHE_NAME = 'projects/123/locations/us-central1/cachedContents/456';
+const NOW_SECONDS = 1_700_000_000;
 const nowSeconds = () => Date.now() / 1000;
 
 describe('CacheMetadata', () => {
@@ -197,6 +199,38 @@ describe('CacheMetadata', () => {
       const rendered = cacheMetadataToString(meta);
       expect(rendered).toContain('Fingerprint-only: 2 contents');
       expect(rendered).toContain('fingerprint=abcdef01...');
+    });
+  });
+
+  describe('isActiveCacheMetadata', () => {
+    const activeMetadata = (expireTime: number): CacheMetadata =>
+      createCacheMetadata({
+        cacheName: CACHE_NAME,
+        expireTime,
+        invocationsUsed: 7,
+        fingerprint: 'abcdef0123456789',
+        contentsCount: 5,
+        createdAt: NOW_SECONDS - 60,
+      });
+
+    it('exposes the active fields once cacheName is known to be set', () => {
+      const metadata = activeMetadata(NOW_SECONDS + 60);
+      if (!isActiveCacheMetadata(metadata)) {
+        expect.fail('expected active cache metadata');
+      }
+      expect(metadata.expireTime).toBe(NOW_SECONDS + 60);
+      expect(metadata.invocationsUsed).toBe(7);
+    });
+
+    it('hides the active fields on fingerprint-only metadata', () => {
+      const metadata = createCacheMetadata({
+        fingerprint: 'abcdef0123456789',
+        contentsCount: 3,
+      });
+      expect(isActiveCacheMetadata(metadata)).toBe(false);
+      expect(metadata.cacheName).toBeUndefined();
+      expect(metadata.expireTime).toBeUndefined();
+      expect(metadata.invocationsUsed).toBeUndefined();
     });
   });
 });

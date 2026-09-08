@@ -30,6 +30,9 @@ const MAX_CACHE_INTERVALS = 100;
  * leading contents) across multiple requests. Caching begins on the second turn
  * of a session at the earliest and requires the cacheable prefix to reach the
  * model-specific minimum, so short or single-turn sessions are never cached.
+ *
+ * WARNING: This feature is **experimental** and its API or behavior may change
+ * in future releases.
  */
 export interface ContextCacheConfig {
   /**

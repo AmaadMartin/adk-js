@@ -61,6 +61,8 @@ Maintainers may prefer these on adk.dev instead. Moving them is a file move.
 - [ConformanceTestGemini](models/conformance_replay/index.md) - Replaying
   recorded LLM responses, and verifying that the runtime asked for what was
   recorded.
+- [Gemini context caching](models/context_caching/index.md) - Reusing a
+  processed request prefix across turns with an explicit Gemini cache.
 - [Live responses](models/live_responses/index.md) - Reading a Gemini Live run:
   which response field carries what, how grounding accumulates, and how Gemini
   3.x differs.

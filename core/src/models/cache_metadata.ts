@@ -56,6 +56,44 @@ export interface CacheMetadata {
 }
 
 /**
+ * A {@link CacheMetadata} record in the active-cache state.
+ *
+ * The three active fields are required here, so code that has narrowed a
+ * record with {@link isActiveCacheMetadata} reads them without a check.
+ *
+ * Token counts are not repeated here. Read them from
+ * `LlmResponse.usageMetadata`.
+ */
+export interface ActiveCacheMetadata extends CacheMetadata {
+  /**
+   * Full resource name of the cached content, for example
+   * `projects/123/locations/us-central1/cachedContents/456`.
+   */
+  cacheName: string;
+  /** Unix timestamp (seconds) when the cache expires. */
+  expireTime: number;
+  /** Number of invocations this cache has served. */
+  invocationsUsed: number;
+}
+
+/**
+ * A {@link CacheMetadata} record in the fingerprint-only state, which
+ * describes a content prefix that has no cache behind it yet.
+ */
+export interface FingerprintCacheMetadata extends CacheMetadata {
+  cacheName?: undefined;
+  expireTime?: undefined;
+  invocationsUsed?: undefined;
+}
+
+/** Returns whether the record describes a live cache. */
+export function isActiveCacheMetadata(
+  meta: CacheMetadata,
+): meta is ActiveCacheMetadata {
+  return meta.cacheName !== undefined;
+}
+
+/**
  * Creates a validated, immutable {@link CacheMetadata} record.
  *
  * @param fields The metadata fields.

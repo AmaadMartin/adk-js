@@ -412,9 +412,19 @@ export {
   cacheExpireSoon,
   cacheMetadataToString,
   createCacheMetadata,
+  isActiveCacheMetadata,
 } from './models/cache_metadata.js';
-export type {CacheMetadata} from './models/cache_metadata.js';
+export type {
+  ActiveCacheMetadata,
+  CacheMetadata,
+  FingerprintCacheMetadata,
+} from './models/cache_metadata.js';
 export type {LlmCapabilities} from './models/capabilities.js';
+export {GeminiContextCacheManager} from './models/gemini_context_cache_manager.js';
+export type {
+  CacheClient,
+  CacheScope,
+} from './models/gemini_context_cache_manager.js';
 export {
   Gemini,
   ResourceExhaustedError,
