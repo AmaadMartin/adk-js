@@ -5,59 +5,176 @@
  */
 
 import {
+  EntityManager,
   FilterQuery,
   LockMode,
   Options as MikroDBOptions,
   MikroORM,
 } from '@mikro-orm/core';
 
+import {AlreadyExistsError} from '../errors/already_exists_error.js';
+import {SessionNotFoundError} from '../errors/session_not_found_error.js';
+import {StaleSessionError} from '../errors/stale_session_error.js';
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {KeyedMutex} from '../utils/keyed_mutex.js';
 import {
   AppendEventRequest,
+  applyTempState,
   BaseSessionService,
   CreateSessionRequest,
   DeleteSessionRequest,
+  extractStateDelta,
+  GetSessionConfig,
   GetSessionRequest,
+  GetUserStateRequest,
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
+  ScopedStateDelta,
   trimTempDeltaState,
+  validateGetSessionConfig,
 } from './base_session_service.js';
 import {
+  assertSupportedDatabaseUri,
+  detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
+  getOrCreateRow,
+  namesSupportedDatabaseBackend,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
   ENTITIES,
+  SCHEMA_VERSION_0_PICKLE,
   StorageAppState,
   StorageEvent,
   StorageSession,
   StorageUserState,
 } from './db/schema.js';
-import {createSession, Session} from './session.js';
-import {State} from './state.js';
+import {CompositeSessionKey, createSession, Session} from './session.js';
+
+/**
+ * The message a stale write is rejected with. The wording matches adk-python,
+ * because it reaches the user and both SDKs are tested against it.
+ */
+const STALE_SESSION_ERROR_MESSAGE =
+  'The session has been modified in storage since it was loaded. ' +
+  'Please reload the session before appending more events.';
+
+/** Newest event first, with the id breaking a timestamp tie. */
+const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
+
+/**
+ * Selects the events of one session, optionally from a timestamp onwards.
+ *
+ * Spelled out rather than built from `CompositeSessionKey`, because MikroORM's
+ * `FilterQuery` only accepts a type that carries an implicit index signature,
+ * which an interface does not have.
+ */
+type EventFilter = {
+  appName: string;
+  userId: string;
+  sessionId: string;
+  timestamp?: {$gte: Date};
+};
+
+/**
+ * Oldest session first, with the user id and then the session id breaking a
+ * tie. A total order is what makes `limit`/`offset`/`page` well defined: two
+ * pages of an unordered query can repeat a session and skip another.
+ */
+const OLDEST_SESSION_FIRST = {
+  updateTime: 'ASC',
+  userId: 'ASC',
+  id: 'ASC',
+} as const;
+
+/** Newest session first, keeping the tie-break keys ascending. */
+const NEWEST_SESSION_FIRST = {
+  updateTime: 'DESC',
+  userId: 'ASC',
+  id: 'ASC',
+} as const;
 
 /**
  * Checks if a URI is a database connection URI.
+ *
+ * A URI whose scheme also names a driver, such as `postgresql+asyncpg://`,
+ * counts: the backend is one this service owns, so the service is the right
+ * place for the caller to be told what is wrong with the scheme.
  *
  * @param uri The URI to check.
  * @returns True if the URI is a database connection URI, false otherwise.
  */
 export function isDatabaseConnectionString(uri?: string): boolean {
-  if (!uri) {
-    return false;
-  }
+  return uri !== undefined && namesSupportedDatabaseBackend(uri);
+}
 
-  return (
-    uri.startsWith('postgres://') ||
-    uri.startsWith('postgresql://') ||
-    uri.startsWith('mysql://') ||
-    uri.startsWith('mariadb://') ||
-    uri.startsWith('mssql://') ||
-    uri.startsWith('sqlite://')
+/** Narrows a constructor argument to an already-built MikroORM instance. */
+function isMikroORM(source: MikroDBOptions | MikroORM): source is MikroORM {
+  return 'em' in source && 'schema' in source && 'close' in source;
+}
+
+/** The exact storage revision a session row is currently at. */
+function updateMarkerOf(storageSession: StorageSession): string {
+  return storageSession.updateTime.toISOString();
+}
+
+/**
+ * Reads a session row back after a write, and reports the revision it reached.
+ *
+ * The marker is compared for exact equality against the marker rebuilt on the
+ * next append, so it has to describe what the column holds rather than what
+ * the caller wrote. A database created before the timestamp columns declared
+ * millisecond precision rounds `update_time` to the whole second, and a marker
+ * taken from the in-memory value would then never match the row again. Reading
+ * inside the write transaction is safe: no other writer can reach the row.
+ */
+async function readRevision(
+  em: EntityManager,
+  storageSession: StorageSession,
+): Promise<{lastUpdateTime: number; marker: string}> {
+  await em.flush();
+  const stored = (await em.refresh(storageSession)) ?? storageSession;
+  return {
+    lastUpdateTime: stored.updateTime.getTime(),
+    marker: updateMarkerOf(stored),
+  };
+}
+
+/** Read options that take a row-level write lock when `enabled`. */
+function writeLock(enabled: boolean): {lockMode?: LockMode} {
+  return enabled ? {lockMode: LockMode.PESSIMISTIC_WRITE} : {};
+}
+
+/** Merges a scoped delta into a stored state row, if it has any entries. */
+function applyScopedDelta(
+  row: {state: Record<string, unknown>},
+  delta: Record<string, unknown>,
+): void {
+  if (Object.keys(delta).length > 0) {
+    row.state = {...row.state, ...delta};
+  }
+}
+
+/**
+ * Reports whether a marker-less session still matches the stored history.
+ *
+ * A session built by hand carries no revision marker, so the newest stored
+ * event stands in for one: the caller is current when it holds that event, or
+ * when both it and storage hold none.
+ */
+async function sessionMatchesStorageRevision(
+  em: EntityManager,
+  session: Session,
+): Promise<boolean> {
+  const newestStored = await em.findOne(
+    StorageEvent,
+    {appName: session.appName, userId: session.userId, sessionId: session.id},
+    {orderBy: NEWEST_EVENT_FIRST},
   );
+  return newestStored?.id === session.events.at(-1)?.id;
 }
 
 /**
@@ -66,38 +183,113 @@ export function isDatabaseConnectionString(uri?: string): boolean {
 export class DatabaseSessionService extends BaseSessionService {
   private orm?: MikroORM;
   private initialized = false;
+  private initInFlight?: Promise<void>;
   private options?: MikroDBOptions;
   private connectionString?: string;
+  private optionOverrides?: Partial<MikroDBOptions>;
+  private readonly ownsOrm: boolean;
+  private readonly sessionLocks = new KeyedMutex();
 
-  constructor(connectionStringOrOptions: MikroDBOptions | string) {
+  /**
+   * @param source A connection string, a MikroORM options object, or a
+   *     MikroORM instance the caller already initialized and continues to own.
+   * @param overrides Options merged over the ones derived from a connection
+   *     string. Ignored for the other two forms.
+   * @throws Error if the connection string is not one this service supports.
+   */
+  constructor(
+    source: MikroDBOptions | MikroORM | string,
+    overrides?: Partial<MikroDBOptions>,
+  ) {
     super();
-    if (typeof connectionStringOrOptions === 'string') {
-      this.connectionString = connectionStringOrOptions;
-    } else {
-      if (!connectionStringOrOptions.driver) {
-        throw new Error('Driver is required when passing options object.');
-      }
-
-      this.options = {
-        ...connectionStringOrOptions,
-        entities: ENTITIES,
-      };
-    }
-  }
-
-  async init() {
-    if (this.initialized) {
+    if (typeof source === 'string') {
+      assertSupportedDatabaseUri(source);
+      this.connectionString = source;
+      this.optionOverrides = overrides;
+      this.ownsOrm = true;
       return;
     }
 
-    if (this.connectionString && (!this.options || !this.options.driver)) {
-      this.options = await getConnectionOptionsFromUri(this.connectionString);
+    if (isMikroORM(source)) {
+      this.orm = source;
+      this.ownsOrm = false;
+      return;
     }
 
-    this.orm = await MikroORM.init(this.options!);
-    await ensureDatabaseCreated(this.orm!);
-    await validateDatabaseSchemaVersion(this.orm!);
+    if (!source.driver) {
+      throw new Error('Driver is required when passing options object.');
+    }
+    this.options = {...source, entities: ENTITIES};
+    this.ownsOrm = true;
+  }
+
+  /**
+   * Connects to the database and prepares its tables.
+   *
+   * Callers do not need this: every method initializes on demand. Call it
+   * during startup to pay the cost upfront. It is safe to call more than once
+   * and safe to call concurrently, and a failed attempt can be retried.
+   *
+   * @throws Error if the database holds the legacy v0 session schema.
+   */
+  async init(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+    this.initInFlight ??= this.connect().finally(() => {
+      this.initInFlight = undefined;
+    });
+    return this.initInFlight;
+  }
+
+  private async connect(): Promise<void> {
+    // Hold the instance locally: a `close()` that lands while this is in
+    // flight clears the field, and the rest of the method would then run
+    // against nothing.
+    const orm = (this.orm ??= await MikroORM.init(await this.resolveOptions()));
+
+    // Detect before creating anything: `ensureDatabaseCreated` adds the v1
+    // `event_data` column to a legacy `events` table, which erases the
+    // evidence the detection reads.
+    const version = await detectDatabaseSchemaVersion(orm);
+    if (version === SCHEMA_VERSION_0_PICKLE) {
+      throw new Error(
+        'This database uses the legacy v0 session schema, which stores event ' +
+          'actions as a Python pickle that this SDK cannot read. Migrate it ' +
+          'with the adk-python `adk migrate session` command first.',
+      );
+    }
+
+    await ensureDatabaseCreated(orm);
+    await validateDatabaseSchemaVersion(orm);
     this.initialized = true;
+  }
+
+  private async resolveOptions(): Promise<MikroDBOptions> {
+    return this.connectionString === undefined
+      ? this.options!
+      : getConnectionOptionsFromUri(
+          this.connectionString,
+          this.optionOverrides,
+        );
+  }
+
+  /**
+   * Releases the database connections this service opened.
+   *
+   * The sqlite driver holds an open connection on the event loop, so a
+   * short-lived process that never calls this never exits. A MikroORM instance
+   * supplied by the caller stays open, because the caller owns it. Calling this
+   * twice, or before `init`, does nothing.
+   */
+  async close(): Promise<void> {
+    this.initialized = false;
+    if (!this.ownsOrm) {
+      return;
+    }
+    const orm = this.orm;
+    this.orm = undefined;
+    await orm?.close();
   }
 
   async createSession({
@@ -111,74 +303,54 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const id = sessionId || randomUUID();
     const now = new Date();
-    const existing = await em.findOne(StorageSession, {
-      id,
-      appName,
-      userId,
-    });
-    if (existing) {
-      throw new Error(`Session with id ${id} already exists.`);
+    if (sessionId && (await this.sessionExists({appName, userId, id}))) {
+      throw new AlreadyExistsError(`Session with id ${id} already exists.`);
     }
 
-    let appStateModel = await em.findOne(StorageAppState, {appName});
-    if (!appStateModel) {
-      appStateModel = em.create(StorageAppState, {
-        appName,
-        state: {},
-        updateTime: now,
-      });
-      em.persist(appStateModel);
-    }
+    const appStateModel = await getOrCreateRow(
+      em,
+      StorageAppState,
+      {appName},
+      {appName, state: {}, updateTime: now},
+    );
+    const userStateModel = await getOrCreateRow(
+      em,
+      StorageUserState,
+      {appName, userId},
+      {appName, userId, state: {}, updateTime: now},
+    );
 
-    let userStateModel = await em.findOne(StorageUserState, {appName, userId});
-    if (!userStateModel) {
-      userStateModel = em.create(StorageUserState, {
-        appName,
-        userId,
-        state: {},
-      });
-      em.persist(userStateModel);
-    }
-
-    const appStateDelta: Record<string, unknown> = {};
-    const userStateDelta: Record<string, unknown> = {};
-    const sessionState: Record<string, unknown> = {};
-
-    if (state) {
-      for (const [key, value] of Object.entries(state)) {
-        if (key.startsWith(State.APP_PREFIX)) {
-          appStateDelta[key.replace(State.APP_PREFIX, '')] = value;
-        } else if (key.startsWith(State.USER_PREFIX)) {
-          userStateDelta[key.replace(State.USER_PREFIX, '')] = value;
-        } else if (!key.startsWith(State.TEMP_PREFIX)) {
-          sessionState[key] = value;
-        }
-      }
-    }
-
-    if (Object.keys(appStateDelta).length > 0) {
-      appStateModel.state = {...appStateModel.state, ...appStateDelta};
-    }
-    if (Object.keys(userStateDelta).length > 0) {
-      userStateModel.state = {...userStateModel.state, ...userStateDelta};
-    }
+    const delta = extractStateDelta(state ?? {});
+    applyScopedDelta(appStateModel, delta.app);
+    applyScopedDelta(userStateModel, delta.user);
 
     const storageSession = em.create(StorageSession, {
       id,
       appName,
       userId,
-      state: sessionState,
+      state: delta.session,
       createTime: now,
       updateTime: now,
     });
     em.persist(storageSession);
 
-    await em.flush();
+    let revision: {lastUpdateTime: number; marker: string};
+    try {
+      revision = await readRevision(em, storageSession);
+    } catch (error: unknown) {
+      // A concurrent createSession can commit this id between the probe above
+      // and this write. Drivers report that as a unique-constraint violation
+      // whose class differs per dialect, so the row itself is the evidence.
+      if (await this.sessionExists({appName, userId, id})) {
+        throw new AlreadyExistsError(`Session with id ${id} already exists.`);
+      }
+      throw error;
+    }
 
     const mergedState = mergeStates(
       appStateModel.state,
       userStateModel.state,
-      sessionState,
+      delta.session,
     );
 
     return createSession({
@@ -187,8 +359,17 @@ export class DatabaseSessionService extends BaseSessionService {
       userId,
       state: mergedState,
       events: [],
-      lastUpdateTime: storageSession.createTime.getTime(),
+      lastUpdateTime: revision.lastUpdateTime,
+      storageUpdateMarker: revision.marker,
     });
+  }
+
+  private async sessionExists(key: {
+    appName: string;
+    userId: string;
+    id: string;
+  }): Promise<boolean> {
+    return (await this.orm!.em.fork().count(StorageSession, key)) > 0;
   }
 
   async getSession({
@@ -197,6 +378,8 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
+    validateGetSessionConfig(config);
+
     await this.init();
     const em = this.orm!.em.fork();
 
@@ -210,24 +393,11 @@ export class DatabaseSessionService extends BaseSessionService {
       return undefined;
     }
 
-    const eventWhere: FilterQuery<StorageEvent> = {
-      appName,
-      userId,
-      sessionId,
-    };
-
-    if (config?.afterTimestamp) {
-      eventWhere.timestamp = {$gt: new Date(config.afterTimestamp)};
-    }
-
-    // Get latest numRecentEvents events or all events in DESC order
-    const storageEvents = await em.find(StorageEvent, eventWhere, {
-      orderBy: {timestamp: 'DESC'},
-      limit: config?.numRecentEvents,
-    });
-    // Reverse the events to maintain the original order as we get events in DESC order
-    // to get the latest events first.
-    storageEvents.reverse();
+    const events = await this.findEvents(
+      em,
+      {appName, userId, sessionId},
+      config,
+    );
 
     const appStateModel = await em.findOne(StorageAppState, {appName});
     const userStateModel = await em.findOne(StorageUserState, {
@@ -246,9 +416,55 @@ export class DatabaseSessionService extends BaseSessionService {
       appName,
       userId,
       state: mergedState,
-      events: storageEvents.map((se) => se.eventData),
+      events,
       lastUpdateTime: storageSession.updateTime.getTime(),
+      storageUpdateMarker: updateMarkerOf(storageSession),
     });
+  }
+
+  override async getUserState({
+    appName,
+    userId,
+  }: GetUserStateRequest): Promise<Record<string, unknown>> {
+    await this.init();
+    const em = this.orm!.em.fork();
+
+    const userStateModel = await em.findOne(StorageUserState, {
+      appName,
+      userId,
+    });
+    return {...(userStateModel?.state ?? {})};
+  }
+
+  /**
+   * Reads the stored events of one session, oldest first.
+   *
+   * A `numRecentEvents` of zero makes this an existence or metadata-only
+   * read, so the query is skipped rather than issued with a limit no dialect
+   * defines.
+   */
+  private async findEvents(
+    em: EntityManager,
+    key: CompositeSessionKey,
+    config?: GetSessionConfig,
+  ): Promise<Event[]> {
+    if (config?.numRecentEvents === 0) {
+      return [];
+    }
+
+    const where: EventFilter = {...key};
+    if (config?.afterTimestamp) {
+      // Inclusive, matching adk-python: a caller passing the timestamp of a
+      // known event receives that event.
+      where.timestamp = {$gte: new Date(config.afterTimestamp)};
+    }
+
+    const storageEvents = await em.find(StorageEvent, where, {
+      orderBy: NEWEST_EVENT_FIRST,
+      limit: config?.numRecentEvents,
+    });
+    storageEvents.reverse();
+    return storageEvents.map((storageEvent) => storageEvent.eventData);
   }
 
   async listSessions({
@@ -268,11 +484,7 @@ export class DatabaseSessionService extends BaseSessionService {
     }
 
     const orderBy =
-      order === 'asc'
-        ? {updateTime: 'ASC' as const, id: 'ASC' as const}
-        : order === 'desc'
-          ? {updateTime: 'DESC' as const, id: 'ASC' as const}
-          : undefined;
+      order === 'desc' ? NEWEST_SESSION_FIRST : OLDEST_SESSION_FIRST;
 
     let storageSessions;
     let paginationMeta: Pick<
@@ -348,6 +560,7 @@ export class DatabaseSessionService extends BaseSessionService {
         state: merged,
         events: [],
         lastUpdateTime: ss.updateTime.getTime(),
+        storageUpdateMarker: updateMarkerOf(ss),
       });
     });
 
@@ -371,145 +584,146 @@ export class DatabaseSessionService extends BaseSessionService {
     event,
   }: AppendEventRequest): Promise<Event> {
     await this.init();
-    const em = this.orm!.em.fork();
 
     if (event.partial) {
       return event;
     }
 
+    // Temp state stays readable for the rest of the invocation, so apply it to
+    // the in-memory session before trimming it out of the persisted event.
+    applyTempState({session, event});
     const trimmedEvent = trimTempDeltaState(event);
+    const delta = extractStateDelta(trimmedEvent.actions.stateDelta ?? {});
 
-    await em.transactional(async (txEm) => {
+    // JSON-encode the tuple so that ('a|b', 'c') and ('a', 'b|c') cannot
+    // collide on one lock.
+    const lockKey = JSON.stringify([
+      session.appName,
+      session.userId,
+      session.id,
+    ]);
+    const revision = await this.sessionLocks.runExclusive(lockKey, () =>
+      this.writeEvent(session, trimmedEvent, delta),
+    );
+
+    session.lastUpdateTime = revision.lastUpdateTime;
+    session.storageUpdateMarker = revision.marker;
+
+    return super.appendEvent({session, event: trimmedEvent});
+  }
+
+  /**
+   * Writes one event and its state delta in a single transaction.
+   *
+   * @returns The storage revision the session reaches once the write commits.
+   * @throws SessionNotFoundError if storage does not hold the session.
+   * @throws StaleSessionError if storage has moved past the session's revision.
+   */
+  private async writeEvent(
+    session: Session,
+    event: Event,
+    delta: ScopedStateDelta,
+  ): Promise<{lastUpdateTime: number; marker: string}> {
+    const hasAppDelta = Object.keys(delta.app).length > 0;
+    const hasUserDelta = Object.keys(delta.user).length > 0;
+
+    return this.orm!.em.fork().transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
         StorageSession,
-        {
-          appName: session.appName,
-          userId: session.userId,
-          id: session.id,
-        },
-        {lockMode: LockMode.PESSIMISTIC_WRITE},
+        {appName: session.appName, userId: session.userId, id: session.id},
+        writeLock(true),
       );
-
       if (!storageSession) {
-        throw new Error(`Session ${session.id} not found for appendEvent`);
+        throw new SessionNotFoundError(`Session ${session.id} not found.`);
       }
 
-      let appStateModel = await txEm.findOne(StorageAppState, {
-        appName: session.appName,
-      });
-      if (!appStateModel) {
-        appStateModel = txEm.create(StorageAppState, {
-          appName: session.appName,
-          state: {},
-          updateTime: new Date(),
-        });
-        txEm.persist(appStateModel);
-      }
-
-      let userStateModel = await txEm.findOne(StorageUserState, {
-        appName: session.appName,
-        userId: session.userId,
-      });
-      if (!userStateModel) {
-        userStateModel = txEm.create(StorageUserState, {
-          appName: session.appName,
-          userId: session.userId,
-          state: {},
-        });
-        txEm.persist(userStateModel);
-      }
-
-      // Stale session check
-      if (storageSession.updateTime.getTime() > session.lastUpdateTime) {
-        // Reload state
-        const events = await txEm.find(
-          StorageEvent,
-          {
-            appName: session.appName,
-            userId: session.userId,
-            sessionId: session.id,
-          },
-          {orderBy: {timestamp: 'ASC'}},
+      const storageAppState = await txEm.findOne(
+        StorageAppState,
+        {appName: session.appName},
+        writeLock(hasAppDelta),
+      );
+      if (!storageAppState) {
+        throw new Error(
+          `App state missing for app_name='${session.appName}'. Session ` +
+            'state tables should be initialized by createSession.',
         );
+      }
 
-        const mergedState = mergeStates(
-          appStateModel.state,
-          userStateModel.state,
-          storageSession.state,
+      const storageUserState = await txEm.findOne(
+        StorageUserState,
+        {appName: session.appName, userId: session.userId},
+        writeLock(hasUserDelta),
+      );
+      if (!storageUserState) {
+        throw new Error(
+          `User state missing for app_name='${session.appName}', ` +
+            `user_id='${session.userId}'. Session state tables should be ` +
+            'initialized by createSession.',
         );
-        session.state = mergedState;
-        session.events = events.map((e) => e.eventData);
       }
 
-      if (event.actions && event.actions.stateDelta) {
-        const appDelta: Record<string, unknown> = {};
-        const userDelta: Record<string, unknown> = {};
-        const sessionDelta: Record<string, unknown> = {};
+      await this.rejectStaleWrite(txEm, session, storageSession);
 
-        for (const [key, value] of Object.entries(event.actions.stateDelta)) {
-          if (key.startsWith(State.APP_PREFIX)) {
-            appDelta[key.replace(State.APP_PREFIX, '')] = value;
-          } else if (key.startsWith(State.USER_PREFIX)) {
-            userDelta[key.replace(State.USER_PREFIX, '')] = value;
-          } else if (!key.startsWith(State.TEMP_PREFIX)) {
-            sessionDelta[key] = value;
-          }
-        }
-
-        if (Object.keys(appDelta).length > 0) {
-          appStateModel.state = {...appStateModel.state, ...appDelta};
-        }
-        if (Object.keys(userDelta).length > 0) {
-          userStateModel.state = {...userStateModel.state, ...userDelta};
-        }
-        if (Object.keys(sessionDelta).length > 0) {
-          storageSession.state = {...storageSession.state, ...sessionDelta};
-        }
-      }
+      applyScopedDelta(storageAppState, delta.app);
+      applyScopedDelta(storageUserState, delta.user);
+      applyScopedDelta(storageSession, delta.session);
 
       const existingStorageEvent = await txEm.findOne(StorageEvent, {
-        id: trimmedEvent.id,
+        id: event.id,
         appName: session.appName,
         userId: session.userId,
         sessionId: session.id,
       });
 
       if (existingStorageEvent) {
-        existingStorageEvent.eventData = trimmedEvent;
-        existingStorageEvent.timestamp = new Date(trimmedEvent.timestamp);
-        txEm.persist(existingStorageEvent);
+        existingStorageEvent.eventData = event;
+        existingStorageEvent.timestamp = new Date(event.timestamp);
       } else {
-        const newStorageEvent = txEm.create(StorageEvent, {
-          id: trimmedEvent.id,
-          appName: session.appName,
-          userId: session.userId,
-          sessionId: session.id,
-          invocationId: trimmedEvent.invocationId,
-          timestamp: new Date(trimmedEvent.timestamp),
-          eventData: trimmedEvent,
-        });
-        txEm.persist(newStorageEvent);
+        txEm.persist(
+          txEm.create(StorageEvent, {
+            id: event.id,
+            appName: session.appName,
+            userId: session.userId,
+            sessionId: session.id,
+            invocationId: event.invocationId,
+            timestamp: new Date(event.timestamp),
+            eventData: event,
+          }),
+        );
       }
-      await txEm.commit();
 
       storageSession.updateTime = new Date(event.timestamp);
-
-      const newMergedState = mergeStates(
-        appStateModel.state,
-        userStateModel.state,
-        storageSession.state,
-      );
-      session.state = newMergedState;
-
-      const index = session.events.findIndex((e) => e.id === event.id);
-      if (index >= 0) {
-        session.events[index] = event;
-      } else {
-        session.events.push(event);
-      }
-      session.lastUpdateTime = storageSession.updateTime.getTime();
+      // Read the revision before the commit resolves, so the values reported
+      // back describe exactly what storage now holds.
+      return readRevision(txEm, storageSession);
     });
+  }
 
-    return event;
+  /**
+   * Throws when the in-memory session is behind the stored revision.
+   *
+   * Also pulls the session's timestamp up to the stored one, so that a
+   * round-trip that rounded the value does not read as stale next time.
+   */
+  private async rejectStaleWrite(
+    txEm: EntityManager,
+    session: Session,
+    storageSession: StorageSession,
+  ): Promise<void> {
+    const storageMarker = updateMarkerOf(storageSession);
+    const storageUpdateTime = storageSession.updateTime.getTime();
+
+    if (session.storageUpdateMarker !== undefined) {
+      if (session.storageUpdateMarker !== storageMarker) {
+        throw new StaleSessionError(STALE_SESSION_ERROR_MESSAGE);
+      }
+      session.lastUpdateTime = storageUpdateTime;
+    } else if (storageUpdateTime > session.lastUpdateTime) {
+      if (!(await sessionMatchesStorageRevision(txEm, session))) {
+        throw new StaleSessionError(STALE_SESSION_ERROR_MESSAGE);
+      }
+      session.lastUpdateTime = storageUpdateTime;
+    }
+    session.storageUpdateMarker = storageMarker;
   }
 }
