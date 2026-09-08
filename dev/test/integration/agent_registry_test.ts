@@ -7,14 +7,45 @@
 import {
   AgentTool,
   FunctionTool,
+  isLoopAgent,
   LlmAgent,
+  LoopAgent,
   MCPToolset,
   SingleAgentCallback,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
+
+function loopAgentConfig(
+  maxIterations?: number | string | null,
+): YamlAgentConfig {
+  return {
+    agentClass: AgentClass.LoopAgent,
+    name: 'loop_agent',
+    model: 'model',
+    description: 'desc',
+    instruction: 'inst',
+    maxIterations,
+    isRootAgent: true,
+  };
+}
+
+function buildLoopAgent(
+  registry: AgentRegistry,
+  maxIterations?: number | string | null,
+): LoopAgent {
+  registry.registerAgentConfig('loop_agent', loopAgentConfig(maxIterations));
+  const agent = registry.getAgent('loop_agent');
+  if (!isLoopAgent(agent)) {
+    expect.fail('the registry did not build a LoopAgent');
+  }
+  return agent;
+}
 
 describe('AgentRegistry', () => {
   let integrationRegistry: IntegrationRegistry;
@@ -272,5 +303,53 @@ describe('AgentRegistry', () => {
 
     expect(retrieved).toBeDefined();
     expect(retrieved.tools.length).toBe(0);
+  });
+
+  describe('LoopAgent max_iterations', () => {
+    it('keeps a max_iterations of 0, so the loop runs no passes', () => {
+      expect(buildLoopAgent(agentRegistry, 0).maxIterations).toBe(0);
+    });
+
+    it('keeps a negative max_iterations', () => {
+      expect(buildLoopAgent(agentRegistry, -1).maxIterations).toBe(-1);
+    });
+
+    it('accepts a numeric max_iterations', () => {
+      expect(buildLoopAgent(agentRegistry, 3).maxIterations).toBe(3);
+    });
+
+    it('accepts a string max_iterations', () => {
+      expect(buildLoopAgent(agentRegistry, '3').maxIterations).toBe(3);
+    });
+
+    it('leaves the loop unlimited when the config omits max_iterations', () => {
+      expect(buildLoopAgent(agentRegistry).maxIterations).toBe(
+        Number.MAX_SAFE_INTEGER,
+      );
+    });
+
+    it('leaves the loop unlimited when max_iterations has no value', () => {
+      expect(buildLoopAgent(agentRegistry, null).maxIterations).toBe(
+        Number.MAX_SAFE_INTEGER,
+      );
+    });
+
+    it('leaves the loop unlimited when max_iterations is empty', () => {
+      expect(buildLoopAgent(agentRegistry, '').maxIterations).toBe(
+        Number.MAX_SAFE_INTEGER,
+      );
+    });
+
+    it('rejects a max_iterations that is not an integer', () => {
+      agentRegistry.registerAgentConfig('loop_agent', loopAgentConfig('two'));
+      expect(() => agentRegistry.getAgent('loop_agent')).toThrow(
+        'Invalid max_iterations "two": expected an integer.',
+      );
+
+      agentRegistry.registerAgentConfig('loop_agent', loopAgentConfig('3.5'));
+      expect(() => agentRegistry.getAgent('loop_agent')).toThrow(
+        'Invalid max_iterations "3.5": expected an integer.',
+      );
+    });
   });
 });
