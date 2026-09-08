@@ -1851,13 +1851,13 @@ describe('VertexAiSessionService', () => {
 
     describe('agent transfer action', () => {
       const transferSession = () =>
-        ({
+        createSession({
           id: 'transfer-session',
           appName: '12345',
           userId: 'testUser',
           events: [],
           lastUpdateTime: Date.now(),
-        }) as unknown as Session;
+        });
 
       it('sends the transfer under the name the API defines', async () => {
         const event = createEvent({
@@ -1940,13 +1940,13 @@ describe('VertexAiSessionService', () => {
 
     describe('unsupported fields and fallback', () => {
       const appendSession = () =>
-        ({
+        createSession({
           id: 'append-session',
           appName: '12345',
           userId: 'testUser',
           events: [],
           lastUpdateTime: Date.now(),
-        }) as unknown as Session;
+        });
 
       /** The request config captured by the first appendEvent call. */
       const appendedConfig = () =>
@@ -2054,13 +2054,13 @@ describe('VertexAiSessionService', () => {
 
   describe('workflow event fields', () => {
     const appendSession = () =>
-      ({
+      createSession({
         id: 'wf-session',
         appName: '12345',
         userId: 'testUser',
         events: [],
         lastUpdateTime: Date.now(),
-      }) as unknown as Session;
+      });
 
     /**
      * Replays an API event the way the real service sees it: the request is
