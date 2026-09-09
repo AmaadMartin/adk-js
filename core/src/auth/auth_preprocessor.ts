@@ -17,6 +17,7 @@ import {
   getFunctionCalls,
   getFunctionResponses,
 } from '../events/event.js';
+import {eventsOnCurrentBranch} from '../events/event_scope.js';
 import {State} from '../sessions/state.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
@@ -71,6 +72,59 @@ function requestedAuthConfigs(
   return requests;
 }
 
+/**
+ * The calls this event recorded as waiting on a credential, if the agent
+ * itself recorded them.
+ *
+ * Author-checked for the same reason the requests are: a client-authored map
+ * is the client naming calls it would like resumed. In adk-js only
+ * `handleFunctionCallsAsync` writes this map, and it authors the event as the
+ * agent, so the check costs nothing.
+ */
+function pendingAuthConfigs(
+  event: Event,
+  agentName: string,
+): Array<[string, AuthConfig]> {
+  if (event.author !== agentName) {
+    return [];
+  }
+  return Object.entries(event.actions.requestedAuthConfigs ?? {});
+}
+
+/**
+ * The other calls that the credentials stored in this pass also unblock.
+ *
+ * One model turn can raise several tool calls behind a single credential, and
+ * the user answers only one of the requests. The event that recorded those
+ * calls names them all under `actions.requestedAuthConfigs`, so it says which
+ * siblings the answered credential unblocks too.
+ *
+ * Only an event that already names a directly-answered call is read. That is
+ * what stops a stale request for the same credential from being resurrected.
+ * The widened ids collect in their own set, so a sibling added here never
+ * becomes a direct target and cannot pull in a further event.
+ */
+function siblingsAwaitingAuthorizedKeys(
+  events: Event[],
+  directTargets: ReadonlySet<string>,
+  authorizedKeys: ReadonlySet<string>,
+  agentName: string,
+): Set<string> {
+  const siblings = new Set<string>();
+  for (const event of events) {
+    const pending = pendingAuthConfigs(event, agentName);
+    if (!pending.some(([fcId]) => directTargets.has(fcId))) {
+      continue;
+    }
+    for (const [fcId, config] of pending) {
+      if (authorizedKeys.has(config.credentialKey)) {
+        siblings.add(fcId);
+      }
+    }
+  }
+  return siblings;
+}
+
 async function storeAuthAndCollectResumeTargets(
   events: Event[],
   authFcIds: Set<string>,
@@ -80,6 +134,7 @@ async function storeAuthAndCollectResumeTargets(
 ): Promise<Set<string>> {
   const requests = requestedAuthConfigs(events, authFcIds, agentName);
 
+  const authorizedKeys = new Set<string>();
   const toolsToResume: Set<string> = new Set();
   for (const fcId of authFcIds) {
     const request = requests.get(fcId);
@@ -105,6 +160,7 @@ async function storeAuthAndCollectResumeTargets(
       );
       continue;
     }
+    authorizedKeys.add(authConfig.credentialKey);
     await new AuthHandler(authConfig).parseAndStoreAuthResponse(state);
 
     const functionCallId = request.args?.functionCallId;
@@ -114,6 +170,15 @@ async function storeAuthAndCollectResumeTargets(
     ) {
       toolsToResume.add(functionCallId);
     }
+  }
+
+  for (const fcId of siblingsAwaitingAuthorizedKeys(
+    events,
+    toolsToResume,
+    authorizedKeys,
+    agentName,
+  )) {
+    toolsToResume.add(fcId);
   }
 
   return toolsToResume;
@@ -128,8 +193,11 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    const events = invocationContext.session.events;
-    if (!events || events.length === 0) {
+    const events = eventsOnCurrentBranch(
+      invocationContext.session.events,
+      invocationContext.branch,
+    );
+    if (events.length === 0) {
       return;
     }
 

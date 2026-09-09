@@ -6,12 +6,17 @@
 
 import {
   AUTH_PREPROCESSOR,
+  AuthConfig,
+  AuthScheme,
   Event,
   InvocationContext,
   createEvent,
 } from '@google/adk';
 import {Mock, beforeEach, describe, expect, it, vi} from 'vitest';
-import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
+import {
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  handleFunctionCallsAsync,
+} from '../../src/agents/functions.js';
 
 vi.mock('../../src/agents/functions.js', async (importOriginal) => {
   const actual = (await importOriginal()) as {
@@ -44,7 +49,11 @@ describe('AuthPreprocessor', () => {
    * collected, so these fixtures carry a scheme and the response carries its
    * material under `exchangedAuthCredential`, as a real client sends it.
    */
-  const API_KEY_SCHEME = {type: 'apiKey', in: 'header', name: 'X-API-Key'};
+  const API_KEY_SCHEME: AuthScheme = {
+    type: 'apiKey',
+    in: 'header',
+    name: 'X-API-Key',
+  };
   const CREDENTIAL_RESPONSE = {
     exchangedAuthCredential: {authType: 'apiKey', apiKey: 'test'},
   };
@@ -769,6 +778,307 @@ describe('AuthPreprocessor', () => {
 
       expect((await generator.next()).done).toBe(true);
       expect(storeCredential).not.toHaveBeenCalled();
+    });
+  });
+
+  /** An invocation whose agent owns `someTool`, optionally on a branch. */
+  function contextOn(events: Event[], branch?: string): InvocationContext {
+    return {
+      agent: {
+        [LLM_AGENT_SYMBOL]: true,
+        name: 'agent',
+        canonicalTools: vi.fn().mockResolvedValue([{name: 'someTool'}]),
+        canonicalBeforeToolCallbacks: [],
+        canonicalAfterToolCallbacks: [],
+      },
+      branch,
+      session: {state: {}, events},
+    } as unknown as InvocationContext;
+  }
+
+  function authConfigFor(credentialKey: string): AuthConfig {
+    return {credentialKey, authScheme: API_KEY_SCHEME};
+  }
+
+  /** The agent's tool calls, as the model issued them. */
+  function toolCallEvent(ids: string[], branch?: string): Event {
+    return createEvent({
+      author: 'agent',
+      branch,
+      content: {
+        parts: ids.map((id) => ({
+          functionCall: {id, name: 'someTool', args: {}},
+        })),
+      },
+    });
+  }
+
+  /** An event recording which calls wait on which credential. */
+  function pendingAuthEvent(
+    pending: Record<string, string>,
+    options: {author?: string; branch?: string} = {},
+  ): Event {
+    return createEvent({
+      author: options.author ?? 'agent',
+      branch: options.branch,
+      actions: {
+        requestedAuthConfigs: Object.fromEntries(
+          Object.entries(pending).map(([fcId, credentialKey]) => [
+            fcId,
+            authConfigFor(credentialKey),
+          ]),
+        ),
+      },
+    });
+  }
+
+  /** The agent's `adk_request_credential` call naming `functionCallId`. */
+  function credentialRequestEvent(
+    functionCallId: string,
+    options: {id?: string; credentialKey?: string; branch?: string} = {},
+  ): Event {
+    return createEvent({
+      author: 'agent',
+      branch: options.branch,
+      content: {
+        parts: [
+          {
+            functionCall: {
+              id: options.id ?? 'fc1',
+              name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+              args: {
+                authConfig: authConfigFor(options.credentialKey ?? 'testKey'),
+                functionCallId,
+              },
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  /** The user's answer to those requests. */
+  function credentialResponseEvent(
+    options: {ids?: string[]; branch?: string} = {},
+  ): Event {
+    return createEvent({
+      author: 'user',
+      branch: options.branch,
+      content: {
+        parts: (options.ids ?? ['fc1']).map((id) => ({
+          functionResponse: {
+            id,
+            name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+            response: CREDENTIAL_RESPONSE,
+          },
+        })),
+      },
+    });
+  }
+
+  /** The resume set the one call to `handleFunctionCallsAsync` carried. */
+  function resumedFilters(): Set<string> | undefined {
+    const call = vi.mocked(handleFunctionCallsAsync).mock.calls[0];
+    expect(call).toBeDefined();
+    return call[0].filters;
+  }
+
+  describe('resuming siblings by credential key', () => {
+    beforeEach(() => {
+      vi.mocked(handleFunctionCallsAsync).mockClear();
+      storeCredential.mockClear();
+    });
+
+    it('resumes every call awaiting the authorized credential key', async () => {
+      const originalCalls = toolCallEvent(['toolFc1', 'toolFc2']);
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn([
+          originalCalls,
+          pendingAuthEvent({toolFc1: 'testKey', toolFc2: 'testKey'}),
+          credentialRequestEvent('toolFc1'),
+          credentialResponseEvent(),
+        ]),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1', 'toolFc2']));
+      expect(
+        vi.mocked(handleFunctionCallsAsync).mock.calls[0][0].functionCallEvent,
+      ).toBe(originalCalls);
+    });
+
+    it('does not resume a call awaiting a different credential key', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn([
+          toolCallEvent(['toolFc1', 'toolFc2']),
+          pendingAuthEvent({toolFc1: 'testKey', toolFc2: 'otherKey'}),
+          credentialRequestEvent('toolFc1'),
+          credentialResponseEvent(),
+        ]),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1']));
+    });
+
+    it('does not resume stale calls from an older request', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn([
+          toolCallEvent(['toolFc1', 'staleFc']),
+          pendingAuthEvent({staleFc: 'testKey'}),
+          pendingAuthEvent({toolFc1: 'testKey'}),
+          credentialRequestEvent('toolFc1'),
+          credentialResponseEvent(),
+        ]),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1']));
+    });
+
+    it('ignores a requestedAuthConfigs map the client wrote', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn([
+          toolCallEvent(['toolFc1', 'toolFc2']),
+          pendingAuthEvent(
+            {toolFc1: 'testKey', toolFc2: 'testKey'},
+            {author: 'user'},
+          ),
+          credentialRequestEvent('toolFc1'),
+          credentialResponseEvent(),
+        ]),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1']));
+    });
+
+    it('does not cascade through a newly added target', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn([
+          toolCallEvent(['toolFc1', 'toolFc2', 'toolFc3']),
+          pendingAuthEvent({toolFc1: 'testKey', toolFc2: 'testKey'}),
+          pendingAuthEvent({toolFc2: 'testKey', toolFc3: 'testKey'}),
+          credentialRequestEvent('toolFc1'),
+          credentialResponseEvent(),
+        ]),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1', 'toolFc2']));
+    });
+
+    it('skips an event whose actions carry no auth map', async () => {
+      const originalCalls = createEvent({
+        author: 'agent',
+        actions: {requestedAuthConfigs: undefined},
+        content: {
+          parts: [{functionCall: {id: 'toolFc1', name: 'someTool', args: {}}}],
+        },
+      });
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn([
+          originalCalls,
+          credentialRequestEvent('toolFc1'),
+          credentialResponseEvent(),
+        ]),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1']));
+    });
+
+    it('widens by a toolset auth key without resuming the toolset call', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn([
+          toolCallEvent(['toolFc1', 'toolFc2']),
+          pendingAuthEvent({toolFc1: 'testKey', toolFc2: 'toolsetKey'}),
+          credentialRequestEvent('toolFc1'),
+          credentialRequestEvent('_adk_toolset_auth_listing', {
+            id: 'fc2',
+            credentialKey: 'toolsetKey',
+          }),
+          credentialResponseEvent({ids: ['fc1', 'fc2']}),
+        ]),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1', 'toolFc2']));
+    });
+  });
+
+  describe('branch scoping', () => {
+    beforeEach(() => {
+      vi.mocked(handleFunctionCallsAsync).mockClear();
+      storeCredential.mockClear();
+    });
+
+    it('ignores a credential response raised on a sibling branch', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn(
+          [
+            toolCallEvent(['toolFc1'], 'root.b@1'),
+            credentialRequestEvent('toolFc1', {branch: 'root.b@1'}),
+            credentialResponseEvent({branch: 'root.b@1'}),
+          ],
+          'root.a@1',
+        ),
+      );
+
+      expect((await generator.next()).done).toBe(true);
+      expect(storeCredential).not.toHaveBeenCalled();
+    });
+
+    it('honours events on the current branch and on no branch', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn(
+          [
+            toolCallEvent(['toolFc1']),
+            credentialRequestEvent('toolFc1', {branch: 'root.a@1'}),
+            credentialResponseEvent({branch: 'root.a@1'}),
+          ],
+          'root.a@1',
+        ),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1']));
+    });
+
+    it('honours an event on an ancestor branch', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn(
+          [
+            toolCallEvent(['toolFc1'], 'root'),
+            credentialRequestEvent('toolFc1', {branch: 'root'}),
+            credentialResponseEvent({branch: 'root.a@1'}),
+          ],
+          'root.a@1',
+        ),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1']));
+    });
+
+    it('ignores a sibling branch when widening by credential key', async () => {
+      const generator = AUTH_PREPROCESSOR.runAsync(
+        contextOn(
+          [
+            toolCallEvent(['toolFc1', 'toolFc2'], 'root.a@1'),
+            pendingAuthEvent(
+              {toolFc1: 'testKey', toolFc2: 'testKey'},
+              {branch: 'root.b@1'},
+            ),
+            credentialRequestEvent('toolFc1', {branch: 'root.a@1'}),
+            credentialResponseEvent({branch: 'root.a@1'}),
+          ],
+          'root.a@1',
+        ),
+      );
+
+      expect((await generator.next()).done).toBe(false);
+      expect(resumedFilters()).toEqual(new Set(['toolFc1']));
     });
   });
 });
