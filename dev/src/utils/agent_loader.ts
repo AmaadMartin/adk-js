@@ -154,6 +154,8 @@ export class AgentFile {
   constructor(
     private readonly filePath: string,
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
+    /** Whether this file may be imported again after a change. */
+    private readonly reloadable = false,
   ) {}
 
   async load(): Promise<RunnableRoot | App> {
@@ -241,8 +243,7 @@ export class AgentFile {
       logger.warn(`Failed to delete require cache for ${filePath}`);
     }
 
-    const importUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const jsModule = await import(importUrl);
+    const jsModule = await import(buildImportUrl(filePath, this.reloadable));
 
     if (jsModule) {
       if (isApp(jsModule.app)) {
@@ -570,7 +571,11 @@ export class AgentLoader {
 
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
     try {
-      const agentFile = new AgentFile(file.path, this.options);
+      const agentFile = new AgentFile(
+        file.path,
+        this.options,
+        this.watchForChanges,
+      );
       await agentFile.load();
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
@@ -589,7 +594,11 @@ export class AgentLoader {
     }
 
     try {
-      const agentFile = new AgentFile(possibleEntryFile.path, this.options);
+      const agentFile = new AgentFile(
+        possibleEntryFile.path,
+        this.options,
+        this.watchForChanges,
+      );
       await agentFile.load();
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
@@ -613,6 +622,22 @@ export class AgentLoader {
         `Skipping it; the other agents are unaffected.`,
     );
   }
+}
+
+/**
+ * Node serves a URL it has already imported from its module cache, so picking
+ * up a changed file means importing it under a URL Node has not seen — hence
+ * the unique suffix. A load that can never be reloaded must not carry one: the
+ * query stays visible as `import.meta.url` to the agent file and to everything
+ * esbuild bundles into it, so code that compares that value sees a different
+ * string on every load.
+ */
+export function buildImportUrl(filePath: string, reloadable: boolean): string {
+  const fileUrl = pathToFileURL(filePath).href;
+  if (!reloadable) {
+    return fileUrl;
+  }
+  return `${fileUrl}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
 function isJsFile(fileExt?: string): boolean {

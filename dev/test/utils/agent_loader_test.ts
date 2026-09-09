@@ -24,6 +24,7 @@ import {App, isApp} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
+  buildImportUrl,
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
@@ -560,6 +561,36 @@ describe('AgentLoader', () => {
 
       await expect(agentFile.load()).rejects.toThrow(
         `Agent file ${agentPath} does not exists`,
+      );
+    });
+  });
+
+  describe('buildImportUrl', () => {
+    it('imports the file at its own URL when reloading is off', () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+
+      const url = buildImportUrl(agentPath, false);
+
+      expect(url).toBe(pathToFileURL(agentPath).href);
+      expect(new URL(url).search).toBe('');
+    });
+
+    it('adds a unique cache-busting query when reloading is on', () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+
+      const url = new URL(buildImportUrl(agentPath, true));
+
+      expect(url.pathname).toBe(
+        new URL(pathToFileURL(agentPath).href).pathname,
+      );
+      expect(url.search).toMatch(/^\?t=\d+_[a-z0-9]+$/);
+    });
+
+    it('gives a different URL to every reload', () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+
+      expect(buildImportUrl(agentPath, true)).not.toBe(
+        buildImportUrl(agentPath, true),
       );
     });
   });
