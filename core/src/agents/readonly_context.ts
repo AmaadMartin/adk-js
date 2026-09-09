@@ -6,7 +6,7 @@
 
 import {Content} from '@google/genai';
 
-import {State} from '../sessions/state.js';
+import {ReadonlyState, ReadonlyStateView} from '../sessions/readonly_state.js';
 
 import {InvocationContext, requireAgent} from './invocation_context.js';
 
@@ -52,13 +52,14 @@ export class ReadonlyContext {
   }
 
   /**
-   * The state of the current session.
+   * The state of the current session, as a read-only view.
+   *
+   * Reads pass through to the live session state. A write throws
+   * `ReadonlyStateError`: use a `Context` (tool or callback) or a workflow
+   * node's `ctx.state` to write state.
    */
-  get state(): Readonly<State> {
-    return new State(
-      this.invocationContext.session.state,
-      {},
-    ) as Readonly<State>;
+  get state(): ReadonlyStateView {
+    return new ReadonlyState(this.invocationContext.session.state);
   }
 
   /**
