@@ -182,6 +182,9 @@ export class AgentFile {
         this.options.moduleType || (await getFileModuleType(filePath));
       const parsedPath = path.parse(filePath);
       const outputDir = await createTempDir('adk_agent_loader');
+      // Recorded before anything can throw, so a failed compile or import
+      // still leaves dispose() able to remove the directory.
+      this.cleanupDirPath = outputDir;
       const compiledFilePath = path.join(
         outputDir,
         parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
@@ -229,7 +232,6 @@ export class AgentFile {
           : {}),
       });
 
-      this.cleanupDirPath = outputDir;
       this.cleanupFilePath = compiledFilePath;
       filePath = compiledFilePath;
     }
@@ -354,13 +356,13 @@ export class AgentFile {
     if (this.disposed) {
       return;
     }
+    this.disposed = true;
 
-    if (this.cleanupFilePath) {
-      this.disposed = true;
-      await fsPromises.unlink(this.cleanupFilePath);
-      if (this.cleanupDirPath) {
-        await removeFolder(this.cleanupDirPath);
-      }
+    // The compiled artifact lives inside this directory, so removing the
+    // directory removes it too. removeFolder reports its own failures instead
+    // of throwing, which keeps dispose() safe for the fire-and-forget callers.
+    if (this.cleanupDirPath) {
+      await removeFolder(this.cleanupDirPath);
     }
   }
 }
@@ -569,11 +571,12 @@ export class AgentLoader {
   }
 
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
+    const agentFile = new AgentFile(file.path, this.options);
     try {
-      const agentFile = new AgentFile(file.path, this.options);
       await agentFile.load();
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
+      await agentFile.dispose();
       this.recordLoadFailure(file.name, file.path, e);
     }
   }
@@ -588,11 +591,12 @@ export class AgentLoader {
       return;
     }
 
+    const agentFile = new AgentFile(possibleEntryFile.path, this.options);
     try {
-      const agentFile = new AgentFile(possibleEntryFile.path, this.options);
       await agentFile.load();
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
+      await agentFile.dispose();
       this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
     }
   }
