@@ -30,6 +30,8 @@ jobs:
         run: |
           (cd tests/cross_language/a2a/go_ts/go_client && go mod tidy)
           (cd tests/cross_language/a2a/ts_go/go_backend && go mod tidy)
+          # go.sum is gitignored, so this only asserts the committed manifests.
+          git diff --exit-code -- tests/cross_language
 
       - name: Build packages
         run: npm run build
