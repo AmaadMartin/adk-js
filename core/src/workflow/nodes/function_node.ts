@@ -7,7 +7,8 @@
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {createEvent, Event, isEvent} from '../../events/event.js';
 import {carryDeltaStamp} from '../../sessions/state_write_order.js';
-import {BaseNode, BaseNodeConfig, isContent, toContent} from '../base_node.js';
+import {isContent} from '../../utils/content_utils.js';
+import {BaseNode, BaseNodeConfig, toContent} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 import {
   createAuthRequestEvent,

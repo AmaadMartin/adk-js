@@ -15,6 +15,7 @@ import {
   ReflectAndRetryModelPlugin,
   RESERVED_TOOL_CALL_ERROR_TYPE,
 } from '../../src/plugins/reflect_retry_model_plugin.js';
+import {SKIP_THOUGHT_SIGNATURE_VALIDATOR} from '../../src/utils/content_utils.js';
 
 function createMockContext(
   invocationId = 'inv-model-01',
@@ -127,6 +128,22 @@ describe('ReflectAndRetryModelPlugin', () => {
       expect(
         (part.functionCall!.args as Record<string, unknown>)['retry_count'],
       ).toBe(1);
+    });
+
+    it('should stamp the synthesized retry part with the skip-validation signature', async () => {
+      // The model never produced this part, so without the sentinel the
+      // backend rejects it for a missing thought signature.
+      const plugin = new ReflectAndRetryModelPlugin({maxRetries: 3});
+      const retryResponse = await plugin.afterModelCallback({
+        callbackContext: createMockContext('inv-signature'),
+        llmResponse: {
+          errorCode: 'MALFORMED_FUNCTION_CALL',
+          finishReason: FinishReason.MALFORMED_FUNCTION_CALL,
+        },
+      });
+
+      const part = retryResponse!.content!.parts![0];
+      expect(part.thoughtSignature).toBe(SKIP_THOUGHT_SIGNATURE_VALIDATOR);
     });
 
     it('should throw exception when model error exceeds maxRetries and throwException is true', async () => {
