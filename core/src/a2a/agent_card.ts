@@ -167,8 +167,8 @@ export async function getA2AAgentCard(
       pushNotifications: false,
       streaming: true,
     },
-    defaultInputModes: ['text'],
-    defaultOutputModes: ['text'],
+    defaultInputModes: ['text/plain'],
+    defaultOutputModes: ['text/plain'],
     additionalInterfaces: transports,
   };
 }
