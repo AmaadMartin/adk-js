@@ -6,7 +6,10 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
@@ -14,6 +17,19 @@ import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_au
 export interface AuthPreparationResult {
   state: 'pending' | 'done';
   authCredential?: AuthCredential;
+}
+
+/**
+ * Returns true if the credential still needs a token from the identity
+ * provider. Mirrors adk-python's
+ * `ToolAuthHandler._external_exchange_required()`.
+ */
+function externalExchangeRequired(credential: AuthCredential): boolean {
+  return (
+    (credential.authType === AuthCredentialTypes.OAUTH2 ||
+      credential.authType === AuthCredentialTypes.OPEN_ID_CONNECT) &&
+    !credential.oauth2?.accessToken
+  );
 }
 
 class ToolContextCredentialStore {
@@ -112,7 +128,14 @@ export class ToolAuthHandler {
     // configured credential that needed no exchange is already available on
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
-    if (authResponseCredential || result.wasExchanged) {
+    //
+    // A credential that still needs a token is never cached: the read above
+    // returns a cached credential verbatim as `done`, so one failed exchange
+    // would strand this tool on a token-less credential for the whole session.
+    if (
+      !externalExchangeRequired(result.credential) &&
+      (authResponseCredential || result.wasExchanged)
+    ) {
       const key = store.getCredentialKey(this.authScheme);
       store.storeCredential(key, result.credential);
     }

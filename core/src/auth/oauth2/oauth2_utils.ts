@@ -38,6 +38,31 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
   return undefined;
 }
 
+/** `name` of {@link OAuth2EndpointNotAllowedError}, used by its type guard. */
+const ENDPOINT_NOT_ALLOWED = 'OAuth2EndpointNotAllowedError';
+
+/**
+ * Thrown when the SSRF guard rejects a token endpoint. Distinct from a
+ * transport failure: the endpoint is misconfigured or tampered with, so no
+ * retry and no degraded path can make the exchange safe.
+ */
+export class OAuth2EndpointNotAllowedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = ENDPOINT_NOT_ALLOWED;
+  }
+}
+
+/**
+ * Type guard for {@link OAuth2EndpointNotAllowedError}. Matches on `name` so it
+ * still holds when a runtime has loaded two copies of this package.
+ */
+export function isOAuth2EndpointNotAllowedError(
+  value: unknown,
+): value is OAuth2EndpointNotAllowedError {
+  return value instanceof Error && value.name === ENDPOINT_NOT_ALLOWED;
+}
+
 interface OAuth2TokenResponse {
   access_token?: string;
   expires_in?: number;
@@ -55,7 +80,7 @@ export async function fetchOAuth2Tokens(
   // Guard against SSRF: apply the same blocklist used in oauth2_discovery.ts
   // so callers can't point tokenUrl at a private/cloud-metadata address.
   if (!validateDiscoveryUrl(endpoint)) {
-    throw new Error(
+    throw new OAuth2EndpointNotAllowedError(
       `SSRF protection: OAuth2 token endpoint '${endpoint}' is not allowed. Must use HTTPS and must not target private/loopback/cloud-metadata addresses.`,
     );
   }
