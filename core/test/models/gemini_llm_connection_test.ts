@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {LlmResponse} from '@google/adk';
 import {
   Blob,
   Content,
@@ -267,6 +268,87 @@ describe('GeminiLlmConnection', () => {
       );
     });
 
+    it('should put the live session id on every response', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+      );
+      const generator = connection.receive();
+
+      messageQueue.push(
+        liveServerMessage({setupComplete: {sessionId: 'test-session-id'}}),
+      );
+      messageQueue.push(
+        liveServerMessage({
+          serverContent: {modelTurn: {parts: [{text: 'hello'}]}},
+        }),
+      );
+      messageQueue.push(
+        liveServerMessage({serverContent: {turnComplete: true}}),
+      );
+      messageQueue.close();
+
+      const responses: LlmResponse[] = [];
+      for await (const response of generator) {
+        responses.push(response);
+      }
+
+      expect(responses.length).toBeGreaterThan(0);
+      for (const response of responses) {
+        expect(response.liveSessionId).toBe('test-session-id');
+      }
+    });
+
+    it('should omit the live session id when the server never reports one', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+      );
+      const generator = connection.receive();
+
+      messageQueue.push(liveServerMessage({setupComplete: {}}));
+      messageQueue.push(
+        liveServerMessage({usageMetadata: {totalTokenCount: 30}}),
+      );
+      messageQueue.close();
+
+      const res = await generator.next();
+      expect(res.value).not.toHaveProperty('liveSessionId');
+      expect((await generator.next()).done).toBe(true);
+    });
+
+    it('should put the live session id on a response flushed at close', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+        messageQueue,
+      );
+      const generator = connection.receive();
+
+      messageQueue.push(
+        liveServerMessage({setupComplete: {sessionId: 'test-session-id'}}),
+      );
+      messageQueue.push(
+        liveServerMessage({
+          toolCall: {functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}]},
+        }),
+      );
+      messageQueue.close();
+
+      const res = await generator.next();
+      expect(res.value).toEqual({
+        content: {
+          role: 'model',
+          parts: [{functionCall: {name: 'tool_a', args: {x: 1}, id: '1'}}],
+        },
+        modelVersion: 'gemini-2.5-flash',
+        liveSessionId: 'test-session-id',
+      });
+      expect((await generator.next()).done).toBe(true);
+    });
+
     it('should yield usage metadata', async () => {
       const connection = new GeminiLlmConnection(
         mockSession,
@@ -277,7 +359,7 @@ describe('GeminiLlmConnection', () => {
 
       const usageMetadata = {
         promptTokenCount: 10,
-        candidatesTokenCount: 20,
+        responseTokenCount: 20,
         totalTokenCount: 30,
       };
       messageQueue.push(liveServerMessage({usageMetadata}));
@@ -285,7 +367,11 @@ describe('GeminiLlmConnection', () => {
 
       const res = await generator.next();
       expect(res.value).toEqual({
-        usageMetadata,
+        usageMetadata: {
+          promptTokenCount: 10,
+          candidatesTokenCount: 20,
+          totalTokenCount: 30,
+        },
         modelVersion: 'gemini-2.5-flash',
       });
       expect((await generator.next()).done).toBe(true);
@@ -902,6 +988,7 @@ describe('GeminiLlmConnection', () => {
           parts: [{text: 'Hello'}],
         },
         partial: false,
+        interrupted: true,
         modelVersion: 'gemini-2.5-flash',
       });
 
