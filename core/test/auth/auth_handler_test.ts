@@ -4,8 +4,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig, AuthCredentialTypes, AuthHandler, State} from '@google/adk';
+import {
+  AuthConfig,
+  AuthCredentialTypes,
+  AuthHandler,
+  OAuth2Auth,
+  State,
+} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+
+/** Builds an oauth2 AuthConfig whose raw credential carries `oauth2`. */
+function oauth2AuthConfig(oauth2: OAuth2Auth): AuthConfig {
+  return {
+    credentialKey: 'testKey',
+    authScheme: {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://auth.com',
+          tokenUrl: 'https://token.com',
+          scopes: {scope1: 'desc'},
+        },
+      },
+    },
+    rawAuthCredential: {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2,
+    },
+  };
+}
 
 vi.mock('../../src/auth/oauth2/oauth2_credential_exchanger.js', () => ({
   OAuth2CredentialExchanger: class {
@@ -468,6 +495,72 @@ describe('AuthHandler', () => {
 
       expect(uri).toBeDefined();
       expect(uri?.oauth2?.authUri).toContain('https://token.com');
+    });
+
+    it('defaults prompt to consent when the credential does not set one', () => {
+      const handler = new AuthHandler(
+        oauth2AuthConfig({
+          clientId: 'id',
+          clientSecret: 'secret',
+          redirectUri: 'https://redirect.com',
+        }),
+      );
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('prompt=consent');
+    });
+
+    it('uses the prompt from the credential when set', () => {
+      const handler = new AuthHandler(
+        oauth2AuthConfig({clientId: 'id', prompt: 'none'}),
+      );
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('prompt=none');
+      expect(uri?.oauth2?.authUri).not.toContain('prompt=consent');
+    });
+
+    it('carries a multi-word prompt through', () => {
+      const handler = new AuthHandler(
+        oauth2AuthConfig({clientId: 'id', prompt: 'select_account'}),
+      );
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('prompt=select_account');
+    });
+
+    it('encodes a space-delimited prompt list', () => {
+      const handler = new AuthHandler(
+        oauth2AuthConfig({clientId: 'id', prompt: 'consent select_account'}),
+      );
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('prompt=consent+select_account');
+    });
+
+    it('falls back to consent for an empty prompt', () => {
+      const handler = new AuthHandler(
+        oauth2AuthConfig({clientId: 'id', prompt: ''}),
+      );
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('prompt=consent');
+    });
+
+    it('keeps prompt on the exchanged credential', () => {
+      const handler = new AuthHandler(
+        oauth2AuthConfig({clientId: 'id', prompt: 'login'}),
+      );
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('prompt=login');
+      expect(uri?.oauth2?.prompt).toBe('login');
     });
   });
 });
