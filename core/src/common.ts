@@ -155,6 +155,20 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {
+  EvalConversation,
+  EvalEntry,
+  ToolUse,
+} from './evaluation/eval_entry.js';
+export {
+  generateResponses,
+  generateResponsesFromSession,
+  generateResponsesFromSessionFile,
+} from './evaluation/evaluation_generator.js';
+export type {
+  GenerateResponsesParams,
+  InitialSession,
+} from './evaluation/evaluation_generator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {

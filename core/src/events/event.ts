@@ -412,13 +412,22 @@ const PRESERVE_KEYS_SNAKE_CASE = [
 /**
  * Transforms a snake_cased event object to a camelCased Event object.
  *
+ * An event already in camelCase passes through unchanged. `toNotation` matches
+ * a preserved path against the keys of the source, so both key lists apply:
+ * without the camelCase list, a payload such as
+ * `content.parts.functionCall.args` loses the snake_case names of its own
+ * keys.
+ *
  * @param event The snake_cased event object.
  * @returns The camelCased Event object.
  */
 export function transformToCamelCaseEvent(
   event: Record<string, unknown>,
 ): Event {
-  return toCamelCase(event, PRESERVE_KEYS_SNAKE_CASE) as Event;
+  return toCamelCase(event, [
+    ...PRESERVE_KEYS_SNAKE_CASE,
+    ...PRESERVE_KEYS_CAMEL_CASE,
+  ]) as Event;
 }
 
 /**

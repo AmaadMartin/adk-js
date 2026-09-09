@@ -339,6 +339,36 @@ describe('Event Utils', () => {
         NestedKey: 'value2',
       });
     });
+
+    it('preserves the payload keys of an event already in camelCase', () => {
+      const camelEvent = {
+        id: '123',
+        invocationId: 'inv1',
+        actions: {stateDelta: {some_key: 'value'}},
+        content: {
+          role: 'model',
+          parts: [
+            {functionCall: {name: 'get_weather', args: {city_name: 'Paris'}}},
+            {
+              functionResponse: {
+                name: 'get_weather',
+                response: {sky_state: 'rain'},
+              },
+            },
+          ],
+        },
+      };
+
+      const result = transformToCamelCaseEvent(camelEvent);
+
+      expect(result.actions?.stateDelta).toEqual({some_key: 'value'});
+      expect(result.content?.parts?.[0].functionCall?.args).toEqual({
+        city_name: 'Paris',
+      });
+      expect(result.content?.parts?.[1].functionResponse?.response).toEqual({
+        sky_state: 'rain',
+      });
+    });
   });
 
   describe('transformToSnakeCaseEvent', () => {
