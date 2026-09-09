@@ -85,8 +85,8 @@ describe('setLogger', () => {
     });
   });
 
-  describe('backward compatibility', () => {
-    it('deprecated logger export still works with custom logger', async () => {
+  describe('logger facade', () => {
+    it('forwards to the current logger', async () => {
       const {logger} = await import('../../src/utils/logger.js');
 
       const messages: string[] = [];
