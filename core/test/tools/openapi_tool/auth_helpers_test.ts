@@ -114,6 +114,29 @@ describe('auth_helpers', () => {
       expect(result).toBe(url);
       expect(headers['Authorization']).toBe('Bearer my_token');
     });
+
+    it('should apply the additional headers of an exchanged credential', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.HTTP,
+        http: {
+          scheme: 'bearer',
+          credentials: {
+            token: 'my_token',
+          },
+          additionalHeaders: {'x-goog-user-project': 'quota_project'},
+        },
+      };
+
+      const result = applyCredential(url, headers, credential);
+
+      expect(result).toBe(url);
+      expect(headers).toEqual({
+        'x-goog-user-project': 'quota_project',
+        Authorization: 'Bearer my_token',
+      });
+    });
   });
 
   describe('createApiKeyScheme', () => {
