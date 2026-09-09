@@ -64,6 +64,12 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  /**
+   * Free-form metadata accumulated by tools and services during the
+   * invocation. A copy carries the same object over, so a sub-agent's tool
+   * writes where the parent can read.
+   */
+  customMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -268,6 +274,17 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Free-form metadata accumulated by tools and services during this
+   * invocation. Starts empty and is written to as the invocation runs.
+   *
+   * The object is shared with every copy of this context: {@link clone} and
+   * `BaseAgent.createInvocationContext` spread the own fields over, so a
+   * sub-agent writes into the same record the parent reads. `adk-js` has no
+   * `RunConfig.customMetadata`, so unlike adk-python nothing seeds it.
+   */
+  readonly customMetadata: Record<string, unknown>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -289,6 +306,7 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
+    this.customMetadata = params.customMetadata ?? {};
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop

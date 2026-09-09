@@ -5,20 +5,23 @@
  */
 
 /**
- * Helpers for turning arbitrary thrown values into readable, root-cause
- * messages, so that wrapped, aggregated or HTTP-flavoured failures are not
- * reduced to an empty or generic string when they are reported.
+ * Helpers for inspecting arbitrary thrown values: turning them into readable,
+ * root-cause messages, so that wrapped, aggregated or HTTP-flavoured failures
+ * are not reduced to an empty or generic string when they are reported, and
+ * telling a cancellation apart from a real failure.
  */
 
 /**
  * Maximum number of characters of an HTTP response body surfaced by
  * {@link formatError} before it is truncated. Bounds both log volume and the
- * exposure of potentially sensitive response payloads.
+ * exposure of potentially sensitive response payloads. Shared, so that a body
+ * reported through an error and the same body captured for debugging are cut
+ * at the same point.
  */
-const MAX_RESPONSE_BODY_LENGTH = 1000;
+export const MAX_RESPONSE_BODY_LENGTH = 1000;
 
-/** Marker appended to a response body that exceeds {@link MAX_RESPONSE_BODY_LENGTH}. */
-const TRUNCATION_MARKER = '... [truncated]';
+/** Marker appended to a body that exceeds {@link MAX_RESPONSE_BODY_LENGTH}. */
+export const TRUNCATION_MARKER = '... [truncated]';
 
 /** Returned by {@link formatError} when the input carries no usable message. */
 const UNKNOWN_ERROR = 'Unknown error';
@@ -26,6 +29,13 @@ const UNKNOWN_ERROR = 'Unknown error';
 /** Lowest and highest values treated as an HTTP status code. */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
+
+/**
+ * Error `name` values that mean the caller cancelled the operation rather than
+ * the operation failing. An aborted `AbortSignal` produces `AbortError`, and
+ * `AbortSignal.timeout` produces `TimeoutError`.
+ */
+const CANCELLATION_ERROR_NAMES = new Set(['AbortError', 'TimeoutError']);
 
 /**
  * Narrows an arbitrary value to an indexable record, or `undefined` when it is
@@ -158,4 +168,47 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
  */
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
+}
+
+/**
+ * Recursively searches an error graph for a cancellation. `seen` guards
+ * against cyclic `cause`/`errors` graphs.
+ */
+function hasCancellationName(err: unknown, seen: Set<unknown>): boolean {
+  const record = asRecord(err);
+  if (record === undefined || seen.has(record)) {
+    return false;
+  }
+  seen.add(record);
+  const name = record['name'];
+  if (typeof name === 'string' && CANCELLATION_ERROR_NAMES.has(name)) {
+    return true;
+  }
+  const errors = record['errors'];
+  if (
+    Array.isArray(errors) &&
+    errors.some((sub) => hasCancellationName(sub, seen))
+  ) {
+    return true;
+  }
+  return hasCancellationName(record['cause'], seen);
+}
+
+/**
+ * Reports whether `err`, or anything reachable through its `cause` chain or
+ * its `AggregateError.errors`, is a cancellation.
+ *
+ * The whole graph is searched because a transport often translates a
+ * cancellation into another error while it tears the connection down. The
+ * match is on the error `name` rather than on the class, so an error built by
+ * a second copy of a package still matches.
+ *
+ * Never throws, and is safe on `null`, `undefined`, primitives and cyclic
+ * error graphs.
+ *
+ * @param err The thrown or rejected value to classify.
+ * @return `true` when the value carries a cancellation.
+ */
+export function isAbortError(err: unknown): boolean {
+  return hasCancellationName(err, new Set<unknown>());
 }

@@ -6,7 +6,7 @@
 
 import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {resetLogger} from '../../src/utils/logger.js';
+import {logger, resetLogger} from '../../src/utils/logger.js';
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -140,5 +140,50 @@ describe('setLogger', () => {
 
       expect(logger.constructor.name).toBe('SimpleLogger');
     });
+  });
+});
+
+describe('isEnabledFor', () => {
+  beforeEach(() => {
+    resetLogger();
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('reports every level at or above the configured one', () => {
+    setLogLevel(LogLevel.WARN);
+
+    expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(false);
+    expect(logger.isEnabledFor?.(LogLevel.INFO)).toBe(false);
+    expect(logger.isEnabledFor?.(LogLevel.WARN)).toBe(true);
+    expect(logger.isEnabledFor?.(LogLevel.ERROR)).toBe(true);
+  });
+
+  it('reports debug once the level is lowered to DEBUG', () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(true);
+  });
+
+  it('reports nothing for the no-op logger', () => {
+    setLogger(null);
+
+    expect(logger.isEnabledFor?.(LogLevel.ERROR)).toBe(false);
+  });
+
+  it('falls back to false for a logger that does not implement it', () => {
+    const legacyLogger: Logger = {
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    };
+    setLogger(legacyLogger);
+
+    expect(logger.isEnabledFor?.(LogLevel.DEBUG)).toBe(false);
   });
 });
