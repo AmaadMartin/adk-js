@@ -209,7 +209,9 @@ export class GcsArtifactService implements BaseArtifactService {
           }),
         );
 
-        return file.delete();
+        // A version listed above can disappear before this delete reaches GCS,
+        // so a 404 means the caller already got what it asked for.
+        return file.delete({ignoreNotFound: true});
       }),
     );
 
