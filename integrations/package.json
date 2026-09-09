@@ -45,6 +45,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@google/adk": "^2.0.0"
+    "@google-cloud/bigquery": "^8.3.1",
+    "@google/adk": "^2.0.0",
+    "zod": "^4.2.1"
   }
 }
