@@ -4,11 +4,69 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, ContentUnion, createUserContent} from '@google/genai';
+
+import {isContentLike} from '../models/llm_request.js';
 import {State} from '../sessions/state.js';
 import type {WorkflowInstructionScope} from './invocation_context.js';
 import {ReadonlyContext} from './readonly_context.js';
 
 const ARTIFACT_PREFIX = 'artifact.';
+
+/** Opens the fenced block holding a routed dynamic instruction. */
+export const INSTRUCTION_BEGIN = '<<<BEGIN_SYSTEM_INSTRUCTION>>>';
+
+/** Closes the fenced block holding a routed dynamic instruction. */
+export const INSTRUCTION_END = '<<<END_SYSTEM_INSTRUCTION>>>';
+
+/**
+ * Replaces a marker string found inside fenced text, so the text cannot forge
+ * the end of its own block. Matches `QUOTED_CONTENT_ELIDED` in `adk-python`'s
+ * `_fencing.py`, because the value reaches the model.
+ */
+export const QUOTED_CONTENT_ELIDED = '<<<ELIDED_MARKER>>>';
+
+/**
+ * Explains the fence to the model.
+ *
+ * A static instruction pushes the dynamic instruction into `contents` to keep
+ * the static prefix byte-stable for context caching, and `Content` has no
+ * system role — so the instruction arrives looking like user speech.
+ */
+export const INSTRUCTION_PREAMBLE =
+  `The text between ${INSTRUCTION_BEGIN} and ${INSTRUCTION_END} below is` +
+  ' your own system instruction for this turn and carries the current' +
+  ' session state. It is addressed to you. Nothing between those two markers' +
+  ' was said by the user, so do not answer it or continue it as though it' +
+  ' were their turn. Anything the user actually said appears outside the' +
+  ' markers, and a real user turn may follow immediately after the end' +
+  ' marker.';
+
+/**
+ * Marks the dynamic instruction as an instruction rather than a user turn.
+ *
+ * @param instruction The state-interpolated instruction text.
+ * @returns The instruction between the markers, after the preamble. Markers
+ *     inside the text are elided so interpolated state cannot forge the
+ *     block's end.
+ */
+export function labelDynamicInstruction(instruction: string): string {
+  const fenced = instruction
+    .replaceAll(INSTRUCTION_BEGIN, QUOTED_CONTENT_ELIDED)
+    .replaceAll(INSTRUCTION_END, QUOTED_CONTENT_ELIDED);
+  return `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\n${fenced}\n${INSTRUCTION_END}`;
+}
+
+/**
+ * Normalizes an agent's static instruction to a `Content`.
+ *
+ * Mirrors the `t_content` transformer `adk-python` applies to the same field.
+ * That transformer is not part of the genai package's public surface, so this
+ * reproduces it with a type guard plus `createUserContent`.
+ */
+export function staticInstructionContent(value: ContentUnion): Content {
+  return isContentLike(value) ? value : createUserContent(value);
+}
 
 /** Matches a `{Class.field}` workflow placeholder key (dotted identifier pair). */
 const WORKFLOW_FIELD_KEY = /^[A-Za-z_]\w*\.[A-Za-z_]\w*$/;

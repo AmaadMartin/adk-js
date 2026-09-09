@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {createUserContent} from '@google/genai';
+
 import {Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
-import {injectSessionState} from '../instructions.js';
+import {
+  injectSessionState,
+  labelDynamicInstruction,
+  staticInstructionContent,
+} from '../instructions.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
@@ -45,7 +51,15 @@ export class InstructionsLlmRequestProcessor extends BaseLlmRequestProcessor {
       appendInstructions(llmRequest, [instructionWithState]);
     }
 
-    // Step 2: Appends agent local instructions if set.
+    // Step 2: Appends the static instruction, verbatim.
+    if (agent.staticInstruction) {
+      appendInstructions(
+        llmRequest,
+        staticInstructionContent(agent.staticInstruction),
+      );
+    }
+
+    // Step 3: Appends agent local instructions if set.
     // TODO - b/425992518: requireStateInjection means user passed a
     // instruction processor. We need to make it more explicit.
     if (agent.instruction) {
@@ -60,7 +74,16 @@ export class InstructionsLlmRequestProcessor extends BaseLlmRequestProcessor {
           new ReadonlyContext(invocationContext),
         );
       }
-      appendInstructions(llmRequest, [instructionWithState]);
+      if (agent.staticInstruction) {
+        // The static prefix must stay byte-stable for context caching, so the
+        // state-carrying instruction rides in the contents behind it, labelled
+        // so the model does not read it as user speech.
+        llmRequest.contents.push(
+          createUserContent(labelDynamicInstruction(instructionWithState)),
+        );
+      } else {
+        appendInstructions(llmRequest, [instructionWithState]);
+      }
     }
 
     if (

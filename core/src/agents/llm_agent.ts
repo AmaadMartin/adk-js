@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {ContentUnion, GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -309,6 +309,24 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    */
   globalInstruction?: string | InstructionProvider;
 
+  /**
+   * Static instruction content sent literally at the start of the system
+   * instruction.
+   *
+   * The content never changes and is never processed: placeholders are not
+   * substituted and session state is not injected. It exists for context
+   * caching, which needs a byte-stable request prefix. The Live API has its
+   * own cache, so this field does not help there.
+   *
+   * Setting it moves {@link LlmAgentConfig.instruction} out of the system
+   * instruction and into the request contents, after the static content.
+   *
+   * Non-text parts (inline data, file data) cannot go in a system
+   * instruction, so each becomes a textual reference there plus a user
+   * content carrying the data.
+   */
+  staticInstruction?: ContentUnion;
+
   /** Tools available to this agent. */
   tools?: ToolUnion[];
 
@@ -460,6 +478,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   instruction: string | InstructionProvider;
   /** @deprecated Use GlobalInstructionPlugin instead. */
   globalInstruction: string | InstructionProvider;
+  /** See {@link LlmAgentConfig.staticInstruction}. */
+  staticInstruction?: ContentUnion;
   tools: ToolUnion[];
   generateContentConfig?: GenerateContentConfig;
   disallowTransferToParent: boolean;
@@ -515,6 +535,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.model = config.model;
     this.instruction = config.instruction ?? '';
     this.globalInstruction = config.globalInstruction ?? '';
+    this.staticInstruction = config.staticInstruction;
     this.tools = config.tools ?? [];
     this.generateContentConfig = config.generateContentConfig;
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;

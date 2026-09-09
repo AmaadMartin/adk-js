@@ -8,6 +8,7 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createSession,
   Event,
   EventActions,
   InvocationContext,
@@ -17,6 +18,7 @@ import {
   Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
 
 function createMockEvent(id: string, timestamp: number, text: string): Event {
   return {
@@ -182,5 +184,129 @@ describe('ContentRequestProcessor', () => {
     expect(llmRequest.contents[0].parts?.[0]?.text).toContain('Summary 1-3');
     // Followed by message 4
     expect(llmRequest.contents[1].parts?.[0]?.text).toContain('New message 4');
+  });
+});
+
+describe('ContentRequestProcessor with instruction contents', () => {
+  function createAgentEvent(
+    id: string,
+    timestamp: number,
+    author: string,
+    text: string,
+  ): Event {
+    return {
+      id,
+      invocationId: 'test-invoc',
+      author,
+      actions: {} as EventActions,
+      timestamp,
+      content: {role: author === 'user' ? 'user' : 'model', parts: [{text}]},
+    };
+  }
+
+  function createContextFor(
+    agent: LlmAgent,
+    events: Event[],
+  ): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session: createSession({
+        id: 'test-session',
+        events,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      pluginManager: new PluginManager([]),
+    });
+  }
+
+  const history: Event[] = [
+    createAgentEvent('1', 1000, 'user', 'First message'),
+    createAgentEvent('2', 2000, 'test_agent', 'First response'),
+    createAgentEvent('3', 3000, 'user', 'Second message'),
+  ];
+
+  it('keeps the static instruction ahead of the conversation history', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      instruction: 'Dynamic instruction',
+      staticInstruction: {
+        parts: [
+          {
+            fileData: {
+              fileUri: 'gs://test-bucket/reference.pdf',
+              mimeType: 'application/pdf',
+            },
+          },
+        ],
+      },
+    });
+    const invocationContext = createContextFor(agent, history);
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INSTRUCTIONS_LLM_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.contents).toHaveLength(5);
+    expect(llmRequest.contents[0].parts?.[0].text).toBe(
+      'Referenced file data: file_data_0',
+    );
+    expect(llmRequest.contents[0].parts?.[1].fileData?.fileUri).toBe(
+      'gs://test-bucket/reference.pdf',
+    );
+    expect(llmRequest.contents[1].role).toBe('user');
+    expect(llmRequest.contents[1].parts?.[0].text).toContain(
+      'Dynamic instruction',
+    );
+    expect(llmRequest.contents[2].parts?.[0].text).toBe('First message');
+    expect(llmRequest.contents[3].parts?.[0].text).toBe('First response');
+    expect(llmRequest.contents[4].parts?.[0].text).toBe('Second message');
+  });
+
+  it('leaves the history untouched for an agent without a static instruction', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      instruction: 'Dynamic instruction',
+    });
+    const invocationContext = createContextFor(agent, history);
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INSTRUCTIONS_LLM_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.contents).toHaveLength(3);
+    expect(llmRequest.contents[0].parts?.[0].text).toBe('First message');
+    expect(llmRequest.config?.systemInstruction).toBe('Dynamic instruction');
   });
 });
