@@ -214,6 +214,12 @@ export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
 export type {LlmResponse} from './models/llm_response.js';
+export {OpenAILlm} from './models/openai_llm.js';
+export type {
+  OpenAIClient,
+  OpenAICompletions,
+  OpenAILlmParams,
+} from './models/openai_llm.js';
 export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
