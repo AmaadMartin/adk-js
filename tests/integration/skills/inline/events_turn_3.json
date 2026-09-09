@@ -18,7 +18,7 @@
             "name": "load_skill_resource",
             "args": {
               "skill_name": "weather-skill",
-              "path": "references/weather_info.md"
+              "file_path": "references/weather_info.md"
             },
             "id": "adk-aca240c1-1af6-4a46-b331-bb8fb6cc0ed5"
           },
@@ -60,7 +60,7 @@
             "name": "load_skill_resource",
             "response": {
               "skill_name": "weather-skill",
-              "path": "references/weather_info.md",
+              "file_path": "references/weather_info.md",
               "content": "\n        Weather Information\n        - **Location:** San Francisco, CA\n        - **Temperature:** 68°F (20°C)\n        - **Condition:** Partly Cloudy\n        - **Humidity:** 55%\n        - **Wind Speed:** 10 mph"
             }
           }

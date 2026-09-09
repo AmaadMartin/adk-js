@@ -39,13 +39,13 @@ export class LoadSkillResourceTool extends BaseTool {
             type: Type.STRING,
             description: 'The name of the skill.',
           },
-          path: {
+          file_path: {
             type: Type.STRING,
             description:
               "The relative path to the resource (e.g., 'references/my_doc.md', 'assets/template.txt', or 'scripts/setup.sh').",
           },
         },
-        required: ['skill_name', 'path'],
+        required: ['skill_name', 'file_path'],
       },
     };
   }
@@ -55,7 +55,7 @@ export class LoadSkillResourceTool extends BaseTool {
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
     const skillName = args['skill_name'] as string;
-    let resourcePath = args['path'] as string;
+    let resourcePath = args['file_path'] as string;
 
     if (!skillName) {
       return {
@@ -65,7 +65,7 @@ export class LoadSkillResourceTool extends BaseTool {
     }
     if (!resourcePath) {
       return {
-        error: 'Resource path is required.',
+        error: "Argument 'file_path' is required.",
         error_code: 'MISSING_RESOURCE_PATH',
       };
     }
@@ -124,14 +124,14 @@ export class LoadSkillResourceTool extends BaseTool {
     if (Buffer.isBuffer(content)) {
       return {
         skill_name: skillName,
-        path: resourcePath,
+        file_path: resourcePath,
         status: BINARY_FILE_DETECTED_MSG,
       };
     }
 
     return {
       skill_name: skillName,
-      path: resourcePath,
+      file_path: resourcePath,
       content,
     };
   }
@@ -157,7 +157,10 @@ export class LoadSkillResourceTool extends BaseTool {
           (part.functionResponse.response as Record<string, unknown>) || {};
         if (response['status'] === BINARY_FILE_DETECTED_MSG) {
           const skillName = response['skill_name'] as string;
-          const resourcePath = response['path'] as string;
+          const resourcePath = response['file_path'] as string;
+          if (!skillName || !resourcePath) {
+            continue;
+          }
 
           let skill;
           try {
