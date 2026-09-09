@@ -11,6 +11,7 @@ import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {createDockerFileContent} from '../../src/cli/deploy/deploy_utils.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
@@ -466,6 +467,42 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('generated Dockerfile CMD contract', () => {
+    it('should emit --compile/--bundle flags this CLI parses into AgentFileOptions', async () => {
+      const dockerFile = createDockerFileContent({
+        appName: 'test-app',
+        project: 'test-project',
+        region: 'us-central1',
+        port: 8080,
+        withUi: true,
+        logLevel: 'info',
+        agentFileLoadOptions: {compile: true, bundle: true},
+      });
+      const cmdLine = dockerFile.trimEnd().split('\n').at(-1);
+      if (!cmdLine) {
+        expect.fail('The generated Dockerfile has no CMD line');
+      }
+      const flags = cmdLine
+        .split(' ')
+        .filter(
+          (arg) => arg.startsWith('--compile') || arg.startsWith('--bundle'),
+        );
+      expect(flags).toEqual(['--compile=false', '--bundle=false']);
+
+      await parse(['web', '/app/agents/test-app', ...flags]);
+
+      expect(AdkApiServer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentsDir: expect.stringContaining('/app/agents/test-app'),
+          agentFileLoadOptions: expect.objectContaining({
+            compile: false,
+            bundle: false,
+          }),
+        }),
+      );
     });
   });
 });

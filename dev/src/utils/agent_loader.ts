@@ -91,7 +91,7 @@ export interface AgentFileOptions {
  *
  * Compile and bundle only .ts files.
  */
-const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
+export const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
   compile: true,
   bundle: true,
 };

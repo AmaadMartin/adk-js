@@ -18,10 +18,21 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
 type Callback = (error: Error | null, result?: unknown) => void;
+
+function writtenDockerFile(): string {
+  const call = (saveToFile as Mock).mock.calls.find(([filePath]) =>
+    String(filePath).endsWith('Dockerfile'),
+  );
+  if (!call) {
+    expect.fail('No Dockerfile was written');
+  }
+  return String(call[1]);
+}
 
 const A2A_TOKEN = 'test-a2a-token';
 
@@ -47,7 +58,8 @@ vi.mock('node:fs/promises', () => {
   };
 });
 
-vi.mock('../../src/utils/agent_loader.js', () => ({
+vi.mock('../../src/utils/agent_loader.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/agent_loader.js')>()),
   AgentLoader: vi.fn().mockImplementation(() => ({
     listAgents: vi.fn().mockResolvedValue(['agent1']),
     getAgentFile: vi.fn().mockResolvedValue({
@@ -209,6 +221,66 @@ describe('createDockerFileContent', () => {
     });
     expect(content).toContain('agents/my-agent_v2.1/');
     expect(content).toContain('GOOGLE_CLOUD_PROJECT=my-project.example-123');
+  });
+
+  it('should omit --compile/--bundle when the deploy step did not bundle', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: true, bundle: false},
+    });
+    expect(content).not.toContain('--compile=false');
+    expect(content).not.toContain('--bundle=false');
+  });
+
+  it('should omit --compile/--bundle when neither compiling nor bundling', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: false, bundle: false},
+    });
+    expect(content).not.toContain('--compile=false');
+    expect(content).not.toContain('--bundle=false');
+  });
+
+  it('should omit --compile/--bundle when agentFileLoadOptions omits bundle', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: true},
+    });
+    expect(content).not.toContain('--compile=false');
+    expect(content).not.toContain('--bundle=false');
+  });
+
+  it('should emit --compile=false --bundle=false when the deploy step bundled', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: true, bundle: true},
+    });
+    expect(content).toContain('--compile=false --bundle=false');
+  });
+
+  it('should emit --compile=false --bundle=false when agentFileLoadOptions is omitted', () => {
+    const content = createDockerFileContent(defaultOptions);
+    expect(content).toContain('--compile=false --bundle=false');
+  });
+
+  it('should emit --compile=false --bundle=false when only bundle is enabled', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: false, bundle: true},
+    });
+    expect(content).toContain('--compile=false --bundle=false');
+  });
+
+  it('should append --compile/--bundle after every other server option', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      allowOrigins: 'http://example.com',
+      otelToCloud: true,
+      a2a: true,
+    });
+    expect(content.trimEnd()).toMatch(
+      /--host=0\.0\.0\.0 .*--a2a --compile=false --bundle=false$/,
+    );
   });
 });
 
@@ -495,5 +567,23 @@ describe('deployToCloudRun', () => {
       expect.stringContaining('Command failed with exit code 1'),
       expect.stringContaining('\x1b[0m'),
     );
+  });
+
+  it('should forward agentFileLoadOptions into the generated Dockerfile', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: true, bundle: true},
+    });
+
+    expect(writtenDockerFile()).toContain('--compile=false --bundle=false');
+  });
+
+  it('should keep the Dockerfile free of --compile/--bundle when the deploy step did not bundle', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: true, bundle: false},
+    });
+
+    expect(writtenDockerFile()).not.toContain('--compile=false');
   });
 });

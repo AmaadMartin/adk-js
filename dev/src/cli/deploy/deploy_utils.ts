@@ -7,7 +7,11 @@ import {exec, spawn, SpawnOptions} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
-import {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
+import {
+  AgentFileOptions,
+  AgentLoader,
+  DEFAULT_AGENT_FILE_OPTIONS,
+} from '../../utils/agent_loader.js';
 import {
   loadFileData,
   saveToFile,
@@ -47,6 +51,11 @@ export interface CreateDockerFileContentOptions {
   artifactServiceUri?: string;
   otelToCloud?: boolean;
   a2a?: boolean;
+  /**
+   * Options the deploy step handed to the {@link AgentLoader} that produced the
+   * staged agent artifact.
+   */
+  agentFileLoadOptions?: AgentFileOptions;
 }
 
 export interface BaseDeployOptions extends CreateDockerFileContentOptions {
@@ -58,7 +67,6 @@ export interface BaseDeployOptions extends CreateDockerFileContentOptions {
    */
   tempFolder?: string;
   adkVersion: string;
-  agentFileLoadOptions?: AgentFileOptions;
 }
 
 // Dockerfile instructions and the generated CMD's shell form have no
@@ -143,6 +151,14 @@ export function createDockerFileContent(
 
   if (options.a2a) {
     adkServerOptions.push('--a2a');
+  }
+
+  // The deploy step already bundled and minified the staged artifact, so the
+  // container must import it directly instead of running esbuild again on every
+  // cold start. Both flags are required: AgentFile.load() runs esbuild when
+  // either one is set.
+  if ((options.agentFileLoadOptions ?? DEFAULT_AGENT_FILE_OPTIONS).bundle) {
+    adkServerOptions.push('--compile=false', '--bundle=false');
   }
 
   return `
