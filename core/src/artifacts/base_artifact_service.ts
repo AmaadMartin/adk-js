@@ -13,8 +13,14 @@ import {CompositeSessionKey} from '../sessions/session.js';
 export interface SaveArtifactRequest extends CompositeSessionKey {
   /** The filename of the artifact. */
   filename: string;
-  /** The artifact to save. */
-  artifact: Part;
+  /**
+   * The artifact to save.
+   *
+   * An untyped caller, such as an HTTP body, may supply a plain object that
+   * names the fields the way the wire format does. Every implementation runs
+   * it through `ensurePart` before it reads a field.
+   */
+  artifact: Part | Record<string, unknown>;
   /**
    * Optional custom metadata to save with the artifact.
    */

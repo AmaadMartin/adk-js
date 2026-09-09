@@ -11,6 +11,7 @@ import {fileURLToPath, pathToFileURL} from 'url';
 
 import {logger} from '../utils/logger.js';
 
+import {ensurePart} from './artifact_util.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -74,9 +75,10 @@ export class FileArtifactService implements BaseArtifactService {
     userId,
     sessionId,
     filename,
-    artifact,
+    artifact: rawArtifact,
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
+    const artifact = ensurePart(rawArtifact);
     if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
