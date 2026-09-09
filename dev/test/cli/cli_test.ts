@@ -4,14 +4,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {
+  InMemoryArtifactService,
+  InMemorySessionService,
+  LogLevel,
+  setLogLevel,
+} from '@google/adk';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {getServiceRegistry} from '../../src/cli/service_registry.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+
+/**
+ * What the `run` command did, in order: the services file it read, then every
+ * service the registry built for it.
+ */
+const serviceLoads = vi.hoisted(() => [] as string[]);
+
+// Only the record of the call is added; the real loader still runs.
+vi.mock('../../src/cli/service_registry.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/cli/service_registry.js')>();
+  return {
+    ...actual,
+    async loadServicesModule(agentRoot: string) {
+      serviceLoads.push(`load:${agentRoot}`);
+      await actual.loadServicesModule(agentRoot);
+    },
+  };
+});
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -297,6 +323,50 @@ describe('CLI Entrypoint', () => {
           savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
+      );
+    });
+
+    it('reads the agent directory services before it builds a service', async () => {
+      serviceLoads.length = 0;
+      getServiceRegistry().register({
+        scheme: 'registrytest',
+        type: 'session',
+        create: (uri) => {
+          serviceLoads.push(`create:${uri}`);
+          return new InMemorySessionService();
+        },
+      });
+
+      await parse([
+        'run',
+        path.join('agents', 'agent.ts'),
+        '--session_service_uri',
+        'registrytest://demo',
+      ]);
+
+      expect(serviceLoads).toEqual([
+        `load:${path.join(process.cwd(), 'agents')}`,
+        'create:registrytest://demo',
+      ]);
+    });
+
+    it('builds a custom artifact service the registry serves', async () => {
+      const artifactService = new InMemoryArtifactService();
+      getServiceRegistry().register({
+        scheme: 'artifacttest',
+        type: 'artifact',
+        create: () => artifactService,
+      });
+
+      await parse([
+        'run',
+        'agent.ts',
+        '--artifact_service_uri',
+        'artifacttest://demo',
+      ]);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({artifactService}),
       );
     });
   });

@@ -23,6 +23,7 @@ import {
   UserInputKind,
   UserInputRequest,
 } from '@google/adk';
+import {Content, Part} from '@google/genai';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
@@ -33,6 +34,11 @@ import {
   loadFileData,
   saveToFile,
 } from '../utils/file_utils.js';
+import {
+  buildFunctionResponse,
+  collectPendingFunctionCalls,
+  renderLongRunningPrompt,
+} from './hitl_prompt.js';
 
 const HOW_TO_ANSWER: Record<UserInputKind, string> = {
   input: 'Type your reply at the next prompt to continue.',
@@ -281,27 +287,40 @@ async function runInteractively(
     console.log(`Agent reloaded. New runner created with existing session.`);
   });
 
+  let nextMessage: Content | undefined;
+
   while (true) {
-    const query = await getUserInput('[user]: ');
+    if (!nextMessage) {
+      const query = await getUserInput('[user]: ');
 
-    if (!query || !query.trim()) {
-      continue;
+      if (!query || !query.trim()) {
+        continue;
+      }
+
+      if (query === 'exit') {
+        break;
+      }
+
+      nextMessage = {role: 'user', parts: [{text: query}]};
     }
 
-    if (query === 'exit') {
-      break;
-    }
+    const message = nextMessage;
+    nextMessage = undefined;
+    const turnEvents: Event[] = [];
 
     try {
       for await (const event of runner.runAsync({
         userId: options.session.userId,
         sessionId: options.session.id,
-        newMessage: {role: 'user', parts: [{text: query}]},
+        newMessage: message,
         // Interactive CLI: let a plain-text "yes"/"no" resolve a pending tool
         // confirmation (opt-in; off by default on non-interactive surfaces).
         runConfig: {plainTextToolConfirmation: true},
       })) {
-        printEvent(event);
+        turnEvents.push(event);
+        // A pause this turn will prompt for is announced by the prompt itself,
+        // so announcing it here as well would ask the same question twice.
+        printEvent(event, {announcePauses: !hasLongRunningCall(event)});
       }
     } catch (error) {
       console.error(
@@ -309,8 +328,56 @@ async function runInteractively(
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      continue;
+    }
+
+    nextMessage = await answerPendingCalls(turnEvents);
+  }
+}
+
+/** Whether the interactive loop will prompt for a call this event raised. */
+function hasLongRunningCall(event: Event): boolean {
+  return (event.longRunningToolIds?.length ?? 0) > 0;
+}
+
+/** Every request the turn described, keyed by the id that answers it. */
+function indexUserInputRequests(
+  events: Event[],
+): Map<string, UserInputRequest> {
+  const requests = new Map<string, UserInputRequest>();
+  for (const event of events) {
+    for (const request of getUserInputRequests(event)) {
+      requests.set(request.interruptId, request);
     }
   }
+  return requests;
+}
+
+/**
+ * Asks the user to answer every long-running call the finished turn raised.
+ *
+ * The answers travel in one message because the run resumes from a single
+ * message: sending them one at a time would resume with the first answer and
+ * lose the rest.
+ *
+ * @return The message that answers the turn, or undefined when the turn left
+ *     nothing open.
+ */
+async function answerPendingCalls(
+  events: Event[],
+): Promise<Content | undefined> {
+  const parts: Part[] = [];
+  const requests = indexUserInputRequests(events);
+
+  for (const call of collectPendingFunctionCalls(events)) {
+    const request = requests.get(call.id);
+    console.log(
+      request ? renderUserInputRequest(request) : renderLongRunningPrompt(call),
+    );
+    parts.push(buildFunctionResponse(call, await getUserInput('[user]: ')));
+  }
+
+  return parts.length > 0 ? {role: 'user', parts} : undefined;
 }
 
 /**
