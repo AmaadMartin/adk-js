@@ -22,8 +22,17 @@ jobs:
         with:
           go-version: '1.25'
 
+      # runner.temp is only readable from a step context, so both steps that
+      # need the prefetch directory declare it themselves.
+      - name: Prefetch the sqlite3 prebuilt binary
+        run: node scripts/prefetch_sqlite3_prebuild.mjs
+        env:
+          npm_config_sqlite3_local_prebuilds: ${{ runner.temp }}/sqlite3-prebuilds
+
       - name: Install dependencies
         run: npm install
+        env:
+          npm_config_sqlite3_local_prebuilds: ${{ runner.temp }}/sqlite3-prebuilds
 
       - name: Install Go dependencies
         shell: bash
