@@ -8,9 +8,10 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  OpenIdConnectWithConfig,
   ToolAuthHandler,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -262,5 +263,188 @@ describe('ToolAuthHandler', () => {
       'oauth2_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+
+  describe('cached OAuth2 credential', () => {
+    const OIDC_STORE_KEY = 'openIdConnect_existing_exchanged_credential';
+    const TOKEN_ENDPOINT = 'https://example.com/token';
+
+    // `https://example.com` passes the SSRF allowlist `fetchOAuth2Tokens`
+    // applies, so the refresher reaches the (stubbed) network call.
+    const oidcScheme: OpenIdConnectWithConfig = {
+      type: 'openIdConnect',
+      openIdConnectUrl: 'https://example.com/.well-known/openid-configuration',
+      authorizationEndpoint: 'https://example.com/authorize',
+      tokenEndpoint: TOKEN_ENDPOINT,
+    };
+
+    function cachedCredential(expiresAt: number): AuthCredential {
+      return {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'stale-token',
+          refreshToken: 'stale-refresh',
+          expiresAt,
+        },
+      };
+    }
+
+    let restoreFetch: (() => void) | undefined;
+
+    function stubTokenEndpoint(response: Response) {
+      const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+      restoreFetch = () => spy.mockRestore();
+      return spy;
+    }
+
+    function freshTokenResponse(): Response {
+      return new Response(
+        JSON.stringify({
+          access_token: 'fresh-token',
+          refresh_token: 'rotated-token',
+          expires_in: 3600,
+        }),
+        {status: 200, headers: {'Content-Type': 'application/json'}},
+      );
+    }
+
+    // Restore only the fetch spy: `vi.restoreAllMocks()` would also reset the
+    // module mock of AutoAuthCredentialExchanger that the whole file shares.
+    afterEach(() => {
+      restoreFetch?.();
+      restoreFetch = undefined;
+    });
+
+    it('refreshes an expired cached OAuth2 credential before using it', async () => {
+      const fetchSpy = stubTokenEndpoint(freshTokenResponse());
+      const mockContext = {
+        state: new State({
+          [OIDC_STORE_KEY]: cachedCredential(Date.now() - 1000),
+        }),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        oidcScheme,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.oauth2?.accessToken).toBe('fresh-token');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchSpy.mock.calls[0];
+      expect(url).toBe(TOKEN_ENDPOINT);
+      expect(String(init?.body)).toContain('grant_type=refresh_token');
+      expect(String(init?.body)).toContain('refresh_token=stale-refresh');
+    });
+
+    it('persists the refreshed tokens so the next call does not reuse the old refresh token', async () => {
+      stubTokenEndpoint(freshTokenResponse());
+      const state = new State({
+        [OIDC_STORE_KEY]: cachedCredential(Date.now() - 1000),
+      });
+      const mockContext = {state} as unknown as Context;
+
+      await new ToolAuthHandler(
+        mockContext,
+        oidcScheme,
+      ).prepareAuthCredentials();
+
+      const stored = state.get<AuthCredential>(OIDC_STORE_KEY);
+      expect(stored?.oauth2?.accessToken).toBe('fresh-token');
+      expect(stored?.oauth2?.refreshToken).toBe('rotated-token');
+      expect(state.hasDelta()).toBe(true);
+    });
+
+    it('does not refresh a cached OAuth2 credential that is still valid', async () => {
+      const fetchSpy = stubTokenEndpoint(freshTokenResponse());
+      // `isTokenExpired` applies a 60s leeway, so a valid fixture must expire
+      // more than a minute from now.
+      const valid = cachedCredential(Date.now() + 3_600_000);
+      const state = new State({[OIDC_STORE_KEY]: valid});
+      const mockContext = {state} as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        oidcScheme,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.oauth2?.accessToken).toBe('stale-token');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(state.hasDelta()).toBe(false);
+    });
+
+    it('keeps the cached credential when the refresh request fails', async () => {
+      stubTokenEndpoint(new Response('{}', {status: 400}));
+      const mockContext = {
+        state: new State({
+          [OIDC_STORE_KEY]: cachedCredential(Date.now() - 1000),
+        }),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        oidcScheme,
+      ).prepareAuthCredentials();
+
+      // adk-python keeps the stale credential too: the call then fails at the
+      // API rather than here.
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.oauth2?.accessToken).toBe('stale-token');
+    });
+
+    it('re-enters the auth flow when the cached credential has no access token', async () => {
+      const tokenless: AuthCredential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      };
+      const mockContext = {
+        state: new State({[OIDC_STORE_KEY]: tokenless}),
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        oidcScheme,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+
+    it('exchanges a fresh auth response when the cached credential has no access token', async () => {
+      const tokenless: AuthCredential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      };
+      const state = new State({[OIDC_STORE_KEY]: tokenless});
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue({
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            clientId: 'client-id',
+            clientSecret: 'client-secret',
+            authCode: 'auth-code',
+          },
+        }),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        oidcScheme,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.http?.credentials.token).toBe(
+        'exchanged-token',
+      );
+      const stored = state.get<AuthCredential>(OIDC_STORE_KEY);
+      expect(stored?.http?.credentials.token).toBe('exchanged-token');
+    });
   });
 });
