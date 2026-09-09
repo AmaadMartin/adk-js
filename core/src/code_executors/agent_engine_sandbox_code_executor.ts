@@ -8,6 +8,7 @@ import {Client} from '@google-cloud/vertexai';
 import {Language} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {experimental} from '../utils/experimental.js';
 import {guessMimeType} from '../utils/file_utils.js';
+import {waitForOperation} from '../utils/operation_utils.js';
 
 interface LocalChunk {
   data?: string;
@@ -32,7 +33,7 @@ import {
   File,
 } from './code_execution_utils.js';
 
-const DEFAULT_MAX_ATTEMPTS = 180;
+const DEFAULT_OPERATION_TIMEOUT_SECONDS = 180;
 const DEFAULT_SANDBOX_TTL = '31536000s';
 const DEFAULT_SANDBOX_DISPLAY_NAME = 'default_sandbox';
 const DEFAULT_ENGINE_DISPLAY_NAME = 'default_engine';
@@ -62,6 +63,16 @@ export interface AgentEngineSandboxCodeExecutorOptions {
    * Location to use. If not provided, read from GOOGLE_CLOUD_LOCATION env var or default to 'us-central1'.
    */
   location?: string;
+
+  /**
+   * How long, in seconds, to wait for an Agent Engine or sandbox creation
+   * operation to finish before giving up. Default is 180.
+   *
+   * This bounds provisioning only. It has no effect on how long executed code
+   * is allowed to run. A value below one second allows no poll, so a creation
+   * that is not already finished fails immediately.
+   */
+  operationTimeoutSeconds?: number;
 
   /**
    * Optional client instance to use. If not provided, a new one will be created.
@@ -95,11 +106,14 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
   private location?: string;
   private client: Client;
   private agentEngineCreationPromise?: Promise<string>;
+  private readonly operationTimeoutSeconds: number;
 
   constructor(options: AgentEngineSandboxCodeExecutorOptions = {}) {
     super();
     this.sandboxResourceName = options.sandboxResourceName;
     this.agentEngineResourceName = options.agentEngineResourceName;
+    this.operationTimeoutSeconds =
+      options.operationTimeoutSeconds ?? DEFAULT_OPERATION_TIMEOUT_SECONDS;
     this.projectId = options.projectId || process.env.GOOGLE_CLOUD_PROJECT;
     this.location =
       options.location || process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
@@ -257,22 +271,15 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           },
         );
 
-        let apiResponse = operation;
-        let attempts = 0;
-        while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          apiResponse =
-            await this.client.agentEnginesInternal.getAgentOperationInternal({
+        const apiResponse = await waitForOperation({
+          operation,
+          poll: () =>
+            this.client.agentEnginesInternal.getAgentOperationInternal({
               operationName: operation.name!,
-            });
-          attempts++;
-        }
-
-        if (!apiResponse.done) {
-          throw new Error(
-            `Agent Engine creation operation ${operation.name} did not complete in time.`,
-          );
-        }
+            }),
+          timeoutSeconds: this.operationTimeoutSeconds,
+          description: 'Agent Engine creation',
+        });
 
         const response = apiResponse.response as {name?: string};
         this.agentEngineResourceName = response.name;
@@ -336,24 +343,17 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           },
         });
 
-      let apiResponse = operation;
-      let attempts = 0;
-      while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        apiResponse =
-          await this.client.agentEnginesInternal.sandboxes.getSandboxOperationInternal(
+      const apiResponse = await waitForOperation({
+        operation,
+        poll: () =>
+          this.client.agentEnginesInternal.sandboxes.getSandboxOperationInternal(
             {
               operationName: operation.name!,
             },
-          );
-        attempts++;
-      }
-
-      if (!apiResponse.done) {
-        throw new Error(
-          `Sandbox creation operation ${operation.name} did not complete in time.`,
-        );
-      }
+          ),
+        timeoutSeconds: this.operationTimeoutSeconds,
+        description: 'Sandbox creation',
+      });
 
       const response = apiResponse.response as {name?: string};
       sandboxName = response.name!;
