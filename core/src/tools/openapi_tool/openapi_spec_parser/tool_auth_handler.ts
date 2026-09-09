@@ -6,14 +6,47 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../../auth/auth_credential.js';
+import {AuthScheme} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
+import {CredentialRefresherRegistry} from '../../../auth/refresher/credential_refresher_registry.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 export interface AuthPreparationResult {
   state: 'pending' | 'done';
   authCredential?: AuthCredential;
+}
+
+const REFRESHER_REGISTRY = new CredentialRefresherRegistry();
+const OAUTH2_REFRESHER = new OAuth2CredentialRefresher();
+REFRESHER_REGISTRY.register(AuthCredentialTypes.OAUTH2, OAUTH2_REFRESHER);
+REFRESHER_REGISTRY.register(
+  AuthCredentialTypes.OPEN_ID_CONNECT,
+  OAUTH2_REFRESHER,
+);
+
+/**
+ * Returns a refreshed copy of the credential, or the credential itself when no
+ * refresher is registered for its type or its token is still valid.
+ */
+async function refreshIfNeeded(
+  credential: AuthCredential,
+  authScheme: AuthScheme,
+): Promise<AuthCredential> {
+  const refresher = REFRESHER_REGISTRY.getRefresher(credential.authType);
+  if (
+    !refresher ||
+    !(await refresher.isRefreshNeeded(credential, authScheme))
+  ) {
+    return credential;
+  }
+
+  return refresher.refresh(credential, authScheme);
 }
 
 class ToolContextCredentialStore {
@@ -77,7 +110,18 @@ export class ToolAuthHandler {
     const existingCredential = store.getCredential(this.authScheme);
 
     if (existingCredential) {
-      return {state: 'done', authCredential: existingCredential};
+      const credential = await refreshIfNeeded(
+        existingCredential,
+        this.authScheme,
+      );
+      if (credential !== existingCredential) {
+        store.storeCredential(
+          store.getCredentialKey(this.authScheme),
+          credential,
+        );
+      }
+
+      return {state: 'done', authCredential: credential};
     }
 
     const authConfig: AuthConfig = {

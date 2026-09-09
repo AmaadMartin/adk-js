@@ -4,11 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  CredentialRefresherError as ExportedError,
+  OAuth2CredentialRefresher as ExportedRefresher,
+} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {AuthCredential} from '../../../src/auth/auth_credential.js';
 import {AuthScheme} from '../../../src/auth/auth_schemes.js';
 import {OAuth2CredentialRefresher} from '../../../src/auth/oauth2/oauth2_credential_refresher.js';
 import * as oauth2Utils from '../../../src/auth/oauth2/oauth2_utils.js';
+import {CredentialRefresherError} from '../../../src/auth/refresher/base_credential_refresher.js';
 
 vi.mock('../../../src/auth/oauth2/oauth2_utils.js', () => ({
   getTokenEndpoint: vi.fn(),
@@ -289,6 +294,13 @@ describe('OAuth2CredentialRefresher', () => {
       const result = await refresher.refresh(authCredential, authScheme);
 
       expect(result).toBe(authCredential);
+    });
+  });
+
+  describe('public exports', () => {
+    it('reaches the refresher and its error class from the package entry point', () => {
+      expect(ExportedRefresher).toBe(OAuth2CredentialRefresher);
+      expect(ExportedError).toBe(CredentialRefresherError);
     });
   });
 });

@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Auth
+
+- [OAuth2 credential refresh](auth/oauth2_credential_refresh/index.md) - Trading a refresh token for a new access token, and how an OpenAPI tool does it for you.
+
 ### Tools
 
 #### Retrieval
