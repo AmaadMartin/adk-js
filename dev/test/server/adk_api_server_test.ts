@@ -611,6 +611,176 @@ describe('AdkWebServer', () => {
         }),
       ).toBeUndefined();
     });
+
+    it('lists an artifact name that contains a path separator', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+      await artifactService.saveArtifact({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        filename: 'reports/summary.txt',
+        artifact: {text: 'content'},
+      });
+
+      const response = await client.get<string[]>(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual(['reports/summary.txt']);
+    });
+
+    it('loads an artifact whose name contains a path separator', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+      await artifactService.saveArtifact({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        filename: 'reports/summary.txt',
+        artifact: {text: 'content'},
+      });
+
+      const response = await client.get(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/reports/summary.txt',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual({text: 'content'});
+    });
+
+    it('loads a nested artifact by percent-encoded name', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+      await artifactService.saveArtifact({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        filename: 'reports/summary.txt',
+        artifact: {text: 'content'},
+      });
+
+      const response = await client.get(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/reports%2Fsummary.txt',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual({text: 'content'});
+    });
+
+    it('loads a specific version of a nested artifact', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+      await artifactService.saveArtifact({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        filename: 'reports/summary.txt',
+        artifact: {text: 'v0'},
+      });
+      await artifactService.saveArtifact({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        filename: 'reports/summary.txt',
+        artifact: {text: 'v1'},
+      });
+
+      const response = await client.get(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/reports/summary.txt/versions/0',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual({text: 'v0'});
+    });
+
+    it('lists the versions of a nested artifact', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+      await artifactService.saveArtifact({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        filename: 'reports/summary.txt',
+        artifact: {text: 'v0'},
+      });
+      await artifactService.saveArtifact({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        filename: 'reports/summary.txt',
+        artifact: {text: 'v1'},
+      });
+
+      const response = await client.get<string[]>(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/reports/summary.txt/versions',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data?.length).toEqual(2);
+    });
+
+    it('deletes a nested artifact', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+      await artifactService.saveArtifact({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        filename: 'reports/summary.txt',
+        artifact: {text: 'content'},
+      });
+
+      const response = await client.delete(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/reports/summary.txt',
+      );
+
+      expect(response.status).toBe(204);
+      expect(
+        await artifactService.loadArtifact({
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          filename: 'reports/summary.txt',
+        }),
+      ).toBeUndefined();
+    });
+
+    it('answers 404 for a missing nested artifact', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      await expect(
+        client.get(
+          '/apps/testApp/users/testUser/sessions/sessionId/artifacts/reports/summary.txt',
+        ),
+      ).rejects.toMatchObject({
+        response: {status: 404},
+        message: 'Artifact not found: reports/summary.txt',
+      });
+    });
   });
 
   describe('run', () => {

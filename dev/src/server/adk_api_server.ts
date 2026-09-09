@@ -708,31 +708,22 @@ export class AdkApiServer {
 
     // ----------------------- Artifact related endpoints ----------------------
     app.get(
-      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName',
+      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts',
       async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
           const sessionId = req.params['sessionId'];
-          const artifactName = req.params['artifactName'];
 
-          const artifact = await this.artifactService.loadArtifact({
+          const artifactKeys = await this.artifactService.listArtifactKeys({
             appName,
             userId,
             sessionId,
-            filename: artifactName,
           });
 
-          if (!artifact) {
-            res
-              .status(404)
-              .json({error: `Artifact not found: ${artifactName}`});
-            return;
-          }
-
-          res.json(artifact);
+          res.json(artifactKeys);
         } catch (e: unknown) {
-          const error = `Failed to load artifact: ${e}`;
+          const error = `Failed to list artifacts: ${e}`;
 
           res.status(500).json({error});
           this.logger.error(error);
@@ -741,7 +732,7 @@ export class AdkApiServer {
     );
 
     app.get(
-      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName/versions/:versionId',
+      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName(*)/versions/:versionId',
       async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
@@ -776,31 +767,7 @@ export class AdkApiServer {
     );
 
     app.get(
-      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts',
-      async (req: Request, res: Response) => {
-        try {
-          const appName = req.params['appName'];
-          const userId = req.params['userId'];
-          const sessionId = req.params['sessionId'];
-
-          const artifactKeys = await this.artifactService.listArtifactKeys({
-            appName,
-            userId,
-            sessionId,
-          });
-
-          res.json(artifactKeys);
-        } catch (e: unknown) {
-          const error = `Failed to list artifacts: ${e}`;
-
-          res.status(500).json({error});
-          this.logger.error(error);
-        }
-      },
-    );
-
-    app.get(
-      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName/versions',
+      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName(*)/versions',
       async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
@@ -825,8 +792,44 @@ export class AdkApiServer {
       },
     );
 
+    // An artifact name may contain `/`, so this route matches greedily. It is
+    // registered after the `/versions` routes to stop it capturing their
+    // suffix as part of the name.
+    app.get(
+      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName(*)',
+      async (req: Request, res: Response) => {
+        try {
+          const appName = req.params['appName'];
+          const userId = req.params['userId'];
+          const sessionId = req.params['sessionId'];
+          const artifactName = req.params['artifactName'];
+
+          const artifact = await this.artifactService.loadArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename: artifactName,
+          });
+
+          if (!artifact) {
+            res
+              .status(404)
+              .json({error: `Artifact not found: ${artifactName}`});
+            return;
+          }
+
+          res.json(artifact);
+        } catch (e: unknown) {
+          const error = `Failed to load artifact: ${e}`;
+
+          res.status(500).json({error});
+          this.logger.error(error);
+        }
+      },
+    );
+
     app.delete(
-      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName',
+      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName(*)',
       async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
