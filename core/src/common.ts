@@ -94,7 +94,10 @@ export type {
   SessionLoadArtifactRequest,
   SessionSaveArtifactRequest,
 } from './artifacts/session_artifact_service.js';
-export {AuthCredentialTypes} from './auth/auth_credential.js';
+export {
+  AuthCredentialTypes,
+  parseAuthCredential,
+} from './auth/auth_credential.js';
 export type {
   AuthCredential,
   HttpAuth,
@@ -343,6 +346,7 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
+export {snakeToLowerCamel} from './utils/case_utils.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
@@ -375,13 +379,17 @@ export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
+export {dictToAuthScheme} from './tools/openapi_tool/auth/auth_helpers.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
   OperationEndpoint,
   ParsedOperation,
 } from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
-export type {ApiParameter} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
+export type {
+  ApiParameter,
+  ToolArgumentsSchema,
+} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
 export {ToolAuthHandler} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export type {AuthPreparationResult} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {formatError} from '../utils/error_utils.js';
+
 /**
  * Represents the secret token value for HTTP authentication, like user name,
  * password, oauth token, etc.
@@ -270,4 +272,57 @@ export interface AuthCredential {
   http?: HttpAuth;
   serviceAccount?: ServiceAccount;
   oauth2?: OAuth2Auth;
+}
+
+const AUTH_CREDENTIAL_TYPE_VALUES: ReadonlySet<string> = new Set(
+  Object.values(AuthCredentialTypes),
+);
+
+function isAuthCredentialType(value: unknown): value is AuthCredentialTypes {
+  return typeof value === 'string' && AUTH_CREDENTIAL_TYPE_VALUES.has(value);
+}
+
+/**
+ * Accepts a credential as an object or as the JSON text of one.
+ *
+ * A caller that reads its configuration from a file or an environment
+ * variable holds the JSON text, so it is parsed and validated here instead of
+ * at every call site.
+ *
+ * @param value The credential, its JSON text, or nothing.
+ * @throws {Error} If the text is not valid JSON, does not describe an object,
+ *   or names an `authType` that is not an {@link AuthCredentialTypes} member.
+ * @returns The credential, or `undefined` when nothing was supplied.
+ */
+export function parseAuthCredential(
+  value?: AuthCredential | string,
+): AuthCredential | undefined {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(`Invalid auth credential: ${formatError(error)}`);
+  }
+
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    !('authType' in parsed)
+  ) {
+    throw new Error("Invalid auth credential: 'authType' is missing.");
+  }
+
+  const authType = parsed.authType;
+  if (!isAuthCredentialType(authType)) {
+    throw new Error(
+      `Invalid auth credential: unknown authType ${String(authType)}.`,
+    );
+  }
+
+  return {...parsed, authType};
 }

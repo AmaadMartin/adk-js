@@ -130,6 +130,40 @@ describe('OpenAPIToolset', () => {
     ).toEqual({authType: AuthCredentialTypes.API_KEY, apiKey: 'my-key'});
   });
 
+  it('should still build tools from a spec that declares an apiKey scheme', async () => {
+    const specWithApiKey: OpenAPIV3.Document = {
+      ...mockSpec,
+      components: {
+        securitySchemes: {
+          apiKeyAuth: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+        },
+      },
+      security: [{apiKeyAuth: []}],
+    };
+
+    const toolset = new OpenAPIToolset({
+      specDict: specWithApiKey,
+      authCredential: {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'spec-key',
+      },
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.length).toBe(2);
+    expect(tools[0]._getDeclaration()?.name).toBe('get_users');
+  });
+
+  it('should reject a global auth override that is not a valid scheme', () => {
+    expect(
+      () =>
+        new OpenAPIToolset({
+          specDict: mockSpec,
+          authScheme: {type: 'apiKey', name: 'key', in: 'body'},
+        }),
+    ).toThrow("Invalid security scheme data: 'in' must be one of");
+  });
+
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
     const toolset = new OpenAPIToolset({specDict: mockSpec});
     const tools = await toolset.getTools({} as unknown as ReadonlyContext);
