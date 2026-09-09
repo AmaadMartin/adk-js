@@ -43,6 +43,20 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+// `Capabilities` keeps its upstream name inside the module, but this barrel is
+// flat: Cloud Storage cannot claim an identifier that another settings port
+// will also want.
+export {
+  GCS_DEFAULT_SCOPES,
+  GcsAdminToolset,
+  Capabilities as GcsCapabilities,
+} from './integrations/gcs/index.js';
+export type {
+  GcsAdminToolsetOptions,
+  GcsCredentialsConfig,
+  GcsToolResult,
+  GcsToolSettings,
+} from './integrations/gcs/index.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
