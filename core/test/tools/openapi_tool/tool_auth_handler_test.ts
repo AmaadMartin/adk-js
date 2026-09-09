@@ -457,6 +457,19 @@ describe('ToolAuthHandler', () => {
       expect(mockContext.requestCredential).not.toHaveBeenCalled();
     });
 
+    it('requests consent when an oauth2 credential has no oauth2 details', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        AUTHORIZATION_CODE_SCHEME,
+        {authType: AuthCredentialTypes.OAUTH2},
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+
     it('does not request consent for a non-oauth2 scheme', async () => {
       const mockContext = createMockContext();
 
