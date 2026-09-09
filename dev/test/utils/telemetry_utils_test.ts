@@ -40,7 +40,7 @@ class WeatherCallingLlm extends BaseLlm {
       this.calls++ === 0
         ? {functionCall: {id: 'fc_1', name: 'getWeather', args: {city: 'Oslo'}}}
         : {text: 'It is sunny in Oslo.'};
-    yield {content: {role: 'model', parts: [part]}} as LlmResponse;
+    yield {content: {role: 'model', parts: [part]}};
   }
 
   async connect(_request: LlmRequest): Promise<BaseLlmConnection> {

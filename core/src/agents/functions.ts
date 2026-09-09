@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
+import {Content, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -194,16 +194,6 @@ export function generateRequestConfirmationEvent({
   });
 }
 
-async function callToolAsync(
-  tool: BaseTool,
-  args: Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
-  toolContext: Context,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<any> {
-  logger.debug(`callToolAsync ${tool.name}`);
-  return tool.runAsync({args, toolContext});
-}
-
 function buildResponseEvent(
   tool: BaseTool,
   functionResult: Record<string, unknown>,
@@ -369,7 +359,7 @@ async function answerUnresolvableCall({
   toolsDict: Record<string, BaseTool>;
   toolContext: Context;
 }): Promise<Event> {
-  // The sibling path opens `execute_tool <name>` inside `callToolAsync`.
+  // The sibling path opens `execute_tool <name>` inside `executeFunctionCall`.
   // Without this an unresolvable call is the one tool interaction that
   // leaves no span, which is the worst case to be missing from a waterfall.
   return tracer.startActiveSpan(
@@ -450,8 +440,9 @@ async function executeFunctionCall({
 
       // Step 1: Check if plugin before_tool_callback overrides the function
       // response.
-      let functionResponse = null;
+      let functionResponse: Record<string, unknown> | undefined;
       let functionResponseError: unknown;
+      let toolResult: unknown;
       functionResponse =
         await invocationContext.pluginManager.runBeforeToolCallback({
           tool: tool,
@@ -483,11 +474,9 @@ async function executeFunctionCall({
       if (functionResponse == null) {
         // Cover both null and undefined
         try {
-          functionResponse = await callToolAsync(
-            tool,
-            functionArgs,
-            toolContext,
-          );
+          logger.debug(`callTool ${tool.name}`);
+          toolResult = await tool.runAsync({args: functionArgs, toolContext});
+          functionResponse = normalizeCallbackResponse(toolResult);
         } catch (e: unknown) {
           if (e instanceof Error) {
             const onToolErrorResponse =
@@ -515,6 +504,10 @@ async function executeFunctionCall({
         }
       }
 
+      // Both after-tool callbacks are declared to take a record, and a tool may
+      // answer with anything at all.
+      const callbackResponse = functionResponse ?? {};
+
       // Step 4: Check if plugin after_tool_callback overrides the function
       // response.
       let alteredFunctionResponse =
@@ -522,7 +515,7 @@ async function executeFunctionCall({
           tool: tool,
           toolArgs: functionArgs,
           toolContext: toolContext,
-          result: functionResponse,
+          result: callbackResponse,
         });
 
       // Step 5: If no overrides are provided from the plugins, further run the
@@ -534,7 +527,7 @@ async function executeFunctionCall({
             tool: tool,
             args: functionArgs,
             context: toolContext,
-            response: functionResponse,
+            response: callbackResponse,
           });
           if (alteredFunctionResponse) {
             break;
@@ -568,27 +561,17 @@ async function executeFunctionCall({
         return null;
       }
 
-      if (functionResponseError) {
-        functionResponse = {error: functionResponseError};
-      } else if (functionResponse == null) {
-        functionResponse = {result: functionResponse};
-      } else {
-        functionResponse = normalizeCallbackResponse(functionResponse);
-      }
+      // A tool that answered with nothing still owes the model a part.
+      const response: Record<string, unknown> = functionResponseError
+        ? {error: functionResponseError}
+        : (functionResponse ?? {result: toolResult});
 
-      const functionResponseEvent = createEvent({
-        invocationId: invocationContext.invocationId,
-        author: toolEventAuthor(invocationContext),
-        content: createUserContent({
-          functionResponse: {
-            id: toolContext.functionCallId,
-            name: tool.name,
-            response: functionResponse,
-          },
-        }),
-        actions: toolContext.actions,
-        branch: invocationContext.branch,
-      });
+      const functionResponseEvent = buildResponseEvent(
+        tool,
+        response,
+        toolContext,
+        invocationContext,
+      );
 
       traceToolCall({tool, args: functionArgs, functionResponseEvent});
       return functionResponseEvent;
