@@ -633,6 +633,7 @@ export {
   formatLogArgs,
   getLogger,
   logger,
+  resetLogger,
   setLogLevel,
   setLogger,
 } from './utils/logger.js';

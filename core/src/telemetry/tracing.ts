@@ -15,7 +15,7 @@
  *    constructs of the framework that are not observable by the SDK.
  */
 
-import type {Content} from '@google/genai';
+import type {Content, HttpOptions} from '@google/genai';
 import type {Attributes, Context, Span} from '@opentelemetry/api';
 import {context, SpanStatusCode, trace} from '@opentelemetry/api';
 
@@ -463,6 +463,24 @@ export function traceSendData({
 }
 
 /**
+ * Returns a copy of the HTTP options without the caller-supplied fields that
+ * can carry credentials.
+ *
+ * `headers` commonly holds an Authorization bearer token and `extraBody` is a
+ * free-form request-body passthrough, so neither may reach an exported span
+ * attribute. The remaining fields are useful for debugging and stay.
+ *
+ * @param httpOptions The HTTP options taken from the request config.
+ * @returns A new HttpOptions object without `headers` and `extraBody`.
+ */
+function redactHttpOptions(httpOptions: HttpOptions): HttpOptions {
+  const redacted: HttpOptions = {...httpOptions};
+  delete redacted.headers;
+  delete redacted.extraBody;
+  return redacted;
+}
+
+/**
  * Builds a dictionary representation of the LLM request for tracing.
  *
  * This function prepares a dictionary representation of the LlmRequest
@@ -483,6 +501,9 @@ function buildLlmRequestForTrace(
   if (llmRequest.config) {
     // Create a clean config object, pruning responseSchema to reduce noise size
     const {responseSchema: _responseSchema, ...cleanConfig} = llmRequest.config;
+    if (cleanConfig.httpOptions) {
+      cleanConfig.httpOptions = redactHttpOptions(cleanConfig.httpOptions);
+    }
     result.config = cleanConfig;
   }
 
