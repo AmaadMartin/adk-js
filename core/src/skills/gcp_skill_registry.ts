@@ -7,7 +7,7 @@
 import {Client} from '@google-cloud/vertexai';
 import {experimental} from '../utils/experimental.js';
 import {loadSkillFromZipBuffer} from './loader.js';
-import {Frontmatter, Skill} from './skill.js';
+import {Frontmatter, Skill, SNAKE_OR_KEBAB_NAME_PATTERN} from './skill.js';
 import {SkillRegistry} from './skill_registry.js';
 
 export interface GCPSkillRegistryOptions {
@@ -37,6 +37,14 @@ export class GCPSkillRegistry implements SkillRegistry {
   }
 
   async getSkill(name: string): Promise<Skill> {
+    // The name arrives from a model-issued tool call and is interpolated into
+    // the request path, so it must be a single path segment.
+    if (!SNAKE_OR_KEBAB_NAME_PATTERN.test(name)) {
+      throw new Error(
+        `Invalid skill name '${name}': must be lowercase kebab-case or snake_case.`,
+      );
+    }
+
     const apiClient = (this.client as unknown as {apiClient: unknown})
       .apiClient as {
       request(req: {
