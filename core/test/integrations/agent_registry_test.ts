@@ -13,6 +13,7 @@ import {
   AgentRegistrySingleMCPToolset,
   cleanName,
   GCP_MCP_SERVER_DESTINATION_ID,
+  isCustomAuthScheme,
   isGoogleApi,
   ProtocolType,
   ReadonlyContext,
@@ -379,6 +380,44 @@ describe('AgentRegistry', () => {
         type: 'gcpAuthProviderScheme',
         name: 'projects/p/locations/l/authProviders/ap-1',
         continueUri: undefined,
+      });
+    });
+
+    it('should build a binding-derived scheme that isCustomAuthScheme accepts', async () => {
+      const serverDetails = {
+        mcpServerId: 'urn:mcp:1234:bigquery',
+        interfaces: [{url: 'https://example.com', protocolBinding: 'JSONRPC'}],
+      };
+      const bindingsData = {
+        bindings: [
+          {
+            target: {identifier: 'urn:mcp:1234:bigquery'},
+            authProviderBinding: {
+              authProvider: 'projects/p/locations/l/authProviders/ap-1',
+            },
+          },
+        ],
+      };
+
+      vi.spyOn(registry, 'getMcpServer').mockResolvedValue(serverDetails);
+      vi.spyOn(registry, 'makeRequest').mockImplementation(async (path) => {
+        if (path === 'bindings') return bindingsData;
+        return {};
+      });
+
+      const toolset = await registry.getMcpToolset('mcpServers/bigquery', {
+        continueUri: 'https://example.com/continue',
+      });
+
+      const scheme = toolset.authScheme;
+      if (!scheme) {
+        expect.fail('expected a binding-derived auth scheme');
+      }
+      expect(isCustomAuthScheme(scheme)).toBe(true);
+      expect(scheme).toEqual({
+        type: 'gcpAuthProviderScheme',
+        name: 'projects/p/locations/l/authProviders/ap-1',
+        continueUri: 'https://example.com/continue',
       });
     });
 

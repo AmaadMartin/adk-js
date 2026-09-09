@@ -8,6 +8,8 @@ import {AuthProviderRegistry, AuthScheme, BaseAuthProvider} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 class MockAuthProvider implements BaseAuthProvider {
+  readonly supportedAuthSchemes: readonly string[] = [];
+
   async getAuthCredential() {
     return undefined;
   }
