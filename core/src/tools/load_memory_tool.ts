@@ -6,12 +6,33 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 
+import {MemoryEntry} from '../memory/memory_entry.js';
 import {appendInstructions} from '../models/llm_request.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from './base_tool.js';
+
+const TOOL_NAME = 'load_memory';
+
+/**
+ * Returned to the model when it calls the tool without a usable `query`.
+ *
+ * The wording matches the missing-argument error that adk-python's
+ * `FunctionTool` produces, so both SDKs prompt the model to retry the same way.
+ */
+const MISSING_QUERY_ERROR = `Invoking \`${TOOL_NAME}()\` failed as the following mandatory input parameters are not present:
+query
+You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.`;
+
+/**
+ * The response of the `load_memory` tool.
+ */
+export interface LoadMemoryResponse {
+  /** The memory entries matching the query. */
+  memories: MemoryEntry[];
+}
 
 /**
  * A tool that loads the memory for the current user.
@@ -21,7 +42,7 @@ import {
 export class LoadMemoryTool extends BaseTool {
   constructor() {
     super({
-      name: 'load_memory',
+      name: TOOL_NAME,
       description:
         'Loads the memory for the current user.\n\nNOTE: Currently this tool only uses text part from the memory.',
     });
@@ -47,36 +68,20 @@ export class LoadMemoryTool extends BaseTool {
   override async runAsync({
     args,
     toolContext,
-  }: RunAsyncToolRequest): Promise<unknown> {
-    try {
-      const query = args['query'] as string;
-      if (!toolContext.invocationContext.memoryService) {
-        throw new Error('Memory service is not initialized.');
-      }
-      const searchMemoryResponse = await toolContext.searchMemory(query);
-      return {
-        memories: searchMemoryResponse.memories.map((m) => ({
-          // Join all text parts by a space, or empty string if no text parts
-          content: m.content.parts?.map((p) => p.text ?? '').join(' ') ?? '',
-          author: m.author,
-          timestamp: m.timestamp,
-        })),
-      };
-    } catch (e) {
-      console.error('ERROR in LoadMemoryTool runAsync:', e);
-      throw e;
+  }: RunAsyncToolRequest): Promise<LoadMemoryResponse | {error: string}> {
+    const query = args['query'];
+    if (typeof query !== 'string') {
+      return {error: MISSING_QUERY_ERROR};
     }
+
+    const {memories} = await toolContext.searchMemory(query);
+    return {memories};
   }
 
   override async processLlmRequest(
     request: ToolProcessLlmRequest,
   ): Promise<void> {
     await super.processLlmRequest(request);
-
-    // Only tell the model about memory if memoryService is initialized
-    if (!request.toolContext.invocationContext.memoryService) {
-      return;
-    }
 
     appendInstructions(request.llmRequest, [
       `You have memory. You can use it to answer questions. If any questions need\nyou to look up the memory, you should call load_memory function with a query.`,
