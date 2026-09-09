@@ -8,7 +8,14 @@ import {FunctionDeclaration, Part, Type} from '@google/genai';
 
 import {Context} from '../agents/context.js';
 import {appendInstructions, LlmRequest} from '../models/llm_request.js';
+import {maybeBase64ToBytes} from '../utils/base64_utils.js';
+import {extractDocxText} from '../utils/document_text_utils.js';
 import {getLogger} from '../utils/logger.js';
+import {
+  isGeminiInlineMimeTypeSupported,
+  isTextLikeMimeType,
+  normalizeMimeType,
+} from '../utils/mime_utils.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -17,45 +24,44 @@ import {
 
 const logger = getLogger();
 
-const GEMINI_SUPPORTED_INLINE_MIME_PREFIXES = ['image/', 'audio/', 'video/'];
-const GEMINI_SUPPORTED_INLINE_MIME_TYPES = new Set(['application/pdf']);
-const TEXT_LIKE_MIME_TYPES = new Set([
-  'application/csv',
-  'application/json',
-  'application/xml',
-]);
+/** MIME type of a DOCX document. */
+const DOCX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-function normalizeMimeType(mimeType?: string): string | undefined {
-  if (!mimeType) {
-    return undefined;
-  }
-  return mimeType.split(';')[0].trim();
-}
+/** MIME type an upload carries when its real type is unknown. */
+const OCTET_STREAM_MIME_TYPE = 'application/octet-stream';
 
-function isInlineMimeTypeSupported(mimeType?: string): boolean {
-  const normalized = normalizeMimeType(mimeType);
-  if (!normalized) {
-    return false;
-  }
-  return (
-    GEMINI_SUPPORTED_INLINE_MIME_PREFIXES.some((prefix) =>
-      normalized.startsWith(prefix),
-    ) || GEMINI_SUPPORTED_INLINE_MIME_TYPES.has(normalized)
-  );
-}
+/** Filename suffixes whose content is text whatever the MIME type says. */
+const TEXT_FILE_SUFFIXES = ['.csv', '.txt', '.json', '.xml'];
 
-function asSafePartForLlm(artifact: Part, artifactName: string): Part {
+/**
+ * Converts an artifact into a `Part` that is safe to send to Gemini.
+ *
+ * An artifact Gemini accepts inline is returned unchanged. Anything else is
+ * converted to text: a DOCX document to its extracted text, a text-like
+ * payload to its decoded text, and any remaining binary payload to a short
+ * placeholder naming the artifact and its size. The conversion never throws;
+ * every failure degrades to a text part.
+ *
+ * @param artifact The artifact to convert.
+ * @param artifactName The name the artifact was loaded under.
+ * @return A part that is safe to send to Gemini.
+ */
+export async function asSafePartForLlm(
+  artifact: Part,
+  artifactName: string,
+): Promise<Part> {
   const inlineData = artifact.inlineData;
   if (!inlineData) {
     return artifact;
   }
 
-  if (isInlineMimeTypeSupported(inlineData.mimeType)) {
+  if (isGeminiInlineMimeTypeSupported(inlineData.mimeType)) {
     return artifact;
   }
 
   const mimeType =
-    normalizeMimeType(inlineData.mimeType) || 'application/octet-stream';
+    normalizeMimeType(inlineData.mimeType) || OCTET_STREAM_MIME_TYPE;
   const data = inlineData.data;
   if (!data) {
     return {
@@ -63,20 +69,31 @@ function asSafePartForLlm(artifact: Part, artifactName: string): Part {
     };
   }
 
-  const isTextLike =
-    mimeType.startsWith('text/') || TEXT_LIKE_MIME_TYPES.has(mimeType);
+  const bytes = maybeBase64ToBytes(data);
+  if (!bytes) {
+    return {text: data};
+  }
 
-  const decodedBuffer = Buffer.from(data, 'base64');
-  if (isTextLike) {
-    try {
-      const decoded = decodedBuffer.toString('utf8');
-      return {text: decoded};
-    } catch {
-      // Fallback
+  const loweredName = artifactName.toLowerCase();
+  const isDocx =
+    mimeType === DOCX_MIME_TYPE ||
+    mimeType === OCTET_STREAM_MIME_TYPE ||
+    loweredName.endsWith('.docx');
+  if (isDocx) {
+    const docxText = extractDocxText(bytes);
+    if (docxText !== undefined) {
+      return {text: docxText};
     }
   }
 
-  const sizeKb = decodedBuffer.length / 1024;
+  if (
+    isTextLikeMimeType(mimeType) ||
+    TEXT_FILE_SUFFIXES.some((suffix) => loweredName.endsWith(suffix))
+  ) {
+    return {text: bytes.toString('utf8')};
+  }
+
+  const sizeKb = bytes.length / 1024;
   return {
     text: `[Binary artifact: ${artifactName}, type: ${mimeType}, size: ${sizeKb.toFixed(1)} KB. Content cannot be displayed inline.]`,
   };
@@ -211,7 +228,12 @@ export class LoadArtifactsTool extends BaseTool {
         continue;
       }
 
-      const artifactPart = asSafePartForLlm(artifact, artifactName);
+      const artifactPart = await asSafePartForLlm(artifact, artifactName);
+      if (artifactPart !== artifact) {
+        logger.debug(
+          `Transformed artifact "${artifactName}" (mimeType=${artifact.inlineData?.mimeType}) to Part`,
+        );
+      }
 
       llmRequest.contents.push({
         role: 'user',
