@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Client} from '@google-cloud/vertexai';
 import {
+  AgentEngineSandboxCodeExecutor,
   BaseAgent,
   InvocationContext,
   LlmAgent,
@@ -17,11 +19,18 @@ import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
   CodeExecutionResponseProcessor,
 } from '../../../src/agents/processors/code_execution_request_processor.js';
+import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact_service.js';
+import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
+import {SessionArtifactService} from '../../../src/artifacts/session_artifact_service.js';
 import {
   BaseCodeExecutor,
   ExecuteCodeParams,
 } from '../../../src/code_executors/base_code_executor.js';
 import {CodeExecutionResult} from '../../../src/code_executors/code_execution_utils.js';
+
+const AGENT_ENGINE_NAME =
+  'projects/test-project/locations/us-central1/reasoningEngines/123';
+const SANDBOX_NAME = `${AGENT_ENGINE_NAME}/sandboxEnvironments/456`;
 
 class MockBaseAgent extends BaseAgent {
   constructor(name: string) {
@@ -37,7 +46,10 @@ class TestCodeExecutor extends BaseCodeExecutor {
   }
 }
 
-function createMockInvocationContext(agent: BaseAgent): InvocationContext {
+function createMockInvocationContext(
+  agent: BaseAgent,
+  artifactService?: SessionArtifactService,
+): InvocationContext {
   return new InvocationContext({
     invocationId: 'test-invocation',
     agent,
@@ -48,7 +60,44 @@ function createMockInvocationContext(agent: BaseAgent): InvocationContext {
       userId: 'test-user',
     }),
     pluginManager: new PluginManager([]),
+    artifactService,
   });
+}
+
+/**
+ * A Client stub that reports every Agent Engine and sandbox operation as
+ * already complete, so the executor runs without a poll loop.
+ */
+function createSandboxClient(): Client {
+  const completedOperation = {
+    name: 'operations/op',
+    done: true,
+    response: {name: SANDBOX_NAME},
+  };
+  const stub = {
+    agentEnginesInternal: {
+      createInternal: async () => ({
+        name: 'operations/create-engine-op',
+        done: true,
+        response: {name: AGENT_ENGINE_NAME},
+      }),
+      sandboxes: {
+        getInternal: async () => ({name: SANDBOX_NAME, state: 'STATE_RUNNING'}),
+        createInternal: async () => completedOperation,
+        executeCodeInternal: async () => ({
+          outputs: [
+            {
+              mimeType: 'application/json',
+              data: Buffer.from(
+                JSON.stringify({msg_out: 'hi', msg_err: ''}),
+              ).toString('base64'),
+            },
+          ],
+        }),
+      },
+    },
+  };
+  return stub as unknown as Client;
 }
 
 function createLlmRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
@@ -216,6 +265,45 @@ describe('CodeExecutionResponseProcessor', () => {
       );
 
       expect(events).toHaveLength(0);
+    });
+  });
+
+  describe('sandbox state delta', () => {
+    it('publishes the Agent Engine sandbox name on the code execution result event', async () => {
+      const agent = new LlmAgent({
+        name: 'agent-with-sandbox-executor',
+        model: 'gemini-2.5-flash',
+        codeExecutor: new AgentEngineSandboxCodeExecutor({
+          client: createSandboxClient(),
+        }),
+      });
+      const ctx = createMockInvocationContext(
+        agent,
+        new ScopedArtifactService(
+          new InMemoryArtifactService(),
+          'test-app',
+          'test-user',
+          'test-session',
+        ),
+      );
+      const llmResponse = {
+        partial: false,
+        content: {
+          role: 'model',
+          parts: [{text: 'Here you go:\n```python\nprint("hi")\n```'}],
+        },
+      };
+
+      const events = await collectEvents(
+        responseProcessor.runAsync(ctx, llmResponse),
+      );
+
+      const resultEvent = events[events.length - 1];
+      expect(resultEvent.actions.stateDelta['_code_execution_context']).toEqual(
+        expect.objectContaining({
+          sandbox_names: {language_python: SANDBOX_NAME},
+        }),
+      );
     });
   });
 });

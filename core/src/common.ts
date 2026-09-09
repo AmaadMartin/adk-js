@@ -132,6 +132,8 @@ export {
   type CodeExecutionResult,
   type File,
 } from './code_executors/code_execution_utils.js';
+export {CodeExecutorContext} from './code_executors/code_executor_context.js';
+export type {UpdateCodeExecutionResultParams} from './code_executors/code_executor_context.js';
 export {AgentControlledContextCompactor} from './context/agent_controlled_context_compactor.js';
 export {AnchoredContextCompactor} from './context/anchored_context_compactor.js';
 export type {AnchoredContextCompactorOptions} from './context/anchored_context_compactor.js';
