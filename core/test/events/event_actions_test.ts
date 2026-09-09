@@ -12,6 +12,7 @@ import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
+import {UiWidget} from '../../src/events/ui_widget.js';
 import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
 
 function createTestAuthConfig(credentialKey: string): AuthConfig {
@@ -251,5 +252,73 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+});
+
+describe('EventActions.renderUiWidgets', () => {
+  function widget(id: string): UiWidget {
+    return {id, provider: 'mcp', payload: {resource_uri: `ui://${id}`}};
+  }
+
+  it('is undefined on freshly created actions', () => {
+    expect(createEventActions().renderUiWidgets).toBeUndefined();
+  });
+
+  it('makes the actions non-default once set', () => {
+    const actions = createEventActions({renderUiWidgets: [widget('a')]});
+
+    expect(isDefaultEventActions(actions)).toBe(false);
+  });
+
+  it('leaves the actions default when explicitly undefined', () => {
+    const actions = createEventActions({renderUiWidgets: undefined});
+
+    expect(isDefaultEventActions(actions)).toBe(true);
+  });
+
+  it('concatenates widget lists from two sources, in order', () => {
+    const result = mergeEventActions([
+      createEventActions({renderUiWidgets: [widget('a')]}),
+      createEventActions({renderUiWidgets: [widget('b'), widget('c')]}),
+    ]);
+
+    expect(result.renderUiWidgets?.map((w) => w.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps an earlier list when a later source has no widgets', () => {
+    const result = mergeEventActions([
+      createEventActions({renderUiWidgets: [widget('a')]}),
+      createEventActions({stateDelta: {x: 1}}),
+    ]);
+
+    expect(result.renderUiWidgets?.map((w) => w.id)).toEqual(['a']);
+  });
+
+  it('leaves renderUiWidgets undefined when no source has one', () => {
+    const result = mergeEventActions([createEventActions({escalate: true})]);
+
+    expect(result.renderUiWidgets).toBeUndefined();
+  });
+
+  it('does not mutate a source list', () => {
+    const source = createEventActions({renderUiWidgets: [widget('a')]});
+
+    mergeEventActions([
+      source,
+      createEventActions({renderUiWidgets: [widget('b')]}),
+    ]);
+
+    expect(source.renderUiWidgets?.map((w) => w.id)).toEqual(['a']);
+  });
+
+  it('appends source widgets onto a target list', () => {
+    const target = createEventActions({renderUiWidgets: [widget('base')]});
+
+    const result = mergeEventActions(
+      [createEventActions({renderUiWidgets: [widget('added')]})],
+      target,
+    );
+
+    expect(result.renderUiWidgets?.map((w) => w.id)).toEqual(['base', 'added']);
   });
 });

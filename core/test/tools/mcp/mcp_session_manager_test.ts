@@ -7,10 +7,19 @@
 import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {describe, expect, it, vi} from 'vitest';
-// The logger singleton is internal (not part of the public API), so it is
-// imported via a relative path to spy on the exact instance the manager uses.
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPClientTransportOptions,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {FetchLike} from '@modelcontextprotocol/sdk/shared/transport.js';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+// The HTTP debug recorder and the logger singleton are internal (not part of
+// the public API), so they are imported via a relative path.
+import {
+  MAX_HTTP_DEBUG_EXCHANGES,
+  McpHttpExchange,
+  mcpHttpDebugStorage,
+} from '../../../src/tools/mcp/http_debug_recorder.js';
 import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
@@ -297,5 +306,180 @@ describe('MCPSessionManager', () => {
 
       errorSpy.mockRestore();
     });
+  });
+});
+
+describe('MCPSessionManager HTTP debug capture', () => {
+  beforeEach(() => {
+    vi.mocked(StreamableHTTPClientTransport).mockClear();
+  });
+
+  /** The transport options the manager passed on the most recent session. */
+  function lastTransportOptions(): StreamableHTTPClientTransportOptions {
+    const call = vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1);
+    if (!call) {
+      expect.fail('StreamableHTTPClientTransport was never constructed');
+    }
+    return call[1] ?? {};
+  }
+
+  /**
+   * Creates a session with `baseFetch` configured, under `sink` when given,
+   * and returns the `fetch` the manager handed to the transport.
+   */
+  async function fetchForSession(
+    baseFetch: FetchLike | undefined,
+    sink?: McpHttpExchange[],
+  ): Promise<FetchLike | undefined> {
+    const manager = new MCPSessionManager({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://test-url',
+      transportOptions: baseFetch ? {fetch: baseFetch} : {},
+    });
+
+    if (sink) {
+      await mcpHttpDebugStorage.run(sink, () => manager.createSession());
+    } else {
+      await manager.createSession();
+    }
+
+    return lastTransportOptions().fetch;
+  }
+
+  function jsonResponse(status: number): Response {
+    return new Response('{}', {
+      status,
+      headers: {'content-type': 'application/json', 'set-cookie': 'sid=abc'},
+    });
+  }
+
+  it('records one exchange per request with a sink active', async () => {
+    const sink: McpHttpExchange[] = [];
+    const baseFetch = vi.fn(async () => jsonResponse(200));
+
+    const wrapped = await fetchForSession(baseFetch, sink);
+    const response = await wrapped?.('http://test-url/mcp', {
+      method: 'POST',
+      headers: {'authorization': 'Bearer secret', 'x-trace': 'keep-me'},
+    });
+
+    expect(response?.status).toBe(200);
+    expect(sink).toHaveLength(1);
+    expect(sink[0]).toMatchObject({
+      url: 'http://test-url/mcp',
+      method: 'POST',
+      status: 200,
+      requestHeaders: {'authorization': '<redacted>', 'x-trace': 'keep-me'},
+    });
+    expect(sink[0].responseHeaders['set-cookie']).toBe('<redacted>');
+    expect(sink[0].responseHeaders['content-type']).toBe('application/json');
+    expect(sink[0].durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('records a non-2xx response', async () => {
+    const sink: McpHttpExchange[] = [];
+
+    const wrapped = await fetchForSession(async () => jsonResponse(503), sink);
+    const response = await wrapped?.('http://test-url/mcp', {method: 'POST'});
+
+    expect(response?.status).toBe(503);
+    expect(sink).toHaveLength(1);
+    expect(sink[0].status).toBe(503);
+  });
+
+  it('defaults the method to GET when the request does not name one', async () => {
+    const sink: McpHttpExchange[] = [];
+
+    const wrapped = await fetchForSession(async () => jsonResponse(200), sink);
+    await wrapped?.(new URL('http://test-url/stream'));
+
+    expect(sink[0]).toMatchObject({
+      url: 'http://test-url/stream',
+      method: 'GET',
+      requestHeaders: {},
+    });
+  });
+
+  it('still invokes a caller-supplied fetch', async () => {
+    const sink: McpHttpExchange[] = [];
+    const baseFetch = vi.fn(async () => jsonResponse(200));
+
+    const wrapped = await fetchForSession(baseFetch, sink);
+    await wrapped?.('http://test-url/mcp', {method: 'POST'});
+
+    expect(baseFetch).toHaveBeenCalledOnce();
+  });
+
+  it('propagates a rejection and records nothing for it', async () => {
+    const sink: McpHttpExchange[] = [];
+    const baseFetch = vi.fn(async () => {
+      throw new Error('connection reset');
+    });
+
+    const wrapped = await fetchForSession(baseFetch, sink);
+
+    await expect(wrapped?.('http://test-url/mcp')).rejects.toThrow(
+      'connection reset',
+    );
+    expect(sink).toHaveLength(0);
+  });
+
+  it('stops recording at MAX_HTTP_DEBUG_EXCHANGES', async () => {
+    const sink: McpHttpExchange[] = [];
+
+    const wrapped = await fetchForSession(async () => jsonResponse(200), sink);
+    for (let i = 0; i < MAX_HTTP_DEBUG_EXCHANGES + 5; i++) {
+      await wrapped?.('http://test-url/mcp', {method: 'POST'});
+    }
+
+    expect(sink).toHaveLength(MAX_HTTP_DEBUG_EXCHANGES);
+  });
+
+  it('leaves the transport options untouched with no sink active', async () => {
+    const baseFetch = vi.fn(async () => jsonResponse(200));
+
+    const wrapped = await fetchForSession(baseFetch);
+
+    expect(wrapped).toBe(baseFetch);
+  });
+
+  it('does not add a fetch when the caller configured none', async () => {
+    const wrapped = await fetchForSession(undefined);
+
+    expect(wrapped).toBeUndefined();
+  });
+
+  it('falls back to the global fetch when the caller configured none', async () => {
+    const sink: McpHttpExchange[] = [];
+    const globalFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(200));
+
+    const wrapped = await fetchForSession(undefined, sink);
+    await wrapped?.('http://test-url/mcp', {method: 'POST'});
+
+    expect(globalFetch).toHaveBeenCalledOnce();
+    expect(sink).toHaveLength(1);
+    globalFetch.mockRestore();
+  });
+
+  it('records an exchange once when the manager opens two sessions', async () => {
+    const sink: McpHttpExchange[] = [];
+    const transportOptions = {fetch: vi.fn(async () => jsonResponse(200))};
+    const manager = new MCPSessionManager({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://test-url',
+      transportOptions,
+    });
+
+    await mcpHttpDebugStorage.run(sink, async () => {
+      await manager.createSession();
+      await manager.createSession();
+      await lastTransportOptions().fetch?.('http://test-url/mcp', {
+        method: 'POST',
+      });
+    });
+
+    expect(sink).toHaveLength(1);
   });
 });
