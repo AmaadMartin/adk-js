@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Options as MikroORMOptions} from '@mikro-orm/core';
-import {MikroORM} from '@mikro-orm/core';
+import type {
+  MikroORM as MikroORMClass,
+  Options as MikroORMOptions,
+} from '@mikro-orm/core';
 import {logger} from '../../utils/logger.js';
-import {
-  ensureDatabaseCreated,
-  getConnectionOptionsFromUri,
-} from './operations.js';
-import {ENTITIES, StorageMetadata} from './schema.js';
+
+// MikroORM and the entity modules load on first use, not on import. The barrel
+// re-exports `upgradeSessionDatabaseSchema`, so a static import here would put
+// `@mikro-orm/core` back on the `import '@google/adk'` startup path.
 
 /** Key of the `adk_internal_metadata` row that holds the schema version. */
 export const SCHEMA_VERSION_KEY = 'schema_version';
@@ -63,8 +64,9 @@ function assertCompatibleVersion(version: string | undefined): void {
  * @returns The stored version, or undefined when the row is absent.
  */
 export async function readSchemaVersion(
-  orm: MikroORM,
+  orm: MikroORMClass,
 ): Promise<string | undefined> {
+  const {StorageMetadata} = await import('./schema.js');
   const em = orm.em.fork();
   const existing = await em.findOne(StorageMetadata, {key: SCHEMA_VERSION_KEY});
 
@@ -78,9 +80,10 @@ export async function readSchemaVersion(
  * @param version The version to store.
  */
 export async function stampSchemaVersion(
-  orm: MikroORM,
+  orm: MikroORMClass,
   version: string,
 ): Promise<void> {
+  const {StorageMetadata} = await import('./schema.js');
   const em = orm.em.fork();
   const existing = await em.findOne(StorageMetadata, {key: SCHEMA_VERSION_KEY});
 
@@ -107,7 +110,7 @@ export async function stampSchemaVersion(
  * @throws Error if the stored version is outside `SUPPORTED_SCHEMA_VERSIONS`.
  */
 export async function validateDatabaseSchemaVersion(
-  orm: MikroORM,
+  orm: MikroORMClass,
 ): Promise<void> {
   const version = await readSchemaVersion(orm);
   assertCompatibleVersion(version);
@@ -131,6 +134,13 @@ export async function validateDatabaseSchemaVersion(
 export async function upgradeSessionDatabaseSchema(
   connectionStringOrOptions: string | MikroORMOptions,
 ): Promise<void> {
+  const [{MikroORM}, {ENTITIES}, operations] = await Promise.all([
+    import('@mikro-orm/core'),
+    import('./schema.js'),
+    import('./operations.js'),
+  ]);
+  const {ensureDatabaseCreated, getConnectionOptionsFromUri} = operations;
+
   const options =
     typeof connectionStringOrOptions === 'string'
       ? await getConnectionOptionsFromUri(connectionStringOrOptions)

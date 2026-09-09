@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {FilterQuery, Options as MikroDBOptions} from '@mikro-orm/core';
-import {LockMode, MikroORM} from '@mikro-orm/core';
+import type {
+  FilterQuery,
+  LockMode as LockModeEnum,
+  Options as MikroDBOptions,
+  MikroORM as MikroORMClass,
+} from '@mikro-orm/core';
 
 import type {Event} from '../events/event.js';
 import {newUuid} from '../utils/uuid.js';
@@ -23,20 +27,56 @@ import {
   splitStateDelta,
   trimTempDeltaState,
 } from './base_session_service.js';
-import {
-  ensureDatabaseCreated,
-  getConnectionOptionsFromUri,
-} from './db/operations.js';
-import {
-  ENTITIES,
-  StorageAppState,
-  StorageEvent,
-  StorageSession,
-  StorageUserState,
-} from './db/schema.js';
-import {validateDatabaseSchemaVersion} from './db/schema_version.js';
 import type {Session} from './session.js';
 import {createSession} from './session.js';
+
+type SchemaModule = typeof import('./db/schema.js');
+type OperationsModule = typeof import('./db/operations.js');
+type SchemaVersionModule = typeof import('./db/schema_version.js');
+type StorageEventEntity = InstanceType<SchemaModule['StorageEvent']>;
+type StorageSessionEntity = InstanceType<SchemaModule['StorageSession']>;
+type StorageUserStateEntity = InstanceType<SchemaModule['StorageUserState']>;
+
+let MikroORM: typeof MikroORMClass;
+let LockMode: typeof LockModeEnum;
+let ENTITIES: SchemaModule['ENTITIES'];
+let StorageAppState: SchemaModule['StorageAppState'];
+let StorageEvent: SchemaModule['StorageEvent'];
+let StorageSession: SchemaModule['StorageSession'];
+let StorageUserState: SchemaModule['StorageUserState'];
+let ensureDatabaseCreated: OperationsModule['ensureDatabaseCreated'];
+let getConnectionOptionsFromUri: OperationsModule['getConnectionOptionsFromUri'];
+let validateDatabaseSchemaVersion: SchemaVersionModule['validateDatabaseSchemaVersion'];
+
+let mikroOrmLoad: Promise<void> | undefined;
+
+/**
+ * Resolves (and memoizes) MikroORM plus the ADK database modules.
+ *
+ * These stay off the static import graph so that `@mikro-orm/core` is not
+ * evaluated when an agent imports `@google/adk` and never opens a database.
+ * A rejected promise stays cached, so a broken install keeps producing the
+ * same error instead of retrying module resolution on every call.
+ */
+function loadMikroOrm(): Promise<void> {
+  mikroOrmLoad ??= importMikroOrm();
+  return mikroOrmLoad;
+}
+
+async function importMikroOrm(): Promise<void> {
+  const [core, schema, operations, schemaVersion] = await Promise.all([
+    import('@mikro-orm/core'),
+    import('./db/schema.js'),
+    import('./db/operations.js'),
+    import('./db/schema_version.js'),
+  ]);
+
+  ({MikroORM, LockMode} = core);
+  ({ENTITIES, StorageAppState, StorageEvent, StorageSession, StorageUserState} =
+    schema);
+  ({ensureDatabaseCreated, getConnectionOptionsFromUri} = operations);
+  ({validateDatabaseSchemaVersion} = schemaVersion);
+}
 
 /**
  * Checks if a URI is a database connection URI.
@@ -63,7 +103,7 @@ export function isDatabaseConnectionString(uri?: string): boolean {
  * A session service that uses a SQL database for storage via MikroORM.
  */
 export class DatabaseSessionService extends BaseSessionService {
-  private orm?: MikroORM;
+  private orm?: MikroORMClass;
   private initialized = false;
   private options?: MikroDBOptions;
   private connectionString?: string;
@@ -91,7 +131,6 @@ export class DatabaseSessionService extends BaseSessionService {
       this.options = {
         ...additionalOptions,
         ...connectionStringOrOptions,
-        entities: ENTITIES,
       };
     }
   }
@@ -101,14 +140,18 @@ export class DatabaseSessionService extends BaseSessionService {
       return;
     }
 
-    if (this.connectionString && (!this.options || !this.options.driver)) {
-      this.options = {
-        ...this.additionalOptions,
-        ...(await getConnectionOptionsFromUri(this.connectionString)),
-      };
-    }
+    await loadMikroOrm();
 
-    this.orm = await MikroORM.init(this.options!);
+    // ENTITIES overrides a caller-supplied `entities`, exactly as the
+    // constructor did before the schema module became lazy.
+    this.options = this.connectionString
+      ? {
+          ...this.additionalOptions,
+          ...(await getConnectionOptionsFromUri(this.connectionString)),
+        }
+      : {...this.options, entities: ENTITIES};
+
+    this.orm = await MikroORM.init(this.options);
     await ensureDatabaseCreated(this.orm!);
     await validateDatabaseSchemaVersion(this.orm!);
     this.initialized = true;
@@ -234,9 +277,9 @@ export class DatabaseSessionService extends BaseSessionService {
 
     // Zero recent events is an existence/metadata-only read, so skip the events
     // query entirely instead of issuing a select that can only return no rows.
-    let storageEvents: StorageEvent[] = [];
+    let storageEvents: StorageEventEntity[] = [];
     if (config?.numRecentEvents !== 0) {
-      const eventWhere: FilterQuery<StorageEvent> = {
+      const eventWhere: FilterQuery<StorageEventEntity> = {
         appName,
         userId,
         sessionId,
@@ -293,7 +336,8 @@ export class DatabaseSessionService extends BaseSessionService {
     // two can never disagree about which users are in range.
     const where = (
       userId === undefined ? {appName} : {appName, userId}
-    ) satisfies FilterQuery<StorageSession> & FilterQuery<StorageUserState>;
+    ) satisfies FilterQuery<StorageSessionEntity> &
+      FilterQuery<StorageUserStateEntity>;
 
     const orderBy =
       order === 'asc'
