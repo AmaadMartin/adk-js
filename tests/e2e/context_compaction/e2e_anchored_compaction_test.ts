@@ -7,7 +7,6 @@
 import {
   AnchoredContextCompactor,
   BasePlugin,
-  CompactedEvent,
   ContextCompactionTrigger,
   Gemini,
   InMemoryRunner,
@@ -21,7 +20,7 @@ import {createUserContent} from '@google/genai';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
-import {describe, expect, it} from 'vitest';
+import {assert, describe, expect, it} from 'vitest';
 
 class TestCompactionPlugin extends BasePlugin {
   beforeCalled = false;
@@ -128,9 +127,12 @@ describe('E2e Anchored Context Compaction', () => {
 
       // In AnchoredContextCompactor, the scratchpad should be at index 0
       const firstEvent = events[0];
-      expect(isScratchpadEvent(firstEvent)).toBe(true);
+      assert(
+        isScratchpadEvent(firstEvent),
+        'the first event should be the scratchpad',
+      );
       expect(firstEvent.author).toBe('system');
-      expect((firstEvent as CompactedEvent).compactedContent).toBeTruthy();
+      expect(firstEvent.compactedContent).toBeTruthy();
 
       // Verify that there is at most one scratchpad event
       const scratchpads = events.filter(isScratchpadEvent);
