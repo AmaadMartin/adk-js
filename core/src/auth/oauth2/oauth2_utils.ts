@@ -13,6 +13,10 @@ import {validateDiscoveryUrl} from './oauth2_discovery.js';
 
 /**
  * Returns the token endpoint for the given auth scheme.
+ *
+ * An OAuth2 scheme can declare several flows, and a generator often emits the
+ * unused ones with a blank `tokenUrl`. The flows are searched in precedence
+ * order for the first usable URL, so a blank one never wins.
  */
 export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
   if (
@@ -24,14 +28,14 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
 
   if (authScheme.type === 'oauth2' && authScheme.flows) {
     const flows = authScheme.flows;
-    const flow =
-      flows.authorizationCode ||
-      flows.clientCredentials ||
-      flows.password ||
-      flows.implicit;
-
-    if (flow && 'tokenUrl' in flow) {
-      return flow.tokenUrl;
+    for (const flow of [
+      flows.authorizationCode,
+      flows.clientCredentials,
+      flows.password,
+    ]) {
+      if (flow?.tokenUrl) {
+        return flow.tokenUrl;
+      }
     }
   }
 
