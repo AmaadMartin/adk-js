@@ -28,7 +28,7 @@ import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {
-  EXPRESS_MODE_UNSUPPORTED_MESSAGE,
+  createExpressModeApiClient,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
 
@@ -64,6 +64,9 @@ const HTTP_BAD_REQUEST = 400;
  */
 const WORKFLOW_CUSTOM_METADATA_KEY = '_workflow';
 
+/** The only characters the Agent Engine Sessions API accepts in a session id. */
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
 /**
  * Checks if the given URI is a Vertex AI session service URI.
  */
@@ -81,6 +84,71 @@ export function isVertexAiConnectionString(uri?: string): boolean {
 export function quoteFilterLiteral(value: string): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${escaped}"`;
+}
+
+/**
+ * Reduces a full session resource name
+ * (`projects/P/locations/L/reasoningEngines/E/sessions/S`) to the short id `S`
+ * the Sessions API expects, and returns any other value unchanged.
+ *
+ * The Agent Engine REST API hands callers the full resource name, so a caller
+ * that passes it straight back would otherwise address
+ * `reasoningEngines/E/sessions/projects/P/.../sessions/S`.
+ *
+ * @throws if the name embeds a reasoning engine other than `expectedEngineId`,
+ *     which would otherwise query a different engine's session.
+ */
+export function extractShortSessionId(
+  sessionId: string,
+  expectedEngineId?: string,
+): string {
+  const parts = sessionId.split('/');
+  if (parts.length < 2 || parts[parts.length - 2] !== 'sessions') {
+    return sessionId;
+  }
+  const embeddedEngineId =
+    parts.length >= 4 && parts[parts.length - 4] === 'reasoningEngines'
+      ? parts[parts.length - 3]
+      : undefined;
+  if (
+    expectedEngineId &&
+    embeddedEngineId &&
+    embeddedEngineId !== expectedEngineId
+  ) {
+    throw new Error(
+      `Session resource name mismatch: session belongs to reasoningEngine ` +
+        `'${embeddedEngineId}', but service is configured for ` +
+        `'${expectedEngineId}'.`,
+    );
+  }
+  return parts[parts.length - 1];
+}
+
+/**
+ * Rejects a session id that would escape its URL path segment.
+ *
+ * @throws if `sessionId` does not match {@link SESSION_ID_PATTERN}.
+ */
+export function validateSessionId(sessionId: string): void {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    throw new Error(
+      `Invalid sessionId '${sessionId}': must match ` +
+        `${SESSION_ID_PATTERN.source}.`,
+    );
+  }
+}
+
+/**
+ * Reduces a caller-supplied session id to its short form and rejects it when it
+ * cannot be safely interpolated into a resource name.
+ *
+ * The two steps are always applied in this order: validating first would reject
+ * every legitimate full resource name.
+ */
+function resolveSessionId(sessionId: string, engineId: string): string {
+  const shortId = extractShortSessionId(sessionId, engineId);
+  validateSessionId(shortId);
+  return shortId;
 }
 
 export interface VertexAiSessionServiceOptions {
@@ -130,19 +198,25 @@ export class VertexAiSessionService extends BaseSessionService {
     // sessions is primarily for testing to inject a mock client.
     if (options.sessions) {
       this.sessions = options.sessions;
-    } else {
-      if (!this.projectId || !this.location) {
-        throw new Error(
-          this.expressModeApiKey
-            ? EXPRESS_MODE_UNSUPPORTED_MESSAGE
-            : 'Project ID and Location are required.',
-        );
-      }
+    } else if (this.projectId && this.location) {
       const client = new Client({
         project: this.projectId,
         location: this.location,
       });
       this.sessions = client.agentEnginesInternal.sessions;
+    } else if (this.expressModeApiKey) {
+      this.sessions = new Sessions(
+        // `@google-cloud/vertexai` bundles its own nested copy of
+        // `@google/genai` (1.52.0) while the repo root resolves 2.9.0, so the
+        // two `ApiClient` classes are nominally distinct (their private fields
+        // make them structurally incompatible) but interchangeable at runtime.
+        // The cast is confined to this one boundary.
+        createExpressModeApiClient(
+          this.expressModeApiKey,
+        ) as unknown as ConstructorParameters<typeof Sessions>[0],
+      );
+    } else {
+      throw new Error('Project ID and Location are required.');
     }
   }
 
@@ -185,13 +259,16 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
+    const shortSessionId = sessionId
+      ? resolveSessionId(sessionId, reasoningEngineId)
+      : undefined;
     const filteredState = state ? trimTempState(state) : undefined;
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
       config: {
         ...(filteredState ? {sessionState: filteredState} : {}),
-        ...(sessionId ? {sessionId} : {}),
+        ...(shortSessionId ? {sessionId: shortSessionId} : {}),
         ...(ttl != null ? {ttl} : {}),
         ...(expireTime != null ? {expireTime} : {}),
       },
@@ -239,7 +316,10 @@ export class VertexAiSessionService extends BaseSessionService {
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
+    // Outside the try/catch: a rejected id is a caller error, not an API
+    // failure, so it must not be logged as one nor swallowed as NOT_FOUND.
+    const shortSessionId = resolveSessionId(sessionId, reasoningEngineId);
+    const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`;
 
     try {
       let getSessionResponse: VertexAiSession | undefined;
@@ -274,12 +354,12 @@ export class VertexAiSessionService extends BaseSessionService {
 
       if (sessionObj.userId !== userId) {
         throw new Error(
-          `Session ${sessionId} does not belong to user ${userId}.`,
+          `Session ${shortSessionId} does not belong to user ${userId}.`,
         );
       }
 
       const session = createSession({
-        id: sessionId,
+        id: shortSessionId,
         appName,
         userId,
         state: sessionObj.sessionState,
@@ -358,17 +438,7 @@ export class VertexAiSessionService extends BaseSessionService {
       pageToken = (response as {nextPageToken?: string}).nextPageToken;
     } while (pageToken);
 
-    if (order === 'asc') {
-      adkSessions.sort(
-        (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    } else if (order === 'desc') {
-      adkSessions.sort(
-        (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    }
+    adkSessions.sort((a, b) => compareSessions(a, b, order));
 
     if (limit === undefined) {
       const totalItems = adkSessions.length;
@@ -410,6 +480,7 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
+    const shortSessionId = resolveSessionId(sessionId, reasoningEngineId);
 
     // A session may only be deleted by the user it belongs to. getSession
     // already enforces this and throws when the stored session's userId does
@@ -419,7 +490,7 @@ export class VertexAiSessionService extends BaseSessionService {
     const session = await this.getSession({
       appName,
       userId,
-      sessionId,
+      sessionId: shortSessionId,
       config: {numRecentEvents: 0},
     });
     if (!session) {
@@ -427,8 +498,27 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     await this.sessions.delete({
-      name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
+      name: `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`,
     });
+  }
+
+  /**
+   * Not supported by the Vertex AI Agent Engine backend, which has no way to
+   * read user state without a session. To read user state, enumerate sessions
+   * with {@link listSessions} and call {@link getSession} on each result.
+   *
+   * @throws Always.
+   */
+  async getUserState(_request: {
+    appName: string;
+    userId: string;
+  }): Promise<Record<string, unknown>> {
+    throw new Error(
+      'VertexAiSessionService does not support getUserState. The Vertex AI ' +
+        'Agent Engine API does not expose user state independently of a ' +
+        'session. To read user state, enumerate sessions via listSessions ' +
+        'and call getSession on each result.',
+    );
   }
 
   override async appendEvent({
@@ -438,6 +528,9 @@ export class VertexAiSessionService extends BaseSessionService {
     await super.appendEvent({session, event});
     session.lastUpdateTime = event.timestamp;
 
+    // The session object already carries a short id, so validate it without
+    // extracting.
+    validateSessionId(session.id);
     const reasoningEngineId = this.getReasoningEngineId(session.appName);
 
     const customMetadata: Record<string, unknown> = {...event.customMetadata};
@@ -517,6 +610,26 @@ export class VertexAiSessionService extends BaseSessionService {
   }
 }
 
+/**
+ * Orders listed sessions by `(lastUpdateTime, userId, id)`, so a repeated
+ * `listSessions` call returns the same sequence whatever order the backend
+ * paginated in. `order` reverses the update-time comparison only; the
+ * tie-breaks stay ascending so equal timestamps still order deterministically.
+ */
+function compareSessions(
+  a: Session,
+  b: Session,
+  order: 'asc' | 'desc' | undefined,
+): number {
+  const byUpdateTime =
+    order === 'desc'
+      ? b.lastUpdateTime - a.lastUpdateTime
+      : a.lastUpdateTime - b.lastUpdateTime;
+  return (
+    byUpdateTime || a.userId.localeCompare(b.userId) || a.id.localeCompare(b.id)
+  );
+}
+
 interface WorkflowEventMetadata {
   output?: unknown;
   route?: Route;
@@ -578,6 +691,11 @@ function applyWorkflowMetadata(
  * API actually defines, mirroring what `_fromApiEvent` reads back and what
  * adk-python writes. Returns a new object: `partialCopy` is shallow, so
  * rewriting the event's own `actions` in place would mutate the caller's event.
+ *
+ * The requested auth configs go through a JSON round trip, so the request
+ * carries a plain snapshot instead of aliasing the caller's live `AuthConfig`
+ * objects onto the wire payload. This also drops `undefined`-valued optional
+ * fields, matching what adk-python serializes.
  */
 function toApiActions(
   actions: EventActions | undefined,
@@ -585,11 +703,19 @@ function toApiActions(
   if (!actions) {
     return undefined;
   }
-  const {transferToAgent, ...rest} = actions;
+  const {transferToAgent, requestedAuthConfigs, ...rest} = actions;
   return {
     ...rest,
     ...(transferToAgent !== undefined ? {transferAgent: transferToAgent} : {}),
+    requestedAuthConfigs: toPlainJson(requestedAuthConfigs),
   } as ApiEventActions;
+}
+
+/** Returns a detached, JSON-representable copy of `value`. */
+function toPlainJson(
+  value: Record<string, AuthConfig>,
+): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 
 /**
