@@ -78,6 +78,88 @@ describe('FileArtifactService', () => {
     });
   });
 
+  describe('customMetadata on disk', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+    const sessionId = 'test-session';
+    const filename = 'no-meta.txt';
+
+    function metadataPath(root: string): string {
+      return path.join(
+        getSessionArtifactsDir(getUserRoot(root, userId), sessionId),
+        filename,
+        'versions',
+        '0',
+        'metadata.json',
+      );
+    }
+
+    it('persists an empty customMetadata object', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: 'body'},
+        });
+
+        const written = JSON.parse(
+          await fs.readFile(metadataPath(rootDir), 'utf-8'),
+        ) as Record<string, unknown>;
+
+        expect(written.customMetadata).toEqual({});
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('defaults customMetadata for a metadata file that predates the key', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: 'body'},
+        });
+
+        const legacyPath = metadataPath(rootDir);
+        const legacy = JSON.parse(
+          await fs.readFile(legacyPath, 'utf-8'),
+        ) as Record<string, unknown>;
+        delete legacy.customMetadata;
+        await fs.writeFile(legacyPath, JSON.stringify(legacy), 'utf-8');
+
+        const single = await service.getArtifactVersion({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          version: 0,
+        });
+        expect(single?.customMetadata).toEqual({});
+
+        const listed = await service.listArtifactVersions({
+          appName,
+          userId,
+          sessionId,
+          filename,
+        });
+        expect(listed).toHaveLength(1);
+        expect(listed[0].customMetadata).toEqual({});
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
+
   describe('path security', () => {
     it('rejects traversal attempts', async () => {
       rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
