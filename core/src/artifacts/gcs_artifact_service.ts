@@ -23,6 +23,7 @@ const GCS_FILE_URI_METADATA_KEY = 'adkFileUri';
 const GCS_FILE_MIME_TYPE_METADATA_KEY = 'adkFileMimeType';
 const GCS_DISPLAY_NAME_METADATA_KEY = 'adkDisplayName';
 const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
+const USER_NAMESPACE_PREFIX = 'user:';
 
 export class GcsArtifactService implements BaseArtifactService {
   private readonly bucketName: string;
@@ -192,7 +193,7 @@ export class GcsArtifactService implements BaseArtifactService {
 
     return [
       ...extractArtifactKeys(sessionFiles, sessionPrefix),
-      ...extractArtifactKeys(userSessionFiles, usernamePrefix, 'user:'),
+      ...extractArtifactKeys(userSessionFiles, usernamePrefix),
     ].sort((a, b) => a.localeCompare(b));
   }
 
@@ -299,31 +300,21 @@ function getFileName({
   filename,
   version,
 }: LoadArtifactRequest): string {
-  const isUser = filename.startsWith('user:');
-  const cleanFilename = isUser ? filename.substring(5) : filename;
-
-  const prefix = isUser
-    ? `${appName}/${userId}/user/${cleanFilename}`
-    : `${appName}/${userId}/${sessionId}/${cleanFilename}`;
+  const prefix = filename.startsWith(USER_NAMESPACE_PREFIX)
+    ? `${appName}/${userId}/user/${filename}`
+    : `${appName}/${userId}/${sessionId}/${filename}`;
 
   return version !== undefined ? `${prefix}/${version}` : prefix;
 }
 
-function extractArtifactKeys(
-  files: File[],
-  fileNamePrefix: string,
-  keyPrefix: string = '',
-): string[] {
+function extractArtifactKeys(files: File[], fileNamePrefix: string): string[] {
   const keys = new Set<string>();
   for (const file of files) {
     if (!file.name.startsWith(fileNamePrefix)) {
       continue;
     }
 
-    const relative = file.name.substring(fileNamePrefix.length);
-    const name = getFileNameFromPath(relative);
-
-    keys.add(`${keyPrefix}${name}`);
+    keys.add(getFileNameFromPath(file.name.substring(fileNamePrefix.length)));
   }
 
   return [...keys];
