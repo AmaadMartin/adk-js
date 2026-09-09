@@ -19,6 +19,7 @@ import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../events/event_actions.js';
+import {isAgentTool} from '../tools/agent_tool_signature.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ResumeInputs} from '../tools/resume_inputs.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
@@ -322,6 +323,33 @@ function normalizeCallbackResponse(
     return {results: response};
   }
   return response as Record<string, unknown>;
+}
+
+/** Whether a normalized tool response reports an error rather than a result. */
+function isErrorResponse(
+  response: Record<string, unknown> | undefined,
+): boolean {
+  return response !== undefined && 'error' in response;
+}
+
+/**
+ * Whether a raw tool result carries something a user can read. An empty string,
+ * a nullish value, and the `{result: null}` a void tool produces all render as
+ * noise rather than as an answer.
+ */
+function isDisplayableResult(result: unknown): boolean {
+  if (result == null || result === '') {
+    return false;
+  }
+  if (typeof result !== 'object') {
+    return true;
+  }
+  const entries = Object.entries(result);
+  return !(
+    entries.length === 1 &&
+    entries[0][0] === 'result' &&
+    entries[0][1] === null
+  );
 }
 
 /**
@@ -640,6 +668,10 @@ export async function handleFunctionCallList({
       continue;
     }
 
+    // The raw result, before normalization wraps or replaces it, is what a UI
+    // can display.
+    const displayResult = functionResponse;
+
     if (functionResponseError) {
       functionResponse = {error: functionResponseError};
     } else if (functionResponse == null) {
@@ -648,16 +680,41 @@ export async function handleFunctionCallList({
       functionResponse = normalizeCallbackResponse(functionResponse);
     }
 
+    const content = createUserContent({
+      functionResponse: {
+        id: toolContext.functionCallId,
+        name: tool.name,
+        response: functionResponse,
+      },
+    });
+
+    // Nothing summarises an AgentTool result when the flag is set, so the
+    // sub-agent's answer is added as text or it never reaches the user. This is
+    // scoped to AgentTool deliberately: other tools set the flag precisely
+    // because their response is an internal acknowledgement that must not be
+    // surfaced. A tool that returns an error as its value carries an `error`
+    // key here, which is why the thrown-error flag alone is not enough.
+    if (
+      toolContext.actions.skipSummarization &&
+      !isErrorResponse(functionResponse) &&
+      isAgentTool(tool) &&
+      isDisplayableResult(displayResult)
+    ) {
+      content.parts = [
+        ...(content.parts ?? []),
+        {
+          text:
+            typeof displayResult === 'string'
+              ? displayResult
+              : JSON.stringify(displayResult),
+        },
+      ];
+    }
+
     const functionResponseEvent = createEvent({
       invocationId: invocationContext.invocationId,
       author: toolEventAuthor(invocationContext),
-      content: createUserContent({
-        functionResponse: {
-          id: toolContext.functionCallId,
-          name: tool.name,
-          response: functionResponse,
-        },
-      }),
+      content,
       actions: toolContext.actions,
       branch: invocationContext.branch,
     });

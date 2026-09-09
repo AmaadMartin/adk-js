@@ -12,6 +12,7 @@ import {logger} from '../utils/logger.js';
  */
 export enum FeatureName {
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
+  JSON_SCHEMA_FOR_FUNC_DECL = 'JSON_SCHEMA_FOR_FUNC_DECL',
 }
 
 /**
@@ -34,6 +35,10 @@ export interface FeatureConfig {
 // Central registry: FeatureName -> FeatureConfig
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: false,
+  },
+  [FeatureName.JSON_SCHEMA_FOR_FUNC_DECL]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
   },
