@@ -4,9 +4,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {
+  getLogger,
+  logger,
+  Logger,
+  LogLevel,
+  setLogger,
+  setLogLevel,
+} from '@google/adk';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {resetLogger} from '../../src/utils/logger.js';
+
+/** Builds a logger that appends each call it receives to `sink`. */
+function recordingLogger(sink: string[]): Logger {
+  return {
+    setLogLevel: (level) => sink.push(`setLogLevel:${LogLevel[level]}`),
+    log: (level, ...args) => sink.push(`log:${LogLevel[level]}:${args[0]}`),
+    debug: (...args) => sink.push(`debug:${args[0]}`),
+    info: (...args) => sink.push(`info:${args[0]}`),
+    warn: (...args) => sink.push(`warn:${args[0]}`),
+    error: (...args) => sink.push(`error:${args[0]}`),
+  };
+}
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -140,5 +159,99 @@ describe('setLogger', () => {
 
       expect(logger.constructor.name).toBe('SimpleLogger');
     });
+  });
+});
+
+describe('logger (public export)', () => {
+  beforeEach(() => {
+    resetLogger();
+    setLogLevel(LogLevel.DEBUG);
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  it('is reachable from the package entry point', () => {
+    expect(logger).toBeDefined();
+    for (const method of [
+      'log',
+      'debug',
+      'info',
+      'warn',
+      'error',
+      'setLogLevel',
+    ] as const) {
+      expect(typeof logger[method]).toBe('function');
+    }
+  });
+
+  it('routes to a logger installed after the reference was taken', () => {
+    const sink: string[] = [];
+
+    setLogger(recordingLogger(sink));
+    logger.warn('late bound');
+
+    expect(sink).toEqual(['warn:late bound']);
+  });
+
+  it('forwards every level', () => {
+    const sink: string[] = [];
+    setLogger(recordingLogger(sink));
+
+    logger.debug('d');
+    logger.info('i');
+    logger.warn('w');
+    logger.error('e');
+    logger.log(LogLevel.INFO, 'l');
+
+    expect(sink).toEqual([
+      'debug:d',
+      'info:i',
+      'warn:w',
+      'error:e',
+      'log:INFO:l',
+    ]);
+  });
+
+  it('forwards setLogLevel', () => {
+    const sink: string[] = [];
+    setLogger(recordingLogger(sink));
+
+    logger.setLogLevel(LogLevel.ERROR);
+
+    expect(sink).toEqual(['setLogLevel:ERROR']);
+  });
+
+  it('goes silent when logging is disabled after the reference was taken', () => {
+    const sink: string[] = [];
+    setLogger(recordingLogger(sink));
+    setLogger(null);
+
+    expect(() => logger.warn('dropped')).not.toThrow();
+    expect(sink).toEqual([]);
+  });
+
+  it('follows setLogger where a cached getLogger() result does not', () => {
+    const first: string[] = [];
+    const second: string[] = [];
+    setLogger(recordingLogger(first));
+    const cached = getLogger();
+    setLogger(recordingLogger(second));
+
+    cached.warn('stale');
+    logger.warn('fresh');
+
+    expect(first).toEqual(['warn:stale']);
+    expect(second).toEqual(['warn:fresh']);
+  });
+
+  it('reaches a spy installed on the getLogger() instance', () => {
+    const warnSpy = vi.spyOn(getLogger(), 'warn').mockImplementation(() => {});
+
+    logger.warn('spied');
+
+    expect(warnSpy).toHaveBeenCalledWith('spied');
+    warnSpy.mockRestore();
   });
 });
