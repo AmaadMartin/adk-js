@@ -6,12 +6,14 @@
 
 import {getActiveEvents} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
+import {isGemini} from '../../models/google_llm.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 import {
   getContents,
+  GetContentsOptions,
   getCurrentTurnContents,
 } from './content_processor_utils.js';
 
@@ -43,6 +45,12 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
     }
 
     const events = getActiveEvents(invocationContext.session.events);
+    const model = agent.canonicalModel;
+    const options: GetContentsOptions = {
+      preserveFunctionCallIds: isGemini(model) && model.useInteractionsApi,
+      isSingleTurn: agent.mode === 'single_turn',
+      userContent: invocationContext.userContent,
+    };
 
     if (agent.includeContents === 'default') {
       // Include full conversation history
@@ -51,14 +59,22 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
+        {
+          ...options,
+          includeThoughtsFromOtherAgents:
+            invocationContext.runConfig?.includeThoughtsFromOtherAgents ??
+            false,
+        },
       );
     } else {
-      // Include current turn context only (no conversation history).
+      // Include current turn context only (no conversation history). Another
+      // agent's thoughts are history, so they stay out of a current-turn build.
       llmRequest.contents = getCurrentTurnContents(
         events,
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
+        {...options, includeThoughtsFromOtherAgents: false},
       );
     }
 
