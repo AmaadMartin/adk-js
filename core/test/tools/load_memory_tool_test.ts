@@ -16,6 +16,8 @@ import {
   SearchMemoryResponse,
 } from '@google/adk';
 
+import {createMemoryToolContext} from './test_helpers.js';
+
 class StubToolContext {
   private memories: MemoryEntry[];
 
@@ -76,6 +78,42 @@ describe('LoadMemoryTool', () => {
           author: 'someone',
           timestamp: undefined,
         },
+      ],
+    });
+  });
+
+  it('drops text-free parts from the content it reports', async () => {
+    const tool = new LoadMemoryTool();
+    const toolContext = createMemoryToolContext([
+      {
+        content: {
+          role: 'user',
+          parts: [
+            {text: 'hello'},
+            {functionCall: {name: 'f'}},
+            {text: 'world'},
+          ],
+        },
+        author: 'someone',
+      },
+      {
+        content: {
+          role: 'user',
+          parts: [{inlineData: {mimeType: 'audio/wav', data: 'AAAA'}}],
+        },
+        author: 'someone',
+      },
+    ]);
+
+    const result = await tool.runAsync({
+      args: {query: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toEqual({
+      memories: [
+        {content: 'hello world', author: 'someone', timestamp: undefined},
+        {content: '', author: 'someone', timestamp: undefined},
       ],
     });
   });
