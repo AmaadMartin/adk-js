@@ -33,3 +33,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+#### MCP
+
+- [Authenticating an MCP toolset](tools/mcp_tool_auth/index.md) - Declaring the auth scheme and credential an MCP server needs, and how ADK turns them into request headers.
