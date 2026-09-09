@@ -73,6 +73,44 @@ export function appendInstructions(
 }
 
 /**
+ * Inserts request-scoped user content at the current-turn boundary.
+ *
+ * Transient content such as recalled memory belongs before the latest run of
+ * ordinary user contents, but after a function response while the model
+ * continues a tool-call turn. That boundary keeps the content out of the
+ * reusable system and history prefix, so a provider can still cache the
+ * prefix, and it never separates a function call from its response.
+ *
+ * adk-python also clamps the index against a static instruction prefix.
+ * adk-js has no static instruction on a request, so this port does not model
+ * that clamp.
+ *
+ * @param contents The request-scoped contents to insert.
+ */
+export function insertTransientUserContent(
+  llmRequest: LlmRequest,
+  contents: Content[],
+): void {
+  if (!contents.length) {
+    return;
+  }
+
+  let insertIndex = llmRequest.contents.length;
+  while (insertIndex > 0) {
+    const content = llmRequest.contents[insertIndex - 1];
+    if (
+      content.role !== 'user' ||
+      content.parts?.some((part) => part.functionResponse)
+    ) {
+      break;
+    }
+    insertIndex--;
+  }
+
+  llmRequest.contents.splice(insertIndex, 0, ...contents);
+}
+
+/**
  * Appends tools to the request.
  * @param tools The tools to append.
  */

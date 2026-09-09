@@ -10,14 +10,15 @@ import {
   LlmAgent,
   PRELOAD_MEMORY,
 } from '@google/adk';
-import {createUserContent} from '@google/genai';
+import {Content, createUserContent} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 import {GeminiWithMockResponses} from '../test_case_utils.js';
 
 describe('PreloadMemoryTool Integration', () => {
-  it('should preload memory into llmRequest system instructions', async () => {
+  it('should preload memory into llmRequest contents', async () => {
     let capturedInstruction = '';
+    let capturedContents: Content[] = [];
 
     const agent = new LlmAgent({
       name: 'memory_agent',
@@ -28,6 +29,7 @@ describe('PreloadMemoryTool Integration', () => {
         if (request.config?.systemInstruction) {
           capturedInstruction += request.config.systemInstruction.toString();
         }
+        capturedContents = request.contents;
         return undefined;
       },
     });
@@ -84,8 +86,13 @@ describe('PreloadMemoryTool Integration', () => {
       }
     }
 
-    expect(capturedInstruction).toContain('favorite color is green');
-    expect(capturedInstruction).toContain('<PAST_CONVERSATIONS>');
+    const memoryContent = capturedContents.find((content) =>
+      content.parts?.[0]?.text?.includes('<PAST_CONVERSATIONS>'),
+    );
+    expect(memoryContent?.parts?.[0]?.text).toContain(
+      'favorite color is green',
+    );
+    expect(capturedInstruction).not.toContain('<PAST_CONVERSATIONS>');
     expect(finalResponse).toContain('Your favorite color is green.');
   });
 });
