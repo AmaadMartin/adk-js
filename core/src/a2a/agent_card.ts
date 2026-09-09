@@ -121,15 +121,22 @@ async function buildSubAgentSkills(agent: RunnableRoot): Promise<AgentSkill[]> {
   const result: AgentSkill[] = [];
 
   for (const sub of subAgents) {
-    const skills = await buildPrimarySkills(sub);
-    for (const subSkill of skills) {
-      const skill: AgentSkill = {
-        id: `${sub.name}_${subSkill.id}`,
-        name: `${sub.name}: ${subSkill.name}`,
-        description: subSkill.description,
-        tags: [`sub_agent:${sub.name}`, ...subSkill.tags],
-      };
-      result.push(skill);
+    // A child that cannot be introspected costs its own skills, not the whole
+    // card. A toolset that fetches its tool list over the network is the usual
+    // source of the rejection.
+    try {
+      const skills = await buildPrimarySkills(sub);
+      for (const subSkill of skills) {
+        const skill: AgentSkill = {
+          id: `${sub.name}_${subSkill.id}`,
+          name: `${sub.name}: ${subSkill.name}`,
+          description: subSkill.description,
+          tags: [`sub_agent:${sub.name}`, ...subSkill.tags],
+        };
+        result.push(skill);
+      }
+    } catch (e: unknown) {
+      logger.warn(`Failed to build skills for sub-agent ${sub.name}`, e);
     }
   }
 
