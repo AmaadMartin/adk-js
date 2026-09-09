@@ -6,10 +6,12 @@
 
 import {
   AgentTool,
+  BasePlugin,
   Context,
   createEvent,
   createEventActions,
   createSession,
+  Event,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -17,6 +19,7 @@ import {
   Runner,
   State,
 } from '@google/adk';
+import {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -32,7 +35,133 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   };
 });
 
+class StubSubAgent extends LlmAgent {
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'sub-agent answer'}]},
+    });
+  }
+}
+
+class RecordingPlugin extends BasePlugin {
+  readonly beforeRunAgentNames: Array<string | undefined> = [];
+  readonly seenEventAuthors: Array<string | undefined> = [];
+
+  constructor() {
+    super('recording_plugin');
+  }
+
+  override async beforeRunCallback({
+    invocationContext,
+  }: {
+    invocationContext: InvocationContext;
+  }): Promise<Content | undefined> {
+    this.beforeRunAgentNames.push(invocationContext.agent?.name);
+    return undefined;
+  }
+
+  override async onEventCallback({
+    event,
+  }: {
+    invocationContext: InvocationContext;
+    event: Event;
+  }): Promise<Event | undefined> {
+    this.seenEventAuthors.push(event.author);
+    return undefined;
+  }
+}
+
+/**
+ * Builds a parent tool context whose PluginManager holds `plugin`, and hands
+ * the mocked Runner constructor back to the real implementation so the
+ * sub-agent runs for real.
+ */
+async function setUpRealSubRunner(plugin: RecordingPlugin) {
+  const {Runner: ActualRunner} = await vi.importActual<
+    typeof import('../../src/runner/runner.js')
+  >('../../src/runner/runner.js');
+
+  const subAgent = new StubSubAgent({
+    name: 'sub-agent',
+    model: 'gemini-2.5-flash',
+  });
+
+  const invocationContext = new InvocationContext({
+    invocationId: 'test-invocation',
+    agent: subAgent,
+    session: createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    }),
+    pluginManager: new PluginManager([plugin]),
+    sessionService: new InMemorySessionService(),
+  });
+
+  const runners: Runner[] = [];
+  vi.mocked(Runner).mockImplementation((config) => {
+    const runner = new ActualRunner(config);
+    runners.push(runner);
+    return runner;
+  });
+
+  return {
+    subAgent,
+    toolContext: new Context({invocationContext}),
+    subRunner: () => {
+      const runner = runners[0];
+      if (!runner) {
+        expect.fail('AgentTool did not construct a sub-Runner');
+      }
+      return runner;
+    },
+  };
+}
+
 describe('AgentTool', () => {
+  it('runs the sub-agent with the parent runner plugins by default', async () => {
+    const plugin = new RecordingPlugin();
+    const {subAgent, toolContext, subRunner} = await setUpRealSubRunner(plugin);
+
+    const tool = new AgentTool({agent: subAgent});
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('sub-agent answer');
+    expect(
+      subRunner()
+        .pluginManager.getPlugins()
+        .map((p) => p.name),
+    ).toEqual(['recording_plugin']);
+    expect(plugin.beforeRunAgentNames).toEqual(['sub-agent']);
+    expect(plugin.seenEventAuthors).toContain('sub-agent');
+  });
+
+  it('runs the sub-agent with no plugins when includePlugins is false', async () => {
+    const plugin = new RecordingPlugin();
+    const {subAgent, toolContext, subRunner} = await setUpRealSubRunner(plugin);
+
+    const tool = new AgentTool({agent: subAgent, includePlugins: false});
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('sub-agent answer');
+    expect(subRunner().pluginManager.getPlugins()).toEqual([]);
+    expect(subRunner().pluginManager.hasPlugins).toBe(false);
+    expect(plugin.beforeRunAgentNames).toEqual([]);
+    expect(plugin.seenEventAuthors).toEqual([]);
+  });
+
   it('propagates session context and state delta', async () => {
     const mockAgent = {
       name: 'sub-agent',
@@ -365,6 +494,7 @@ describe('AgentTool', () => {
         userId: 'parent-user',
         session: {id: 'parent-session'},
         sessionService: mockSessionService,
+        pluginManager: new PluginManager([]),
       },
       state: {
         toRecord: () => ({}),
@@ -415,6 +545,7 @@ describe('AgentTool', () => {
         userId: 'parent-user',
         session: {id: 'parent-session'},
         sessionService: mockSessionService,
+        pluginManager: new PluginManager([]),
       },
       state: {
         toRecord: () => ({}),

@@ -189,6 +189,25 @@ describe('PluginManager', () => {
     expect(service.getPlugin('plugin1')).toBe(plugin1);
   });
 
+  it('should expose the registered plugins in registration order', () => {
+    service.registerPlugin(plugin1);
+    service.registerPlugin(plugin2);
+
+    expect(service.getPlugins().map((p) => p.name)).toEqual([
+      'plugin1',
+      'plugin2',
+    ]);
+  });
+
+  it('should return a snapshot that cannot change the registry', () => {
+    service.registerPlugin(plugin1);
+    service.registerPlugin(plugin2);
+
+    service.getPlugins().pop();
+
+    expect(service.getPlugins()).toHaveLength(2);
+  });
+
   it('should throw an error when registering a duplicate plugin object', () => {
     service.registerPlugin(plugin1);
     expect(() => service.registerPlugin(plugin1)).toThrowError(
