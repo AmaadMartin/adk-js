@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Event} from '@google/adk';
+import type {ArtifactVersion, Event} from '@google/adk';
 import {Session} from '@google/adk';
 import {Content, createUserContent} from '@google/genai';
 
@@ -85,6 +85,30 @@ export class AdkApiClient {
         state: params.state,
       }),
     });
+  }
+
+  /**
+   * Applies a state delta to an existing session without running the agent.
+   *
+   * A delta key prefixed `app:` or `user:` writes state shared beyond this
+   * session.
+   */
+  async updateSession(params: {
+    appName: string;
+    userId: string;
+    sessionId: string;
+    stateDelta: Record<string, unknown>;
+  }): Promise<Session> {
+    return this.fetch<Session>(
+      `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({stateDelta: params.stateDelta}),
+      },
+    );
   }
 
   async deleteSession(params: {
@@ -237,6 +261,41 @@ export class AdkApiClient {
   }): Promise<number[]> {
     const url = `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}/artifacts/${params.artifactName}/versions`;
     return this.fetch<number[]>(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+  }
+
+  /**
+   * Reads one artifact version's metadata. Pass `'latest'` to read the newest
+   * version without knowing its number.
+   */
+  async getArtifactVersionMetadata(params: {
+    appName: string;
+    userId: string;
+    sessionId: string;
+    artifactName: string;
+    version: number | 'latest';
+  }): Promise<ArtifactVersion> {
+    const url = `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}/artifacts/${params.artifactName}/versions/${params.version}/metadata`;
+    return this.fetch<ArtifactVersion>(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+  }
+
+  async listArtifactVersionsMetadata(params: {
+    appName: string;
+    userId: string;
+    sessionId: string;
+    artifactName: string;
+  }): Promise<ArtifactVersion[]> {
+    const url = `${this.backendUrl}/apps/${params.appName}/users/${params.userId}/sessions/${params.sessionId}/artifacts/${params.artifactName}/versions/metadata`;
+    return this.fetch<ArtifactVersion[]>(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

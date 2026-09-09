@@ -6,6 +6,7 @@
 
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
+  ArtifactVersion,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
@@ -93,6 +94,10 @@ class HttpClient {
 
   put<T>(url: string, body?: unknown) {
     return this.request<T>(url, {method: 'PUT', body});
+  }
+
+  patch<T>(url: string, body?: unknown) {
+    return this.request<T>(url, {method: 'PATCH', body});
   }
 
   delete<T>(url: string) {
@@ -466,6 +471,107 @@ describe('AdkWebServer', () => {
     });
   });
 
+  describe('Update session', () => {
+    beforeEach(async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        state: {existing: 'kept'},
+      });
+    });
+
+    it('applies the state delta and returns the updated session', async () => {
+      const response = await client.patch<Session>(
+        '/apps/testApp/users/testUser/sessions/sessionId',
+        {stateDelta: {added: 'value'}},
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data?.state).toEqual({existing: 'kept', added: 'value'});
+    });
+
+    it('appends one user event marked with the p- invocation id', async () => {
+      await client.patch('/apps/testApp/users/testUser/sessions/sessionId', {
+        stateDelta: {added: 'value'},
+      });
+
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      expect(session?.events).toHaveLength(1);
+      expect(session?.events[0].author).toBe('user');
+      expect(session?.events[0].invocationId).toMatch(/^p-/);
+      expect(session?.events[0].actions.stateDelta).toEqual({added: 'value'});
+    });
+
+    it('accepts the state_delta body alias used by the Python client', async () => {
+      const response = await client.patch<Session>(
+        '/apps/testApp/users/testUser/sessions/sessionId',
+        {state_delta: {added: 'value'}},
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data?.state).toEqual({existing: 'kept', added: 'value'});
+    });
+
+    it('returns 404 for an unknown session', async () => {
+      await expect(
+        client.patch('/apps/testApp/users/testUser/sessions/missing', {
+          stateDelta: {added: 'value'},
+        }),
+      ).rejects.toMatchObject({response: {status: 404}});
+    });
+
+    it('returns 422 and leaves the session untouched when stateDelta is missing', async () => {
+      await expect(
+        client.patch('/apps/testApp/users/testUser/sessions/sessionId', {
+          other: 'value',
+        }),
+      ).rejects.toMatchObject({response: {status: 422}});
+
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      expect(session?.state).toEqual({existing: 'kept'});
+      expect(session?.events).toHaveLength(0);
+    });
+
+    it('returns 422 when stateDelta is an array rather than an object', async () => {
+      await expect(
+        client.patch('/apps/testApp/users/testUser/sessions/sessionId', {
+          stateDelta: ['added'],
+        }),
+      ).rejects.toMatchObject({response: {status: 422}});
+    });
+
+    it('returns 422 when the body itself is an array', async () => {
+      await expect(
+        client.patch('/apps/testApp/users/testUser/sessions/sessionId', [
+          {stateDelta: {added: 'value'}},
+        ]),
+      ).rejects.toMatchObject({response: {status: 422}});
+    });
+
+    it('returns 500 when the session service fails', async () => {
+      vi.spyOn(sessionService, 'appendEvent').mockRejectedValueOnce(
+        new Error('append failed'),
+      );
+
+      await expect(
+        client.patch('/apps/testApp/users/testUser/sessions/sessionId', {
+          stateDelta: {added: 'value'},
+        }),
+      ).rejects.toMatchObject({response: {status: 500}});
+    });
+  });
+
   describe('Artifacts', () => {
     it('should return an empty list of artifacts', async () => {
       await sessionService.createSession({
@@ -610,6 +716,122 @@ describe('AdkWebServer', () => {
           filename: 'artifact.txt',
         }),
       ).toBeUndefined();
+    });
+  });
+
+  describe('Artifact version metadata', () => {
+    /** Saves `count` versions of `artifact.txt`, tagged by version number. */
+    async function saveVersions(count: number): Promise<void> {
+      for (let version = 0; version < count; version++) {
+        await artifactService.saveArtifact({
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          filename: 'artifact.txt',
+          artifact: {text: `content${version}`},
+          customMetadata: {tag: `v${version}`},
+        });
+      }
+    }
+
+    beforeEach(async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+    });
+
+    it('returns the metadata of a numbered version', async () => {
+      await saveVersions(1);
+
+      const response = await client.get<ArtifactVersion>(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/0/metadata',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual({version: 0, customMetadata: {tag: 'v0'}});
+    });
+
+    it('resolves latest to the newest version', async () => {
+      await saveVersions(2);
+
+      const response = await client.get<ArtifactVersion>(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/latest/metadata',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual({version: 1, customMetadata: {tag: 'v1'}});
+    });
+
+    it.each(['abc', '1abc', '1.5'])(
+      'returns 422 for the version id %s',
+      async (versionId) => {
+        await saveVersions(1);
+
+        await expect(
+          client.get(
+            `/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/${versionId}/metadata`,
+          ),
+        ).rejects.toMatchObject({response: {status: 422}});
+      },
+    );
+
+    it('returns 404 for a version that does not exist', async () => {
+      await saveVersions(1);
+
+      await expect(
+        client.get(
+          '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/7/metadata',
+        ),
+      ).rejects.toMatchObject({response: {status: 404}});
+    });
+
+    it('returns 500 when the artifact service fails', async () => {
+      vi.spyOn(artifactService, 'getArtifactVersion').mockRejectedValueOnce(
+        new Error('read failed'),
+      );
+
+      await expect(
+        client.get(
+          '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/0/metadata',
+        ),
+      ).rejects.toMatchObject({response: {status: 500}});
+    });
+
+    it('lists the metadata of every version', async () => {
+      await saveVersions(2);
+
+      const response = await client.get<ArtifactVersion[]>(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/metadata',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual([
+        {version: 0, customMetadata: {tag: 'v0'}},
+        {version: 1, customMetadata: {tag: 'v1'}},
+      ]);
+    });
+
+    it('returns an empty list for an unknown artifact', async () => {
+      const response = await client.get<ArtifactVersion[]>(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts/missing.txt/versions/metadata',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual([]);
+    });
+
+    it('returns 500 when listing the version metadata fails', async () => {
+      vi.spyOn(artifactService, 'listArtifactVersions').mockRejectedValueOnce(
+        new Error('list failed'),
+      );
+
+      await expect(
+        client.get(
+          '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt/versions/metadata',
+        ),
+      ).rejects.toMatchObject({response: {status: 500}});
     });
   });
 

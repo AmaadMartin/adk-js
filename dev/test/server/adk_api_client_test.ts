@@ -152,6 +152,55 @@ describe('AdkApiClient', () => {
     });
   });
 
+  describe('updateSession', () => {
+    it('should patch the session state successfully', async () => {
+      const mockSession = createSession({
+        id: 'session1',
+        appName: 'app1',
+        userId: 'user1',
+        state: {key: 'value'},
+      });
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => mockSession,
+      });
+
+      const result = await client.updateSession({
+        appName: 'app1',
+        userId: 'user1',
+        sessionId: 'session1',
+        stateDelta: {key: 'value'},
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${mockBackendUrl}/apps/app1/users/user1/sessions/session1`,
+        {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({stateDelta: {key: 'value'}}),
+        },
+      );
+      expect(result).toEqual(mockSession);
+    });
+
+    it('should throw the error the server reported', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({error: 'Session not found: session1'}),
+      });
+
+      await expect(
+        client.updateSession({
+          appName: 'app1',
+          userId: 'user1',
+          sessionId: 'session1',
+          stateDelta: {key: 'value'},
+        }),
+      ).rejects.toThrow('Session not found: session1');
+    });
+  });
+
   describe('deleteSession', () => {
     it('should delete session successfully', async () => {
       (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -518,6 +567,100 @@ describe('AdkApiClient', () => {
 
       expect(global.fetch).toHaveBeenCalledWith(
         `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts/file1.txt/versions`,
+        {
+          method: 'GET',
+          headers: {'Content-Type': 'application/json'},
+        },
+      );
+      expect(result).toEqual(mockVersions);
+    });
+  });
+
+  describe('getArtifactVersionMetadata', () => {
+    it('should read a numbered version successfully', async () => {
+      const mockVersion = {version: 2, mimeType: 'text/plain'};
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => mockVersion,
+      });
+
+      const result = await client.getArtifactVersionMetadata({
+        appName: 'app1',
+        userId: 'user1',
+        sessionId: 'session1',
+        artifactName: 'report',
+        version: 2,
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts/report/versions/2/metadata`,
+        {
+          method: 'GET',
+          headers: {'Content-Type': 'application/json'},
+        },
+      );
+      expect(result).toEqual(mockVersion);
+    });
+
+    it('should request the latest version', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({version: 4}),
+      });
+
+      await client.getArtifactVersionMetadata({
+        appName: 'app1',
+        userId: 'user1',
+        sessionId: 'session1',
+        artifactName: 'report',
+        version: 'latest',
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts/report/versions/latest/metadata`,
+        {
+          method: 'GET',
+          headers: {'Content-Type': 'application/json'},
+        },
+      );
+    });
+
+    it('should throw the error the server reported', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: async () => ({error: 'Invalid version ID: abc'}),
+      });
+
+      await expect(
+        client.getArtifactVersionMetadata({
+          appName: 'app1',
+          userId: 'user1',
+          sessionId: 'session1',
+          artifactName: 'report',
+          version: 2,
+        }),
+      ).rejects.toThrow('Invalid version ID: abc');
+    });
+  });
+
+  describe('listArtifactVersionsMetadata', () => {
+    it('should list the version metadata successfully', async () => {
+      const mockVersions = [{version: 0}, {version: 1}];
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => mockVersions,
+      });
+
+      const result = await client.listArtifactVersionsMetadata({
+        appName: 'app1',
+        userId: 'user1',
+        sessionId: 'session1',
+        artifactName: 'report',
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${mockBackendUrl}/apps/app1/users/user1/sessions/session1/artifacts/report/versions/metadata`,
         {
           method: 'GET',
           headers: {'Content-Type': 'application/json'},
