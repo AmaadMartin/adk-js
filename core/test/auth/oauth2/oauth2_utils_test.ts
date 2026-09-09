@@ -5,7 +5,15 @@
  */
 
 import {AuthScheme, OAuth2Auth} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {
   AuthorizationCodeParams,
   ClientCredentialsParams,
@@ -16,6 +24,7 @@ import {
   parseAuthorizationCode,
   RefreshTokenParams,
 } from '../../../src/auth/oauth2/oauth2_utils.js';
+import {logger} from '../../../src/utils/logger.js';
 
 describe('oauth2_utils', () => {
   describe('getTokenEndpoint', () => {
@@ -170,6 +179,92 @@ describe('oauth2_utils', () => {
         ),
       ).rejects.toThrow('SSRF protection');
       expect(fetch).not.toHaveBeenCalled();
+    });
+
+    describe('request timeout', () => {
+      let errorSpy: MockInstance<typeof logger.error>;
+
+      beforeEach(() => {
+        // Vitest fake timers do not patch the timer inside
+        // `AbortSignal.timeout`, so the bound is asserted through the spy.
+        vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+          new AbortController().signal,
+        );
+        errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      });
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      it('bounds the token request with a 10s abort signal', async () => {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: async () => ({access_token: 'acc-123'}),
+        } as Response);
+
+        await fetchOAuth2Tokens(
+          'https://example.com/token',
+          new URLSearchParams(),
+        );
+
+        expect(vi.mocked(AbortSignal.timeout)).toHaveBeenCalledWith(10_000);
+        expect(fetch).toHaveBeenCalledWith(
+          'https://example.com/token',
+          expect.objectContaining({signal: expect.anything()}),
+        );
+      });
+
+      it('surfaces a fired timeout as a descriptive error', async () => {
+        vi.mocked(fetch).mockRejectedValue(
+          new DOMException(
+            'The operation was aborted due to timeout',
+            'TimeoutError',
+          ),
+        );
+
+        await expect(
+          fetchOAuth2Tokens('https://example.com/token', new URLSearchParams()),
+        ).rejects.toThrow(
+          "OAuth2 token request to 'https://example.com/token' timed out after 10000ms",
+        );
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+      });
+
+      it('rethrows a non-timeout failure unchanged', async () => {
+        const failure = new TypeError('fetch failed');
+        vi.mocked(fetch).mockRejectedValue(failure);
+
+        await expect(
+          fetchOAuth2Tokens('https://example.com/token', new URLSearchParams()),
+        ).rejects.toBe(failure);
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+        expect(errorSpy.mock.calls[0][0]).not.toContain('timed out');
+      });
+
+      it('leaves the success path unaffected', async () => {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            access_token: 'acc-123',
+            refresh_token: 'ref-456',
+            id_token: 'id-789',
+            expires_in: 3600,
+          }),
+        } as Response);
+
+        const result = await fetchOAuth2Tokens(
+          'https://example.com/token',
+          new URLSearchParams(),
+        );
+
+        expect(result.accessToken).toBe('acc-123');
+        expect(result.refreshToken).toBe('ref-456');
+        expect(result.idToken).toBe('id-789');
+        expect(result.expiresIn).toBe(3600);
+        expect(result.expiresAt).toBeGreaterThan(Date.now());
+        expect(errorSpy).not.toHaveBeenCalled();
+      });
     });
   });
 
