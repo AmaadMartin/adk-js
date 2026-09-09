@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  MCPConnectionParams,
-  MCPSessionManager,
-  mergeConnectionHeaders,
-} from '@google/adk';
+import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -167,32 +163,36 @@ describe('MCPSessionManager', () => {
   });
 
   describe('per-call headers', () => {
-    it('test_merge_headers_stdio', () => {
-      const merged = mergeConnectionHeaders(
-        {
-          type: 'StdioConnectionParams',
-          serverParams: {command: 'test-command'},
-        },
-        {Authorization: 'Bearer token'},
-      );
+    it('test_merge_headers_stdio', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
 
-      expect(merged).toBeUndefined();
+      await manager.createSession({Authorization: 'Bearer token'});
+
+      expect(StdioClientTransport).toHaveBeenLastCalledWith({
+        command: 'test-command',
+      });
     });
 
-    it('test_merge_headers_streamable_http', () => {
-      const merged = mergeConnectionHeaders(
-        {
-          type: 'StreamableHTTPConnectionParams',
-          url: 'http://test-url',
-          transportOptions: {requestInit: {headers: {'x-static': 'static'}}},
-        },
-        {Authorization: 'Bearer token'},
-      );
-
-      expect(merged).toEqual({
-        'x-static': 'static',
-        Authorization: 'Bearer token',
+    it('test_merge_headers_streamable_http', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: {'x-static': 'static'}}},
       });
+
+      await manager.createSession({Authorization: 'Bearer token'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-static': 'static', authorization: 'Bearer token'},
+          },
+        },
+      );
     });
 
     it('lets a per-call header override a static one of the same name', async () => {
@@ -200,7 +200,7 @@ describe('MCPSessionManager', () => {
         type: 'StreamableHTTPConnectionParams',
         url: 'http://test-url',
         transportOptions: {
-          requestInit: {headers: {Authorization: 'Bearer static'}},
+          requestInit: {headers: {authorization: 'Bearer static'}},
         },
       });
 
@@ -208,7 +208,24 @@ describe('MCPSessionManager', () => {
 
       expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
-        {requestInit: {headers: {Authorization: 'Bearer per-call'}}},
+        {requestInit: {headers: {authorization: 'Bearer per-call'}}},
+      );
+    });
+
+    it('replaces a static header that differs only in capitalization', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: {authorization: 'Bearer static'}},
+        },
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {authorization: 'Bearer per-call'}}},
       );
     });
 
@@ -225,7 +242,7 @@ describe('MCPSessionManager', () => {
         expect.any(URL),
         {
           requestInit: {
-            headers: {'x-tenant': 'acme', Authorization: 'Bearer per-call'},
+            headers: {'x-tenant': 'acme', authorization: 'Bearer per-call'},
           },
         },
       );
@@ -245,7 +262,7 @@ describe('MCPSessionManager', () => {
         {
           requestInit: {
             cache: 'no-store',
-            headers: {Authorization: 'Bearer per-call'},
+            headers: {authorization: 'Bearer per-call'},
           },
         },
       );
@@ -264,7 +281,7 @@ describe('MCPSessionManager', () => {
         expect.any(URL),
         {
           requestInit: {
-            headers: {'x-tenant': 'acme', Authorization: 'Bearer per-call'},
+            headers: {'x-tenant': 'acme', authorization: 'Bearer per-call'},
           },
         },
       );
@@ -298,7 +315,7 @@ describe('MCPSessionManager', () => {
         expect.any(URL),
         {
           requestInit: {
-            headers: {'x-tenant': 'acme', Authorization: 'Bearer per-call'},
+            headers: {'x-tenant': 'acme', authorization: 'Bearer per-call'},
           },
         },
       );
@@ -317,7 +334,7 @@ describe('MCPSessionManager', () => {
         expect.any(URL),
         {
           requestInit: {
-            headers: {'x-tenant': 'acme', Authorization: 'Bearer per-call'},
+            headers: {'x-tenant': 'acme', authorization: 'Bearer per-call'},
           },
         },
       );
@@ -340,7 +357,7 @@ describe('MCPSessionManager', () => {
         expect.any(URL),
         {
           requestInit: {
-            headers: {'x-tenant': 'acme', Authorization: 'Bearer second'},
+            headers: {'x-tenant': 'acme', authorization: 'Bearer second'},
           },
         },
       );

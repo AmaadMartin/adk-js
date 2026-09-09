@@ -4,14 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthCredentialTypes,
-  Context,
-  InvocationContext,
-  MCPToolset,
-} from '@google/adk';
+import {AuthCredentialTypes, MCPToolset} from '@google/adk';
 import type {CallToolResult} from '@modelcontextprotocol/sdk/types.js';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {createToolContext} from '../../../../core/test/agents/context_test_utils.js';
 import {AuthEchoServer, startAuthEchoServer} from './mcp_auth_server.js';
 
 /**
@@ -22,14 +18,6 @@ import {AuthEchoServer, startAuthEchoServer} from './mcp_auth_server.js';
  */
 
 const TOKEN = 'e2e-test-token';
-
-function createToolContext(): Context {
-  const invocationContext = {
-    abortSignal: new AbortController().signal,
-    session: {state: {}},
-  } as unknown as InvocationContext;
-  return new Context({invocationContext, functionCallId: 'function-call-1'});
-}
 
 function textOf(result: unknown): string | undefined {
   const [part] = (result as CallToolResult).content;

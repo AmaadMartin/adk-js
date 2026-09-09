@@ -4,14 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthCredentialTypes,
-  AuthScheme,
-  authCredentialToHeaders,
-} from '@google/adk';
+import {AuthCredentialTypes, AuthScheme} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
-// The logger singleton is internal (not part of the public API), so it is
-// imported via a relative path to spy on the exact instance the helper uses.
+// The helper and the logger singleton are both internal, so they are imported
+// via relative paths rather than through the public entry point.
+import {authCredentialToHeaders} from '../../src/auth/credential_header_utils.js';
 import {logger} from '../../src/utils/logger.js';
 
 /**
