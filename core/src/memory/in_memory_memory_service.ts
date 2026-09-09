@@ -19,7 +19,7 @@ import {MemoryEntry} from './memory_entry.js';
  *
  * Uses keyword matching instead of semantic search.
  */
-export class InMemoryMemoryService implements BaseMemoryService {
+export class InMemoryMemoryService extends BaseMemoryService {
   private readonly memories: MemoryEntry[] = [];
   /**
    * A map from user key to a map from session ID to events.

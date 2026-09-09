@@ -197,8 +197,10 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {BaseMemoryService} from './memory/base_memory_service.js';
 export type {
-  BaseMemoryService,
+  AddEventsToMemoryRequest,
+  AddMemoryRequest,
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './memory/base_memory_service.js';
