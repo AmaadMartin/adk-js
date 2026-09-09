@@ -97,6 +97,7 @@ export class RestApiTool extends BaseTool {
 
     // Prepare request
     const method = this.endpoint.method.toUpperCase();
+    const parameters = this.operationParser.getParameters();
     const {
       url: initialUrl,
       headers,
@@ -104,8 +105,8 @@ export class RestApiTool extends BaseTool {
       bodyData,
     } = prepareRequestParams(
       this.endpoint,
-      this.operationParser.getParameters(),
-      args,
+      parameters,
+      applyRequiredDefaults(parameters, args),
     );
 
     // Handle body
@@ -179,6 +180,31 @@ function encodePathParamValue(name: string, value: string): string {
     );
   }
   return encodeURIComponent(value);
+}
+
+/**
+ * Returns the arguments with the schema default of every omitted required
+ * parameter filled in.
+ *
+ * A model that reads a default in the function declaration often omits the
+ * parameter, but the spec still declares it as required, so the declared value
+ * must go out on the wire. A default of `false`, `0` or `''` is a real value
+ * and is applied; only `undefined` and `null` count as "no default".
+ *
+ * The caller keeps ownership of `args`, so this returns a copy.
+ */
+function applyRequiredDefaults(
+  parameters: ApiParameter[],
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = {...args};
+  for (const param of parameters) {
+    // hasOwn: see the path-placeholder note below.
+    if (!param.required || Object.hasOwn(result, param.name)) continue;
+    const defaultValue: unknown = param.paramSchema.default;
+    if (defaultValue != null) result[param.name] = defaultValue;
+  }
+  return result;
 }
 
 export function prepareRequestParams(
