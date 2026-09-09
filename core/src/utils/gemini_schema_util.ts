@@ -5,6 +5,7 @@
  */
 
 import {Schema, Type} from '@google/genai';
+import {NUMERIC_STRING_KEYS} from './genai_schema_to_json.js';
 
 type MCPToolSchema = {
   type: 'object';
@@ -155,4 +156,188 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     return geminiSchema;
   }
   return recursiveConvert(mcpSchema);
+}
+
+/**
+ * Fields the genai `Schema` declares. `jsonSchemaToGeminiSchema` drops every
+ * other key, because the Gemini API rejects a declaration that carries a
+ * keyword it does not model.
+ *
+ * The `satisfies` clause fails the build if `@google/genai` renames or removes
+ * one of these fields.
+ */
+const SUPPORTED_SCHEMA_FIELDS: ReadonlySet<string> = new Set([
+  'anyOf',
+  'default',
+  'description',
+  'enum',
+  'example',
+  'format',
+  'items',
+  'maxItems',
+  'maxLength',
+  'maxProperties',
+  'maximum',
+  'minItems',
+  'minLength',
+  'minProperties',
+  'minimum',
+  'nullable',
+  'pattern',
+  'properties',
+  'propertyOrdering',
+  'required',
+  'title',
+  'type',
+] satisfies readonly (keyof Schema)[]);
+
+/** `format` values genai accepts, keyed by the JSON Schema type they apply to. */
+const SUPPORTED_FORMATS: Readonly<Record<string, readonly string[]>> = {
+  integer: ['int32', 'int64'],
+  number: ['int32', 'int64'],
+  string: ['date-time', 'enum'],
+};
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSupportedField(field: string): field is keyof Schema {
+  return SUPPORTED_SCHEMA_FIELDS.has(field);
+}
+
+/**
+ * Splits a JSON Schema `type` into a single type name plus a nullability flag.
+ *
+ * JSON Schema spells nullability as a type union (`['string', 'null']`) or as
+ * the bare type `'null'`. genai has no union and no null type: it carries one
+ * `type` and a separate `nullable` flag. A union keeps its first named member,
+ * and a node that names nothing but null becomes a nullable object.
+ */
+function resolveSchemaType(rawType: unknown): {
+  jsonType?: string;
+  nullable: boolean;
+} {
+  const entries = Array.isArray(rawType) ? rawType : [rawType];
+  const nullable = entries.includes('null');
+  const named = entries.find(
+    (entry): entry is string => typeof entry === 'string' && entry !== 'null',
+  );
+  return {jsonType: named ?? (nullable ? 'object' : undefined), nullable};
+}
+
+function isSupportedFormat(
+  jsonType: string | undefined,
+  format: unknown,
+): format is string {
+  if (jsonType === undefined || typeof format !== 'string') {
+    return false;
+  }
+  return SUPPORTED_FORMATS[jsonType]?.includes(format) ?? false;
+}
+
+/**
+ * Converts a plain JSON Schema object into a genai `Schema`.
+ *
+ * This is the counterpart of `genaiSchemaToJsonSchema`, and the converter an
+ * OpenAPI-derived tool declaration goes through. A real OpenAPI document
+ * carries keywords and `format` values that genai does not model, so the
+ * conversion relaxes the input rather than rejecting it:
+ *
+ * - a key outside the genai `Schema` (`additionalProperties`, `allOf`, `$defs`,
+ *   a vendor extension) is dropped;
+ * - a `format` the declared type does not support is dropped;
+ * - a type union becomes one type plus `nullable: true`;
+ * - a count or length bound is stringified, which is how genai encodes it.
+ *
+ * The function never throws and never mutates its argument. A node it cannot
+ * make sense of degrades to an object rather than failing the whole toolset.
+ *
+ * `toGeminiSchema` cannot serve this path. It answers to the MCP contract: it
+ * infers a missing type from `enum`, `const` or `$ref`, expands a multi-member
+ * union into `anyOf`, and emits only 8 keys, so it discards `format`, `title`,
+ * `default`, `pattern` and every bound an OpenAPI document declares.
+ *
+ * @param jsonSchema The JSON Schema object to convert.
+ * @returns The equivalent genai `Schema`.
+ */
+export function jsonSchemaToGeminiSchema(
+  jsonSchema: Record<string, unknown>,
+): Schema {
+  const {jsonType, nullable} = resolveSchemaType(jsonSchema['type']);
+  const draft: Schema = {};
+
+  for (const [key, value] of Object.entries(jsonSchema)) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+    if (!isSupportedField(key)) {
+      continue;
+    }
+
+    switch (key) {
+      case 'type':
+        break;
+      case 'items':
+        if (isJsonObject(value)) {
+          draft.items = jsonSchemaToGeminiSchema(value);
+        }
+        break;
+      case 'anyOf':
+        if (Array.isArray(value)) {
+          draft.anyOf = value
+            .filter(isJsonObject)
+            .map(jsonSchemaToGeminiSchema);
+        }
+        break;
+      case 'properties':
+        if (isJsonObject(value)) {
+          draft.properties = sanitizeProperties(value);
+        }
+        break;
+      case 'format':
+        if (isSupportedFormat(jsonType, value)) {
+          draft.format = value;
+        }
+        break;
+      case 'enum':
+        if (Array.isArray(value)) {
+          draft.enum = value.map(String);
+        }
+        break;
+      default:
+        // The allow-list makes `key` a `keyof Schema`, but each field has its
+        // own value type, so a keyed write cannot be checked against one union.
+        (draft as Record<string, unknown>)[key] =
+          NUMERIC_STRING_KEYS.has(key) && typeof value === 'number'
+            ? String(value)
+            : value;
+    }
+  }
+
+  if (jsonType !== undefined) {
+    draft.type = toGeminiType(jsonType);
+  } else if (Object.keys(draft).length === 0) {
+    draft.type = Type.OBJECT;
+  }
+  if (nullable) {
+    draft.nullable = true;
+  }
+  return draft;
+}
+
+/**
+ * Sanitizes each property schema, leaving the property names untouched: they
+ * are the tool's argument names, not genai schema fields.
+ */
+function sanitizeProperties(
+  properties: Record<string, unknown>,
+): Record<string, Schema> {
+  const sanitized: Record<string, Schema> = {};
+  for (const [name, property] of Object.entries(properties)) {
+    if (isJsonObject(property)) {
+      sanitized[name] = jsonSchemaToGeminiSchema(property);
+    }
+  }
+  return sanitized;
 }

@@ -10,6 +10,7 @@ import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
+import {jsonSchemaToGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
 import {
@@ -65,11 +66,12 @@ export class RestApiTool extends BaseTool {
 
   @experimental
   override _getDeclaration(): FunctionDeclaration {
-    const schema = this.operationParser.getJsonSchema();
     return {
       name: this.name,
       description: this.description,
-      parameters: schema,
+      parameters: jsonSchemaToGeminiSchema(
+        this.operationParser.getJsonSchema(),
+      ),
     };
   }
 
