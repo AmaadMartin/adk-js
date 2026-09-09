@@ -5,6 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {AuthCredential} from '../../../auth/auth_credential.js';
 import {experimental} from '../../../utils/experimental.js';
 import {ApiParameter, OperationParser} from './operation_parser.js';
 
@@ -32,6 +33,12 @@ export interface ParsedOperation {
   parameters: ApiParameter[];
   returnValue?: ApiParameter;
   authScheme?: OpenAPIV3.SecuritySchemeObject;
+  /**
+   * The credential the operation authenticates with. The spec parser leaves it
+   * unset; a caller that knows the credential fills it in before it builds the
+   * tool.
+   */
+  authCredential?: AuthCredential;
 }
 
 @experimental
