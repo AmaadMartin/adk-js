@@ -320,5 +320,109 @@ describe('Telemetry Tracing Functions', () => {
       expect(tracedRequest.config).not.toHaveProperty('responseSchema');
       expect(tracedRequest.config).toEqual({topP: 0.8, maxOutputTokens: 100});
     });
+
+    it('should set usage token attributes from reported usage metadata', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const llmResponse: LlmResponse = {
+        usageMetadata: {promptTokenCount: 50, candidatesTokenCount: 100},
+      };
+
+      // Act
+      traceCallLlm({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse,
+      });
+
+      // Assert
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'gen_ai.usage.input_tokens',
+        50,
+      );
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'gen_ai.usage.output_tokens',
+        100,
+      );
+    });
+
+    it('should record a reported zero output token count', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const llmResponse: LlmResponse = {
+        usageMetadata: {promptTokenCount: 50, candidatesTokenCount: 0},
+      };
+
+      // Act
+      traceCallLlm({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse,
+      });
+
+      // Assert
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'gen_ai.usage.input_tokens',
+        50,
+      );
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'gen_ai.usage.output_tokens',
+        0,
+      );
+    });
+
+    it('should omit input tokens when the response reports none', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const llmResponse: LlmResponse = {
+        usageMetadata: {candidatesTokenCount: 100},
+      };
+
+      // Act
+      traceCallLlm({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse,
+      });
+
+      // Assert
+      expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+        'gen_ai.usage.input_tokens',
+        expect.anything(),
+      );
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'gen_ai.usage.output_tokens',
+        100,
+      );
+    });
+
+    it('should set no usage attributes when usage metadata is absent', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const llmResponse: LlmResponse = {
+        content: {parts: [{text: 'test-response'}]},
+      };
+
+      // Act
+      traceCallLlm({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse,
+      });
+
+      // Assert
+      expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+        'gen_ai.usage.input_tokens',
+        expect.anything(),
+      );
+      expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+        'gen_ai.usage.output_tokens',
+        expect.anything(),
+      );
+    });
   });
 });
