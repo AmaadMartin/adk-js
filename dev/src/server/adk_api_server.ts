@@ -10,6 +10,8 @@ import {
   BaseMemoryService,
   BaseSessionService,
   bearerTokenUserBuilder,
+  createEvent,
+  CreateEventParams,
   Event,
   getFunctionCalls,
   getFunctionResponses,
@@ -22,6 +24,7 @@ import {
   RunConfig,
   RunnableRoot,
   Runner,
+  sessionInitEventError,
   StreamingMode,
   toA2a,
 } from '@google/adk';
@@ -62,6 +65,21 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  * command line.
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
+
+/** Body of `POST /apps/:appName/users/:userId/sessions`. */
+interface CreateSessionBody {
+  /** The initial state of the session. */
+  state?: Record<string, unknown>;
+
+  /**
+   * Events to seed the new session with, in the order they are appended.
+   *
+   * Lets a caller import a conversation captured elsewhere. Rejected events
+   * leave no session behind, because the server validates them before it
+   * creates the session.
+   */
+  events?: CreateEventParams[];
+}
 
 interface ServerOptions {
   agentsDir?: string;
@@ -653,13 +671,35 @@ export class AdkApiServer {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
-          const state = req.body['state'] || {};
+          const body: CreateSessionBody = req.body;
+          const state = body.state || {};
+
+          let events: Event[] = [];
+          if (body.events !== undefined) {
+            if (!Array.isArray(body.events)) {
+              res.status(400).json({error: 'events must be an array.'});
+              return;
+            }
+            events = body.events.map((event) => createEvent(event));
+            const invalidEvents = sessionInitEventError(events);
+            if (invalidEvents) {
+              res.status(400).json({error: invalidEvents});
+              return;
+            }
+          }
 
           const createdSession = await this.sessionService.createSession({
             appName,
             userId,
             state,
           });
+
+          for (const event of events) {
+            await this.sessionService.appendEvent({
+              session: createdSession,
+              event,
+            });
+          }
 
           res.json(createdSession);
         } catch (e: unknown) {
