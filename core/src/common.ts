@@ -197,7 +197,12 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {
+  EVENT_DELTAS_UNSUPPORTED_MESSAGE,
+  addEventsToMemory,
+} from './memory/base_memory_service.js';
 export type {
+  AddEventsToMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
