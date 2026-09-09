@@ -29,6 +29,7 @@ const TEST_SESSION_ID = 'test_session_id';
 class RecordingConnection implements BaseLlmConnection {
   readonly historyCalls: Content[][] = [];
   readonly contentCalls: Content[] = [];
+  readonly contentOptionCalls: Array<{partial?: boolean} | undefined> = [];
   readonly realtimeCalls: Blob[] = [];
   activityStartCalls = 0;
   activityEndCalls = 0;
@@ -49,7 +50,10 @@ class RecordingConnection implements BaseLlmConnection {
   async sendHistory(history: Content[]): Promise<void> {
     this.historyCalls.push(history);
   }
-  async sendContent(content: Content): Promise<void> {
+  async sendContent(
+    content: Content,
+    options?: {partial?: boolean},
+  ): Promise<void> {
     if (this.sendDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, this.sendDelayMs));
     }
@@ -61,6 +65,7 @@ class RecordingConnection implements BaseLlmConnection {
       throw this.sendContentError;
     }
     this.contentCalls.push(content);
+    this.contentOptionCalls.push(options);
   }
   async sendRealtime(blob: Blob): Promise<void> {
     if (this.sendDelayMs > 0) {
@@ -706,6 +711,41 @@ describe('Runner.runLive', () => {
     }
 
     expect(llm.connection!.contentCalls).toEqual([content]);
+  });
+
+  it('forwards the partial flag from the queue to the connection', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    const partialContent: Content = {
+      role: 'user',
+      parts: [{text: 'the app already said this'}],
+    };
+    const finalContent: Content = {role: 'user', parts: [{text: 'and this?'}]};
+    queue.sendContent(partialContent, {partial: true});
+    queue.sendContent(finalContent);
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      // drain
+    }
+
+    expect(llm.connection!.contentCalls).toEqual([
+      partialContent,
+      finalContent,
+    ]);
+    expect(llm.connection!.contentOptionCalls[0]).toEqual({partial: true});
+    expect(llm.connection!.contentOptionCalls[1]?.partial).toBeFalsy();
   });
 
   it('stops early when the abort signal is already aborted', async () => {

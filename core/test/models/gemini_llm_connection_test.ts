@@ -146,6 +146,92 @@ describe('GeminiLlmConnection', () => {
         'Content must have parts.',
       );
     });
+
+    it('should keep the turn open for a partial non-Gemini 3.x content', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const content: Content = {role: 'user', parts: [{text: 'hello'}]};
+
+      await connection.sendContent(content, {partial: true});
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: false,
+      });
+    });
+
+    it('should bypass sendRealtimeInput for a partial Gemini 3.x text', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.1-flash-live',
+      );
+      const content: Content = {role: 'user', parts: [{text: 'hello'}]};
+
+      await connection.sendContent(content, {partial: true});
+
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: false,
+      });
+    });
+
+    it('should keep the Gemini 3.x fast path for an explicit partial false', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.1-flash-live',
+      );
+      const content: Content = {parts: [{text: 'hello'}]};
+
+      await connection.sendContent(content, {partial: false});
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        text: 'hello',
+      });
+      expect(mockSession.sendClientContent).not.toHaveBeenCalled();
+    });
+
+    it('should complete the turn for an explicit partial false on non-Gemini 3.x', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const content: Content = {role: 'user', parts: [{text: 'hello'}]};
+
+      await connection.sendContent(content, {partial: false});
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: true,
+      });
+    });
+
+    it('should still send a tool response when a function response is partial', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const content: Content = {
+        parts: [
+          {
+            functionResponse: {
+              name: 'tool_a',
+              response: {result: 'ok'},
+              id: '1',
+            },
+          },
+        ],
+      };
+
+      await connection.sendContent(content, {partial: true});
+
+      expect(mockSession.sendToolResponse).toHaveBeenCalledWith({
+        functionResponses: [content.parts![0].functionResponse],
+      });
+      expect(mockSession.sendClientContent).not.toHaveBeenCalled();
+    });
   });
 
   describe('sendRealtime', () => {

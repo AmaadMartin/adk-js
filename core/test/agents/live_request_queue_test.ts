@@ -16,6 +16,31 @@ describe('LiveRequestQueue', () => {
     expect(await queue.get()).toEqual({content});
   });
 
+  it('should mark the request partial when sendContent is told to', async () => {
+    const queue = new LiveRequestQueue();
+    const content = createUserContent('partial test');
+    queue.sendContent(content, {partial: true});
+    expect(await queue.get()).toEqual({content, partial: true});
+  });
+
+  it('should not mark the request partial for an explicit false', async () => {
+    const queue = new LiveRequestQueue();
+    const content = createUserContent('explicit false test');
+    queue.sendContent(content, {partial: false});
+    const request = await queue.get();
+    expect(request.content).toEqual(content);
+    expect(request.partial).toBe(false);
+  });
+
+  it('should leave partial undefined when sendContent gets no options', async () => {
+    const queue = new LiveRequestQueue();
+    const content = createUserContent('default test');
+    queue.sendContent(content);
+    const request = await queue.get();
+    expect(request.content).toEqual(content);
+    expect(request.partial).toBeUndefined();
+  });
+
   it('should handle sendRealtime', async () => {
     const queue = new LiveRequestQueue();
     const blob = {mimeType: 'audio/wav', data: 'base64data'};

@@ -63,8 +63,14 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    * responses.
    *
    * @param content The content to send to the model.
+   * @param options.partial If true, the content is appended to the current
+   *     model turn without completing it, so the model does not respond.
+   *     Function responses are unaffected.
    */
-  async sendContent(content: Content): Promise<void> {
+  async sendContent(
+    content: Content,
+    options?: {partial?: boolean},
+  ): Promise<void> {
     if (!content.parts) {
       throw new Error('Content must have parts.');
     }
@@ -80,13 +86,21 @@ export class GeminiLlmConnection implements BaseLlmConnection {
     } else {
       logger.debug('Sending LLM new content', content);
       const isGemini3x = isGemini3xFlashLive(this.modelVersion);
-      if (isGemini3x && content.parts.length === 1 && content.parts[0].text) {
+      const partial = options?.partial ?? false;
+      // sendRealtimeInput always completes the turn, so a partial update has
+      // to go through sendClientContent.
+      if (
+        !partial &&
+        isGemini3x &&
+        content.parts.length === 1 &&
+        content.parts[0].text
+      ) {
         logger.debug('Using sendRealtimeInput for Gemini 3.x text input');
         this.geminiSession.sendRealtimeInput({text: content.parts[0].text});
       } else {
         this.geminiSession.sendClientContent({
           turns: [content],
-          turnComplete: true,
+          turnComplete: !partial,
         });
       }
     }
