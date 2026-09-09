@@ -25,7 +25,7 @@ import {
   StreamingMode,
   toA2a,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {Content, Part} from '@google/genai';
 import {trace, TracerProvider} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
@@ -95,6 +95,18 @@ interface ServerOptions {
   a2aAuthToken?: string;
   reloadAgents?: boolean;
   registerProcessors?: (tracerProvider: TracerProvider) => void;
+}
+
+/**
+ * Body accepted by `POST /apps/../users/../sessions/../artifacts`.
+ *
+ * Every field is optional because the body is untrusted input. The route
+ * checks `filename` and `artifact` before it calls the artifact service.
+ */
+interface SaveArtifactRequestBody {
+  filename?: string;
+  artifact?: Part;
+  customMetadata?: Record<string, unknown>;
 }
 
 export class AdkApiServer {
@@ -707,6 +719,58 @@ export class AdkApiServer {
     );
 
     // ----------------------- Artifact related endpoints ----------------------
+    app.post(
+      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts',
+      async (req: Request, res: Response) => {
+        const appName = req.params['appName'];
+        const userId = req.params['userId'];
+        const sessionId = req.params['sessionId'];
+        const {filename, artifact, customMetadata} =
+          req.body as SaveArtifactRequestBody;
+
+        if (typeof filename !== 'string' || !filename || !artifact) {
+          res.status(400).json({error: 'filename and artifact are required'});
+          return;
+        }
+
+        try {
+          const version = await this.artifactService.saveArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename,
+            artifact,
+            customMetadata,
+          });
+
+          const artifactVersion = await this.artifactService.getArtifactVersion(
+            {
+              appName,
+              userId,
+              sessionId,
+              filename,
+              version,
+            },
+          );
+
+          if (!artifactVersion) {
+            const error = `Artifact metadata unavailable: ${filename}`;
+
+            res.status(500).json({error});
+            this.logger.error(error);
+            return;
+          }
+
+          res.json(artifactVersion);
+        } catch (e: unknown) {
+          const error = `Failed to save artifact: ${e}`;
+
+          res.status(500).json({error});
+          this.logger.error(error);
+        }
+      },
+    );
+
     app.get(
       '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName',
       async (req: Request, res: Response) => {
