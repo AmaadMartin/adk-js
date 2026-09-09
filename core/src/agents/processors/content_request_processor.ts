@@ -43,6 +43,11 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
     }
 
     const events = getActiveEvents(invocationContext.session.events);
+    // The instructions processor is the only producer of contents this early,
+    // and it only produces them for a static instruction, whose content must
+    // stay a stable request prefix for provider-side context caching. The
+    // reassignment below would otherwise discard them.
+    const instructionContents = llmRequest.contents;
 
     if (agent.includeContents === 'default') {
       // Include full conversation history
@@ -61,6 +66,8 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         invocationContext.isolationScope,
       );
     }
+
+    llmRequest.contents.unshift(...instructionContents);
 
     return;
   }
