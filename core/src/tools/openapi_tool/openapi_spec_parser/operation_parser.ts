@@ -25,7 +25,7 @@ export interface ApiParameter {
 @experimental
 export class OperationParser {
   private params: ApiParameter[] = [];
-  private returnValue?: ApiParameter;
+  private readonly returnValue: ApiParameter;
   private preservePropertyNames: boolean;
 
   constructor(
@@ -35,7 +35,7 @@ export class OperationParser {
     this.preservePropertyNames = options.preservePropertyNames ?? false;
     this.processOperationParameters();
     this.processRequestBody();
-    this.processReturnValue();
+    this.returnValue = parseReturnValue(operation);
     this.dedupeParamNames();
   }
 
@@ -136,36 +136,6 @@ export class OperationParser {
     }
   }
 
-  private processReturnValue() {
-    const responses = this.operation.responses || {};
-    // Find first 2xx response
-    const validCodes = Object.keys(responses).filter((k) => k.startsWith('2'));
-    const min20x = validCodes.sort()[0];
-
-    let returnSchema: OpenAPIV3.SchemaObject = {};
-
-    if (min20x) {
-      const response = responses[min20x];
-      if (!('$ref' in response) && response.content) {
-        const firstMimeType = Object.keys(response.content)[0];
-        if (firstMimeType) {
-          const schema = response.content[firstMimeType].schema;
-          if (schema && !('$ref' in schema)) {
-            returnSchema = schema;
-          }
-        }
-      }
-    }
-
-    this.returnValue = {
-      originalName: '',
-      paramLocation: '',
-      paramSchema: returnSchema,
-      required: true,
-      name: 'return',
-    };
-  }
-
   private dedupeParamNames() {
     const nameCounts = new Map<string, number>();
     for (const param of this.params) {
@@ -186,6 +156,14 @@ export class OperationParser {
   @experimental
   public getParameters(): ApiParameter[] {
     return this.params;
+  }
+
+  /**
+   * @returns The operation's response, from its lowest 2xx response code.
+   */
+  @experimental
+  public getReturnValue(): ApiParameter {
+    return this.returnValue;
   }
 
   /**
@@ -237,4 +215,38 @@ export class OperationParser {
   public getDescription(): string {
     return this.operation.description || this.operation.summary || '';
   }
+}
+
+/**
+ * @param operation The OpenAPI operation to read.
+ * @returns The operation's response, from its lowest 2xx response code.
+ */
+function parseReturnValue(operation: OpenAPIV3.OperationObject): ApiParameter {
+  const responses = operation.responses || {};
+  const min20x = Object.keys(responses)
+    .filter((code) => code.startsWith('2'))
+    .sort()[0];
+
+  let returnSchema: OpenAPIV3.SchemaObject = {};
+
+  if (min20x) {
+    const response = responses[min20x];
+    if (!('$ref' in response) && response.content) {
+      const firstMimeType = Object.keys(response.content)[0];
+      if (firstMimeType) {
+        const schema = response.content[firstMimeType].schema;
+        if (schema && !('$ref' in schema)) {
+          returnSchema = schema;
+        }
+      }
+    }
+  }
+
+  return {
+    originalName: '',
+    paramLocation: '',
+    paramSchema: returnSchema,
+    required: true,
+    name: 'return',
+  };
 }

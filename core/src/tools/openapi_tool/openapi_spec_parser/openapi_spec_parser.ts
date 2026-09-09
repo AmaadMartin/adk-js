@@ -5,6 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {ApiParameter, OperationParser} from './operation_parser.js';
 
@@ -30,7 +31,12 @@ export interface ParsedOperation {
   endpoint: OperationEndpoint;
   operation: OpenAPIV3.OperationObject;
   parameters: ApiParameter[];
-  returnValue?: ApiParameter;
+  /**
+   * The operation's response, taken from its lowest 2xx response code. Always
+   * present; the schema is empty when the operation declares no 2xx response
+   * with a schema.
+   */
+  returnValue: ApiParameter;
   authScheme?: OpenAPIV3.SecuritySchemeObject;
 }
 
@@ -46,10 +52,18 @@ export class OpenApiSpecParser {
    * Parses an OpenAPI specification document and extracts a list of operations.
    *
    * @param openapiSpec The OpenAPI V3 document to parse.
+   * @throws {TypeError} If the spec is not an object.
    * @returns An array of parsed operations.
    */
   @experimental
   public parse(openapiSpec: OpenAPIV3.Document): ParsedOperation[] {
+    if (
+      typeof openapiSpec !== 'object' ||
+      openapiSpec === null ||
+      Array.isArray(openapiSpec)
+    ) {
+      throw new TypeError('OpenAPI spec must be an object.');
+    }
     const resolvedSpec = resolveReferences(openapiSpec);
     const sanitizedSpec = sanitizeSchemaTypes(resolvedSpec);
     return collectOperations(sanitizedSpec, {
@@ -228,6 +242,31 @@ function resolveServerUrl(server: OpenAPIV3.ServerObject): string {
 }
 
 /**
+ * Returns the scheme name a security requirement list requires, or `undefined`
+ * when it requires none.
+ *
+ * An empty requirement object is the OpenAPI idiom for optional
+ * authentication. A tool that carries an auth scheme stops and asks the caller
+ * for a credential instead of sending the request, so an optional requirement
+ * resolves to no scheme. A caller that does want to authenticate passes
+ * `authScheme` and `authCredential` to the toolset.
+ *
+ * @param security The security requirement list to inspect.
+ * @returns The required scheme name, or `undefined`.
+ */
+function requiredSchemeName(
+  security?: OpenAPIV3.SecurityRequirementObject[],
+): string | undefined {
+  if (!security || security.length === 0) {
+    return undefined;
+  }
+  if (security.some((requirement) => Object.keys(requirement).length === 0)) {
+    return undefined;
+  }
+  return Object.keys(security[0])[0];
+}
+
+/**
  * Collects and parses all operations defined in the OpenAPI spec document.
  */
 function collectOperations(
@@ -239,11 +278,7 @@ function collectOperations(
   const server = spec.servers?.[0];
   const baseUrl = server ? resolveServerUrl(server) : '';
 
-  const globalSecurity = spec.security || [];
-  let globalSchemeName: string | undefined;
-  if (globalSecurity.length > 0) {
-    globalSchemeName = Object.keys(globalSecurity[0])[0];
-  }
+  const globalSchemeName = requiredSchemeName(spec.security);
 
   const authSchemes =
     (spec.components?.securitySchemes as Record<
@@ -275,19 +310,19 @@ function collectOperations(
       operation.parameters = [...opParams, ...pathParams];
 
       if (!operation.operationId) {
-        // Generate operation ID if missing
-        operation.operationId = `${method}_${path.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        operation.operationId = snakeCase(`${path}_${method}`);
       }
 
       const parser = new OperationParser(operation, {
         preservePropertyNames,
       });
 
-      let authSchemeName: string | undefined;
-      if (operation.security && operation.security.length > 0) {
-        authSchemeName = Object.keys(operation.security[0])[0];
-      }
-      authSchemeName = authSchemeName || globalSchemeName;
+      // Declaring security of its own overrides the global requirement, even
+      // when the operation declares an empty list.
+      const authSchemeName =
+        operation.security === undefined
+          ? globalSchemeName
+          : requiredSchemeName(operation.security);
 
       const authScheme = authSchemeName
         ? authSchemes[authSchemeName]
@@ -299,6 +334,7 @@ function collectOperations(
         endpoint: {baseUrl, path, method},
         operation: operation,
         parameters: parser.getParameters(),
+        returnValue: parser.getReturnValue(),
         authScheme: authScheme,
       });
     }
