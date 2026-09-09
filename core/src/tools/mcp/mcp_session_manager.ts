@@ -7,7 +7,15 @@
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {
+  ClientCapabilities,
+  CreateMessageRequest,
+  CreateMessageResult,
+  ElicitRequest,
+  ElicitResult,
+} from '@modelcontextprotocol/sdk/types.js';
 
+import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
@@ -73,6 +81,101 @@ export type MCPConnectionParams =
   | StreamableHTTPConnectionParams;
 
 /**
+ * Resolves extra request headers immediately before a session is opened.
+ *
+ * It runs for every session, so a short-lived credential is freshly minted each
+ * time. Headers only apply to an HTTP transport; a stdio connection ignores
+ * them.
+ */
+export type MCPHeaderProvider = (
+  context?: ReadonlyContext,
+) => Record<string, string> | Promise<Record<string, string>>;
+
+/**
+ * Answers a server's `sampling/createMessage` request, which asks the client to
+ * run a model on the server's behalf.
+ */
+export type SamplingFn = (
+  request: CreateMessageRequest,
+) => CreateMessageResult | Promise<CreateMessageResult>;
+
+/**
+ * Answers a server's `elicitation/create` request, which asks the client for
+ * more input from the user.
+ */
+export type ElicitationFn = (
+  request: ElicitRequest,
+) => ElicitResult | Promise<ElicitResult>;
+
+/** Configures the client an {@link MCPSessionManager} builds. */
+export interface MCPSessionManagerOptions {
+  /** Handles `sampling/createMessage`. Advertises the sampling capability. */
+  samplingCallback?: SamplingFn;
+  /** Detail advertised with the sampling capability. Defaults to `{}`. */
+  samplingCapabilities?: ClientCapabilities['sampling'];
+  /** Handles `elicitation/create`. Advertises the elicitation capability. */
+  elicitationCallback?: ElicitationFn;
+}
+
+/**
+ * Returns the capabilities the client declares at construction.
+ *
+ * The SDK refuses to register a request handler for a capability the client did
+ * not declare, so this must be settled before `new Client`. Returns undefined
+ * when neither callback is configured, so a client built without either option
+ * is constructed exactly as before.
+ */
+function buildClientCapabilities(
+  options: MCPSessionManagerOptions,
+): ClientCapabilities | undefined {
+  const capabilities: ClientCapabilities = {};
+  if (options.samplingCallback) {
+    capabilities.sampling = options.samplingCapabilities ?? {};
+  }
+  if (options.elicitationCallback) {
+    capabilities.elicitation = {};
+  }
+  return Object.keys(capabilities).length > 0 ? capabilities : undefined;
+}
+
+/**
+ * Returns `connectionParams` with `extraHeaders` merged over its own headers,
+ * folding in the deprecated `header` field.
+ *
+ * The stored params are never mutated: one manager serves many sessions and
+ * each may carry different headers. Stdio has no headers, so it comes back
+ * unchanged.
+ */
+function withExtraHeaders(
+  connectionParams: MCPConnectionParams,
+  extraHeaders?: Record<string, string>,
+): MCPConnectionParams {
+  if (connectionParams.type !== 'StreamableHTTPConnectionParams') {
+    return connectionParams;
+  }
+
+  const transportOptions = connectionParams.transportOptions;
+  // The deprecated `header` field is ignored whenever transportOptions is set,
+  // even when it names no headers.
+  const baseHeaders = transportOptions
+    ? transportOptions.requestInit?.headers
+    : (connectionParams.header as Record<string, string> | undefined);
+  const headers = {...baseHeaders, ...extraHeaders};
+
+  if (Object.keys(headers).length === 0) {
+    return connectionParams;
+  }
+
+  return {
+    ...connectionParams,
+    transportOptions: {
+      ...transportOptions,
+      requestInit: {...transportOptions?.requestInit, headers},
+    },
+  };
+}
+
+/**
  * Manages Model Context Protocol (MCP) client sessions.
  *
  * This class is responsible for establishing and managing connections to MCP
@@ -87,51 +190,67 @@ export type MCPConnectionParams =
  */
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
+  private readonly options: MCPSessionManagerOptions;
   private readonly activeSessions = new Set<Client>();
 
-  constructor(connectionParams: MCPConnectionParams) {
+  constructor(
+    connectionParams: MCPConnectionParams,
+    options: MCPSessionManagerOptions = {},
+  ) {
     this.connectionParams = connectionParams;
+    this.options = options;
   }
 
-  async createSession(): Promise<Client> {
+  /**
+   * Opens a new MCP client session.
+   *
+   * @param extraHeaders Headers merged over the connection's own headers for
+   *     this session only; on a key conflict these win. Ignored for a stdio
+   *     connection, which has no headers.
+   */
+  async createSession(extraHeaders?: Record<string, string>): Promise<Client> {
     const {Client} = await loadOptionalPeer(
       MCP_SDK,
       () => import('@modelcontextprotocol/sdk/client/index.js'),
     );
-    const client = new Client({name: 'MCPClient', version: '1.0.0'});
+    const clientInfo = {name: 'MCPClient', version: '1.0.0'};
+    const capabilities = buildClientCapabilities(this.options);
+    // Constructed with no options at all when nothing is advertised, so a
+    // client built without either callback is exactly what it was before.
+    const client = capabilities
+      ? new Client(clientInfo, {capabilities})
+      : new Client(clientInfo);
+    await this.registerRequestHandlers(client);
+
+    const connectionParams = withExtraHeaders(
+      this.connectionParams,
+      extraHeaders,
+    );
 
     try {
-      switch (this.connectionParams.type) {
+      switch (connectionParams.type) {
         case 'StdioConnectionParams': {
           const {StdioClientTransport} = await loadOptionalPeer(
             MCP_SDK,
             () => import('@modelcontextprotocol/sdk/client/stdio.js'),
           );
           const transport = new StdioClientTransport(
-            this.connectionParams.serverParams,
+            connectionParams.serverParams,
           );
           transport.onerror = logTransportError;
           await client.connect(transport);
           break;
         }
         case 'StreamableHTTPConnectionParams': {
-          const options = this.connectionParams.transportOptions ?? {};
-
-          if (
-            !options.requestInit &&
-            this.connectionParams.header !== undefined
-          ) {
-            options.requestInit = {
-              headers: this.connectionParams.header as Record<string, string>,
-            };
-          }
+          // withExtraHeaders already folded the deprecated `header` field in.
+          const options = connectionParams.transportOptions ?? {};
 
           const {StreamableHTTPClientTransport} = await loadOptionalPeer(
             MCP_SDK,
             () => import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
           );
           const transport = new StreamableHTTPClientTransport(
-            new URL(this.connectionParams.url),
+            new URL(connectionParams.url),
             options,
           );
           transport.onerror = logTransportError;
@@ -140,7 +259,7 @@ export class MCPSessionManager {
         }
         default: {
           // Triggers compile error if a case is missing.
-          const _exhaustiveCheck: never = this.connectionParams;
+          const _exhaustiveCheck: never = connectionParams;
           break;
         }
       }
@@ -152,6 +271,37 @@ export class MCPSessionManager {
 
     this.activeSessions.add(client);
     return client;
+  }
+
+  /**
+   * Registers the handlers for the capabilities this manager advertises.
+   *
+   * The request schemas are SDK values, so they are loaded lazily here rather
+   * than imported at module top level: that would make the optional peer a hard
+   * dependency for every ADK user.
+   */
+  private async registerRequestHandlers(client: Client): Promise<void> {
+    const {samplingCallback, elicitationCallback} = this.options;
+    if (!samplingCallback && !elicitationCallback) {
+      return;
+    }
+
+    const {CreateMessageRequestSchema, ElicitRequestSchema} =
+      await loadOptionalPeer(
+        MCP_SDK,
+        () => import('@modelcontextprotocol/sdk/types.js'),
+      );
+
+    if (samplingCallback) {
+      client.setRequestHandler(CreateMessageRequestSchema, (request) =>
+        samplingCallback(request),
+      );
+    }
+    if (elicitationCallback) {
+      client.setRequestHandler(ElicitRequestSchema, (request) =>
+        elicitationCallback(request),
+      );
+    }
   }
 
   async closeSession(client: Client): Promise<void> {
