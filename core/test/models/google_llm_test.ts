@@ -55,6 +55,9 @@ class TestGemini extends Gemini {
   getTrackingHeaders(): Record<string, string> {
     return this.trackingHeaders;
   }
+  override getHttpOptions(): HttpOptions {
+    return super.getHttpOptions();
+  }
 }
 
 describe('GoogleLlm', () => {
@@ -122,11 +125,7 @@ describe('GoogleLlm', () => {
       apiKey: 'test-key',
       headers: {'user-agent': 'my-app/1.0'},
     });
-    const options = llm.apiClient['apiClient']['clientOptions'][
-      'httpOptions'
-    ] as HttpOptions;
-
-    expect(options.headers!['user-agent']).toEqual(
+    expect(llm.getHttpOptions().headers!['user-agent']).toEqual(
       `${llm.getTrackingHeaders()['user-agent']} my-app/1.0`,
     );
   });

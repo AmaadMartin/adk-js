@@ -12,9 +12,6 @@
 
 import {getClientLabels} from './client_labels.js';
 
-const API_CLIENT_HEADER = 'x-goog-api-client';
-const USER_AGENT_HEADER = 'user-agent';
-
 const TOKEN_SEPARATOR = ' ';
 
 /**
@@ -26,8 +23,8 @@ const TOKEN_SEPARATOR = ' ';
 export function getTrackingHeaders(): Record<string, string> {
   const headerValue = getClientLabels().join(TOKEN_SEPARATOR);
   return {
-    [API_CLIENT_HEADER]: headerValue,
-    [USER_AGENT_HEADER]: headerValue,
+    'x-goog-api-client': headerValue,
+    'user-agent': headerValue,
   };
 }
 
@@ -52,13 +49,11 @@ export function mergeTrackingHeaders(
       merged[key] = trackingValue;
       continue;
     }
-    const tokens = trackingValue.split(TOKEN_SEPARATOR);
+    const tokens = new Set(trackingValue.split(TOKEN_SEPARATOR));
     for (const token of callerValue.split(TOKEN_SEPARATOR)) {
-      if (!tokens.includes(token)) {
-        tokens.push(token);
-      }
+      tokens.add(token);
     }
-    merged[key] = tokens.join(TOKEN_SEPARATOR);
+    merged[key] = [...tokens].join(TOKEN_SEPARATOR);
   }
   return merged;
 }
