@@ -25,6 +25,11 @@ import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
+import {
+  GKE_SERVICE_TYPES,
+  deployToGke,
+  parseGkeServiceType,
+} from './deploy/cli_deploy_gke.js';
 
 dotenv.config({quiet: true});
 
@@ -486,6 +491,74 @@ export function createProgram(): Command {
         });
       } catch (error) {
         logger.error('Error deploying agent:', (error as Error).message);
+      }
+    });
+
+  DEPLOY_COMMAND.command('gke')
+    .addArgument(AGENT_DIR_ARGUMENT)
+    .addOption(PORT_OPTION)
+    .addOption(PROJECT_DEPLOY_OPTION)
+    .addOption(REGION_DEPLOY_OPTION)
+    .requiredOption(
+      '--cluster_name <string>',
+      'Required. The name of the GKE cluster.',
+    )
+    .option(
+      '--service_name [string]',
+      'Optional. The service name to use in GKE. Default: "adk-default-service-name"',
+      'adk-default-service-name',
+    )
+    .option(
+      '--app_name [string]',
+      'Optional. App name of the ADK API server (default: the folder name of the agent source code).',
+    )
+    .addOption(
+      new Option(
+        '--service_type [string]',
+        'Optional. The Kubernetes Service type for the deployed agent. ClusterIP keeps the service cluster-internal; use LoadBalancer to expose a public IP.',
+      )
+        .choices([...GKE_SERVICE_TYPES])
+        .default('ClusterIP'),
+    )
+    .option(
+      '--temp_folder [string]',
+      'Optional. Temp folder for the generated GKE source files (default: a private directory created in the system temp directory).',
+    )
+    .addOption(ADK_VERSION_OPTION)
+    .addOption(WITH_UI_OPTION)
+    .addOption(OTEL_TO_CLOUD_OPTION)
+    .addOption(ORIGINS_OPTION)
+    .addOption(VERBOSE_OPTION)
+    .addOption(LOG_LEVEL_OPTION)
+    .addOption(SESSION_SERVICE_URI_OPTION)
+    .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(COMPILE_AGENT_FILE)
+    .addOption(BUNDLE_AGENT_FILE)
+    .addOption(AGENT_FILE_MODULE_TYPE)
+    .action(async (agentPath: string, options: Record<string, string>) => {
+      try {
+        await deployToGke({
+          agentPath: getAbsolutePath(agentPath),
+          project: options['project'],
+          region: options['region'],
+          clusterName: options['cluster_name'],
+          serviceName: options['service_name'],
+          appName: options['app_name'],
+          serviceType: parseGkeServiceType(options['service_type']),
+          tempFolder: options['temp_folder'],
+          port: parseInt(options['port'], 10),
+          withUi: getBoolean(options['with_ui']),
+          otelToCloud: getBoolean(options['otel_to_cloud']),
+          logLevel: options['log_level'],
+          adkVersion: options['adk_version'],
+          allowOrigins: options['allow_origins'],
+          sessionServiceUri: options['session_service_uri'],
+          artifactServiceUri: options['artifact_service_uri'],
+          agentFileLoadOptions: getAgentFileOptions(options),
+        });
+      } catch (error) {
+        logger.error('Error deploying agent:', (error as Error).message);
+        process.exit(1);
       }
     });
 
