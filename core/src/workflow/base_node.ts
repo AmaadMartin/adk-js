@@ -6,6 +6,7 @@
 
 import {Content, createModelContent, PartListUnion} from '@google/genai';
 import {createEvent, Event, isEvent} from '../events/event.js';
+import {isContent} from '../utils/content_utils.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {NodeSchemaValidationError} from './errors.js';
 import type {NodeContext} from './node_context.js';
@@ -251,15 +252,7 @@ export function isBaseNode(value: unknown): value is BaseNode {
   );
 }
 
-/** Returns whether a value looks like a genai `Content` object. */
-export function isContent(value: unknown): value is Content {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'parts' in value &&
-    Array.isArray((value as {parts?: unknown}).parts)
-  );
-}
+export {isContent} from '../utils/content_utils.js';
 
 /**
  * The sentinel node marking the entry point of a workflow graph. It is never
