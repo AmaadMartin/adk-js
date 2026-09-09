@@ -4,11 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import {ContentUnion, FunctionCall, FunctionResponse} from '@google/genai';
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {LlmResponse} from '../models/llm_response.js';
 
+import {toUserContent} from '../utils/content_utils.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {
+  nodeNameFromPath,
+  parentRunIdFromPath,
+  runIdFromPath,
+} from '../utils/node_path_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
 import {createEventActions, EventActions} from './event_actions.js';
 
@@ -63,6 +70,56 @@ export interface NodeInfo {
    * structured output.
    */
   messageAsOutput?: boolean;
+}
+
+/**
+ * Returns the run id of the node that emitted the event, or `''` when the path
+ * is absent or its leaf segment carries no run id.
+ *
+ * Mirrors `google/adk-python` `NodeInfo.run_id`.
+ */
+export function getNodeRunId(nodeInfo?: NodeInfo): string {
+  return runIdFromPath(nodeInfo?.path);
+}
+
+/**
+ * Returns the run id of the parent node that scheduled the emitting node, or
+ * `undefined` when the path has a single segment or the parent segment carries
+ * no run id.
+ *
+ * Mirrors `google/adk-python` `NodeInfo.parent_run_id`.
+ */
+export function getParentNodeRunId(nodeInfo?: NodeInfo): string | undefined {
+  return parentRunIdFromPath(nodeInfo?.path);
+}
+
+/**
+ * Returns the name of the node that emitted the event, without its run id, or
+ * `''` when the path is absent.
+ *
+ * Mirrors `google/adk-python` `NodeInfo.name`.
+ */
+export function getNodePathName(nodeInfo?: NodeInfo): string {
+  return nodeNameFromPath(nodeInfo?.path);
+}
+
+/**
+ * Returns whether the given {@link NodeInfo} still holds only its default
+ * values, i.e. the event carries no workflow-node provenance.
+ *
+ * {@link createEvent} defaults `nodeInfo` on every event, so a storage layer
+ * that persists node provenance needs this to tell a real workflow event from
+ * an ordinary chat event.
+ *
+ * @param nodeInfo - The node info to inspect.
+ * @returns `true` when every field is at its default value.
+ */
+export function isDefaultNodeInfo(nodeInfo: NodeInfo): boolean {
+  return (
+    !nodeInfo.path &&
+    !nodeInfo.outputFor?.length &&
+    nodeInfo.messageAsOutput === undefined
+  );
 }
 
 /**
@@ -160,6 +217,19 @@ export interface Event extends LlmResponse {
  */
 export interface CreateEventParams extends Omit<Partial<Event>, 'actions'> {
   actions?: Partial<EventActions>;
+
+  /**
+   * The user-facing message of the event: a convenience alias for `content`
+   * that also accepts a string, a part, or a list of parts. Mutually exclusive
+   * with `content`.
+   */
+  message?: ContentUnion;
+
+  /** Convenience alias for `actions.stateDelta`. */
+  state?: Record<string, unknown>;
+
+  /** Convenience alias for `nodeInfo.path`. */
+  nodePath?: string;
 }
 
 /**
@@ -167,19 +237,65 @@ export interface CreateEventParams extends Omit<Partial<Event>, 'actions'> {
  *
  * @param params The partial event to create the event from.
  * @returns The event.
+ * @throws InputValidationError when both `message` and `content` are given.
  */
 export function createEvent(params: CreateEventParams = {}): Event {
+  const {message, state, nodePath, ...rest} = params;
+
+  if (message !== undefined && rest.content !== undefined) {
+    throw new InputValidationError(
+      "'message' and 'content' are mutually exclusive. Use one or the other.",
+    );
+  }
+
   return {
-    ...params,
+    ...rest,
+    ...(message !== undefined ? {content: toUserContent(message)} : {}),
     [EVENT_SIGNATURE_SYMBOL]: true,
     id: params.id || createNewEventId(),
     invocationId: params.invocationId || '',
     author: params.author,
-    actions: createEventActions(params.actions),
+    actions: createEventActions(
+      state !== undefined ? {...rest.actions, stateDelta: state} : rest.actions,
+    ),
     longRunningToolIds: params.longRunningToolIds || [],
     branch: params.branch,
     timestamp: params.timestamp || Date.now(),
+    nodeInfo:
+      nodePath !== undefined
+        ? {...rest.nodeInfo, path: nodePath}
+        : (rest.nodeInfo ?? {path: ''}),
   };
+}
+
+/**
+ * Sets the user-facing message of the event, converting a string, a part or a
+ * list of parts to `Content`. A `Content` is stored unchanged, and `null` or
+ * `undefined` clears the content.
+ *
+ * Mirrors the `google/adk-python` `Event.message` setter.
+ */
+export function setEventMessage(
+  event: Event,
+  value: ContentUnion | null | undefined,
+): void {
+  event.content = value == null ? undefined : toUserContent(value);
+}
+
+/**
+ * Returns the name of the node that generated the event.
+ *
+ * An event that carries an agent-state snapshot or marks the end of an agent
+ * belongs to the workflow rather than to the node, so it has no node name.
+ *
+ * Mirrors `google/adk-python` `Event.node_name`.
+ */
+export function getNodeName(event: Event): string {
+  const {agentState, endOfAgent} = event.actions;
+  if (endOfAgent || (agentState && Object.keys(agentState).length > 0)) {
+    return '';
+  }
+  return getNodePathName(event.nodeInfo);
 }
 
 /**
@@ -430,8 +546,20 @@ export function transformToCamelCaseEvent(
 export function transformToSnakeCaseEvent(
   event: Event,
 ): Record<string, unknown> {
-  return toSnakeCase(event, PRESERVE_KEYS_CAMEL_CASE) as Record<
+  const transformed = toSnakeCase(event, PRESERVE_KEYS_CAMEL_CASE) as Record<
     string,
     unknown
   >;
+
+  // A client that diffs serialized events (a debugger UI re-rendering a
+  // conversation, a cache keyed on the payload) must not see an unchanged
+  // event as changed, so the ids are emitted deduplicated and sorted.
+  // `google/adk-python` holds them in a `set` and sorts them the same way.
+  if (event.longRunningToolIds) {
+    transformed['long_running_tool_ids'] = [
+      ...new Set(event.longRunningToolIds),
+    ].sort();
+  }
+
+  return transformed;
 }

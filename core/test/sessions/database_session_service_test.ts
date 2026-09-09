@@ -9,6 +9,8 @@ import {
   createEventActions,
   DatabaseSessionService,
   Event,
+  getNodeName,
+  getParentNodeRunId,
   State,
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
@@ -163,6 +165,36 @@ describe('DatabaseSessionService', () => {
     expect(loadedSession?.state['count']).toBe(1);
     expect(loadedSession?.state[State.APP_PREFIX + 'global']).toBe('value');
     expect(loadedSession?.events.length).toBe(1);
+  });
+
+  it('should round-trip a convenience-built event through the database', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'wf-1',
+    });
+
+    const event = createEvent({
+      author: 'reviewer',
+      message: 'hi',
+      nodePath: 'wf@1.child@2',
+      state: {k: 1},
+      longRunningToolIds: ['zzz', 'aaa', 'aaa'],
+    });
+
+    await service.appendEvent({session, event});
+    const loaded = await service.getSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'wf-1',
+    });
+
+    const stored = loaded!.events[0];
+    expect(getNodeName(stored)).toBe('child');
+    expect(getParentNodeRunId(stored.nodeInfo)).toBe('1');
+    expect(stored.content!.parts![0].text).toBe('hi');
+    expect(stored.actions.stateDelta).toEqual({k: 1});
+    expect(stored.longRunningToolIds).toEqual(['aaa', 'zzz']);
   });
 
   it('should persist app state across sessions', async () => {
