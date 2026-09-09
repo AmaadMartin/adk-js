@@ -162,6 +162,222 @@ describe('MCPSessionManager', () => {
     );
   });
 
+  describe('per-call headers', () => {
+    it('test_merge_headers_stdio', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      await manager.createSession({Authorization: 'Bearer token'});
+
+      expect(StdioClientTransport).toHaveBeenLastCalledWith({
+        command: 'test-command',
+      });
+    });
+
+    it('test_merge_headers_streamable_http', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: {'x-static': 'static'}}},
+      });
+
+      await manager.createSession({Authorization: 'Bearer token'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-static': 'static', authorization: 'Bearer token'},
+          },
+        },
+      );
+    });
+
+    it('lets a per-call header override a static one of the same name', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: {authorization: 'Bearer static'}},
+        },
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {authorization: 'Bearer per-call'}}},
+      );
+    });
+
+    it('replaces a static header that differs only in capitalization', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: {authorization: 'Bearer static'}},
+        },
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {authorization: 'Bearer per-call'}}},
+      );
+    });
+
+    it('keeps static headers with a different name', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: {'x-tenant': 'acme'}}},
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-tenant': 'acme', authorization: 'Bearer per-call'},
+          },
+        },
+      );
+    });
+
+    it('keeps the rest of requestInit when adding a per-call header', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {cache: 'no-store'}},
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            cache: 'no-store',
+            headers: {authorization: 'Bearer per-call'},
+          },
+        },
+      );
+    });
+
+    it('merges a per-call header over the deprecated header field', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        header: {'x-tenant': 'acme'},
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-tenant': 'acme', authorization: 'Bearer per-call'},
+          },
+        },
+      );
+    });
+
+    it('leaves the transport options alone for an empty header map', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession({});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {},
+      );
+    });
+
+    it('sends no headers to a stdio transport', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+      });
+    });
+
+    it('keeps static headers given as a Headers instance', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: new Headers({'x-tenant': 'acme'})},
+        },
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-tenant': 'acme', authorization: 'Bearer per-call'},
+          },
+        },
+      );
+    });
+
+    it('keeps static headers given as an entry array', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: [['x-tenant', 'acme']]}},
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-tenant': 'acme', authorization: 'Bearer per-call'},
+          },
+        },
+      );
+    });
+
+    it('does not mutate the connection params it was constructed with', async () => {
+      const connectionParams: MCPConnectionParams = {
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: {'x-tenant': 'acme'}}},
+      };
+      const snapshot = structuredClone(connectionParams);
+      const manager = new MCPSessionManager(connectionParams);
+
+      await manager.createSession({Authorization: 'Bearer first'});
+      await manager.createSession({Authorization: 'Bearer second'});
+
+      expect(connectionParams).toEqual(snapshot);
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-tenant': 'acme', authorization: 'Bearer second'},
+          },
+        },
+      );
+    });
+  });
+
   it('tracks active sessions and cleans them up', async () => {
     const manager = new MCPSessionManager({
       type: 'StdioConnectionParams',

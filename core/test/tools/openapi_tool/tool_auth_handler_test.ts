@@ -263,4 +263,247 @@ describe('ToolAuthHandler', () => {
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
   });
+  describe('credentialKey namespacing', () => {
+    const API_KEY_SCHEME = {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    } as const;
+
+    it('does not read a credential cached under another credentialKey', async () => {
+      const state = new State({
+        'server_a_existing_exchanged_credential': {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'server-a-token'}},
+        },
+      });
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        API_KEY_SCHEME,
+        undefined,
+        'server_b',
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+
+    it('reads the credential cached under its own credentialKey', async () => {
+      const state = new State({
+        'server_a_existing_exchanged_credential': {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'server-a-token'}},
+        },
+      });
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        API_KEY_SCHEME,
+        undefined,
+        'server_a',
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.http?.credentials.token).toBe(
+        'server-a-token',
+      );
+    });
+
+    it('writes an exchanged credential under its credentialKey', async () => {
+      const state = new State();
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue({
+          authType: AuthCredentialTypes.API_KEY,
+          apiKey: 'key',
+        }),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      await new ToolAuthHandler(
+        mockContext,
+        API_KEY_SCHEME,
+        undefined,
+        'server_a',
+      ).prepareAuthCredentials();
+
+      expect(state.get('server_a_existing_exchanged_credential')).toBeDefined();
+      expect(state.get('apiKey_existing_exchanged_credential')).toBeUndefined();
+    });
+
+    it('keeps the scheme-type slot when no credentialKey is given', async () => {
+      const state = new State();
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue({
+          authType: AuthCredentialTypes.API_KEY,
+          apiKey: 'key',
+        }),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      await new ToolAuthHandler(
+        mockContext,
+        API_KEY_SCHEME,
+      ).prepareAuthCredentials();
+
+      expect(state.get('apiKey_existing_exchanged_credential')).toBeDefined();
+    });
+  });
+  describe('oauth2 consent', () => {
+    const AUTHORIZATION_CODE_SCHEME = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/o/oauth2/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {'read:things': 'read'},
+        },
+      },
+    } as const;
+
+    function createMockContext(state = new State()) {
+      return {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+    }
+
+    it('requests consent for a credential holding only client details', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        AUTHORIZATION_CODE_SCHEME,
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+
+    it('does not request consent once an access token is present', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        AUTHORIZATION_CODE_SCHEME,
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'client-id', accessToken: 'token'},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    });
+
+    it('does not request consent once an authorization code is present', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        AUTHORIZATION_CODE_SCHEME,
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            clientId: 'client-id',
+            clientSecret: 'client-secret',
+            authCode: 'code',
+          },
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    });
+
+    it('does not request consent for a client credentials grant', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        {
+          type: 'oauth2',
+          flows: {
+            clientCredentials: {
+              tokenUrl: 'https://example.com/token',
+              scopes: {},
+            },
+          },
+        },
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    });
+
+    it('requests consent when an oauth2 credential has no oauth2 details', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        AUTHORIZATION_CODE_SCHEME,
+        {authType: AuthCredentialTypes.OAUTH2},
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+
+    it('does not request consent for a non-oauth2 scheme', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        {type: 'http', scheme: 'bearer'},
+        {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'token'}},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    });
+
+    it('requests consent for an openIdConnect credential with no token', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        {
+          type: 'openIdConnect',
+          openIdConnectUrl:
+            'https://example.com/.well-known/openid-configuration',
+        },
+        {
+          authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+          oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+  });
 });

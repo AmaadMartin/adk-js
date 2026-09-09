@@ -4,11 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthCredentialTypes} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+import {createToolContext} from '../../agents/context_test_utils.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -46,6 +49,12 @@ const noop = () => vi.fn().mockResolvedValue(undefined);
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   return {
     StdioClientTransport: vi.fn(),
+  };
+});
+
+vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
+  return {
+    StreamableHTTPClientTransport: vi.fn(),
   };
 });
 
@@ -331,6 +340,52 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+  describe('authentication', () => {
+    it('sends the configured credential as a header on a tool call', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: noop(),
+              close: noop(),
+              listTools: vi.fn().mockResolvedValue({
+                tools: [{name: 'search', description: 'd', inputSchema: {}}],
+              }),
+            }) as unknown as Client,
+        )
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: noop(),
+              close: noop(),
+              callTool: vi.fn().mockResolvedValue({content: []}),
+            }) as unknown as Client,
+        );
+
+      const toolset = new MCPToolset(
+        {type: 'StreamableHTTPConnectionParams', url: 'http://test-url'},
+        [],
+        undefined,
+        {
+          authScheme: {type: 'http', scheme: 'bearer'},
+          authCredential: {
+            authType: AuthCredentialTypes.HTTP,
+            http: {scheme: 'bearer', credentials: {token: 'toolset-token'}},
+          },
+        },
+      );
+
+      const [tool] = await toolset.getTools();
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {authorization: 'Bearer toolset-token'}}},
+      );
     });
   });
 });

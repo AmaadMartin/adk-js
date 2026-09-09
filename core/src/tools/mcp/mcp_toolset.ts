@@ -19,7 +19,7 @@ import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
-import {MCPTool} from './mcp_tool.js';
+import {MCPTool, MCPToolAuthOptions} from './mcp_tool.js';
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -52,14 +52,17 @@ import {MCPTool} from './mcp_tool.js';
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  private readonly authOptions: MCPToolAuthOptions;
 
   constructor(
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    authOptions: MCPToolAuthOptions = {},
   ) {
     super(toolFilter, prefix);
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    this.authOptions = authOptions;
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -82,7 +85,12 @@ export class MCPToolset extends BaseToolset {
         ...tool,
         name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
       };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
+      return new MCPTool(
+        toolWithPrefix,
+        this.mcpSessionManager,
+        tool.name,
+        this.authOptions,
+      );
     });
 
     // Apply toolFilter when specified.
