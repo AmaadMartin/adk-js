@@ -87,6 +87,23 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Whether this tool produces its `FunctionResponse` elsewhere.
+   *
+   * When true, the automatic function-response event is skipped if `runAsync`
+   * resolves to `null` or `undefined`; some other orchestrator supplies the
+   * matching response later in the conversation. A tool that returns a real
+   * value still gets its event, exactly like any other tool.
+   *
+   * Distinct from {@link BaseTool.isLongRunning}, which skips the same way but
+   * additionally records the call in `event.longRunningToolIds`, affecting A2A
+   * conversion, plugin logging and interrupt tracking.
+   *
+   * A tool that defers assigns this after `super(...)`; it is not a
+   * constructor option.
+   */
+  defersResponse = false;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
