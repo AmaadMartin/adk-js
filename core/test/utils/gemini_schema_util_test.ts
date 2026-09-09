@@ -445,4 +445,199 @@ describe('toGeminiSchema', () => {
       ],
     });
   });
+
+  it('keeps a supported integer format on a property', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {id: {type: 'integer', format: 'int64'}},
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {id: {type: Type.INTEGER, format: 'int64'}},
+    });
+  });
+
+  it('keeps a supported string format on a property', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {when: {type: 'string', format: 'date-time'}},
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {when: {type: Type.STRING, format: 'date-time'}},
+    });
+  });
+
+  it('drops an unsupported string format on a property', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {who: {type: 'string', format: 'email'}},
+    });
+
+    expect(schema?.properties?.['who'].format).toBeUndefined();
+  });
+
+  it('keeps a supported format inside array items', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {
+        ids: {type: 'array', items: {type: 'integer', format: 'int32'}},
+        names: {type: 'array', items: {type: 'string', format: 'uri'}},
+      },
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        ids: {
+          type: Type.ARRAY,
+          items: {type: Type.INTEGER, format: 'int32'},
+        },
+        names: {type: Type.ARRAY, items: {type: Type.STRING}},
+      },
+    });
+  });
+
+  it('keeps a supported format inside an anyOf branch', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {
+        value: {
+          anyOf: [
+            {type: 'string', format: 'email'},
+            {type: 'string', format: 'date-time'},
+          ],
+        },
+      },
+    });
+
+    expect(schema?.properties?.['value'].anyOf).toEqual([
+      {type: Type.STRING},
+      {type: Type.STRING, format: 'date-time'},
+    ]);
+  });
+
+  it('does not mutate the schema it was given', () => {
+    const input = {
+      type: 'object' as const,
+      properties: {who: {type: 'string', format: 'email'}},
+    };
+    const pristine = structuredClone(input);
+
+    toGeminiSchema(input);
+
+    expect(input).toEqual(pristine);
+  });
+
+  it('carries pattern, minimum, maximum and default through', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {
+        slug: {type: 'string', pattern: '^[a-z]+$', default: 'abc'},
+        score: {type: 'integer', minimum: 1, maximum: 10, default: 5},
+      },
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        slug: {type: Type.STRING, pattern: '^[a-z]+$', default: 'abc'},
+        score: {type: Type.INTEGER, minimum: 1, maximum: 10, default: 5},
+      },
+    });
+  });
+
+  it('stringifies every count and length bound', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      minProperties: 1,
+      maxProperties: 4,
+      properties: {
+        name: {type: 'string', minLength: 3, maxLength: 40},
+        tags: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 9,
+          items: {type: 'string'},
+        },
+      },
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      minProperties: '1',
+      maxProperties: '4',
+      properties: {
+        name: {type: Type.STRING, minLength: '3', maxLength: '40'},
+        tags: {
+          type: Type.ARRAY,
+          minItems: '1',
+          maxItems: '9',
+          items: {type: Type.STRING},
+        },
+      },
+    });
+  });
+
+  it('carries a false default rather than treating it as absent', () => {
+    const schema = toGeminiSchema({type: 'boolean', default: false});
+
+    expect(schema).toEqual({type: Type.BOOLEAN, default: false});
+  });
+
+  it('drops a bound, a pattern and a propertyOrdering of the wrong type', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      minProperties: '2',
+      pattern: 7,
+      minimum: 'low',
+      maximum: 'high',
+      propertyOrdering: ['a', 3],
+      properties: {},
+    });
+
+    expect(schema).toEqual({type: Type.OBJECT, properties: {}});
+  });
+
+  it('drops a format that is not a string', () => {
+    expect(toGeminiSchema({type: 'integer', format: 64})).toEqual({
+      type: Type.INTEGER,
+    });
+  });
+
+  it('drops the synthetic title an OpenAPI operation carries', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      title: 'upload_file_Arguments',
+      properties: {},
+    });
+
+    expect(schema).toEqual({type: Type.OBJECT, properties: {}});
+  });
+
+  it('keeps a property named format and drops that property own format', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {format: {type: 'string', format: 'email'}},
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {format: {type: Type.STRING}},
+    });
+  });
+
+  it('keeps a property named properties', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      properties: {properties: {type: 'string', format: 'date-time'}},
+    });
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {properties: {type: Type.STRING, format: 'date-time'}},
+    });
+  });
 });

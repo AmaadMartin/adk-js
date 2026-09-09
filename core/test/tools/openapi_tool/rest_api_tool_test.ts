@@ -14,6 +14,7 @@ import {
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -305,8 +306,51 @@ describe('RestApiTool', () => {
     expect(declaration).toEqual({
       name: 'test_tool',
       description: 'description',
-      parameters: mockSchema,
+      parameters: {type: Type.OBJECT, properties: {}},
     });
+  });
+
+  it('should keep a supported format and drop a rejected one in the declaration', () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/pet/{petId}/uploadImage',
+      method: 'POST',
+    };
+    const operation: OpenAPIV3.OperationObject = {
+      operationId: 'uploadFile',
+      parameters: [
+        {
+          name: 'petId',
+          in: 'path',
+          required: true,
+          schema: {type: 'integer', format: 'int64'},
+        },
+      ],
+      requestBody: {
+        content: {
+          'application/octet-stream': {
+            schema: {type: 'string', format: 'binary'},
+          },
+        },
+      },
+      responses: {},
+    };
+    const tool = new RestApiTool(
+      'upload_file',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    const parameters = tool._getDeclaration()?.parameters;
+
+    expect(parameters?.type).toBe(Type.OBJECT);
+    expect(parameters?.title).toBeUndefined();
+    expect(parameters?.properties?.['pet_id']).toEqual({
+      type: Type.INTEGER,
+      format: 'int64',
+    });
+    expect(parameters?.properties?.['body']).toEqual({type: Type.STRING});
   });
 
   it('should extract query parameters from path', async () => {

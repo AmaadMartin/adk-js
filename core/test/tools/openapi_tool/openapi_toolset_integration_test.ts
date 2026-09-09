@@ -13,6 +13,7 @@ import {
   OpenAPIToolset,
   PluginManager,
 } from '@google/adk';
+import {Schema, Type} from '@google/genai';
 import * as fs from 'fs';
 import {OpenAPIV3} from 'openapi-types';
 import * as path from 'path';
@@ -198,4 +199,60 @@ describe('OpenAPIToolset Integration', () => {
     expect(requestUrl.pathname).toBe('/v1/users/..%2F..%2Fadmin%2Fexport');
     expect(requestUrl.searchParams.get('key')).toBe('test-api-key');
   });
+
+  it('should declare only formats the Gemini API accepts for every petstore tool', async () => {
+    const specPath = path.resolve(__dirname, 'fixtures/petstore.yaml');
+    const toolset = new OpenAPIToolset({
+      specStr: fs.readFileSync(specPath, 'utf8'),
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+    expect(tools.length).toBeGreaterThan(0);
+
+    const formats = tools.flatMap((tool) =>
+      collectFormats(tool._getDeclaration()?.parameters),
+    );
+
+    expect(formats.length).toBeGreaterThan(0);
+    expect([...new Set(formats)].sort()).toEqual([
+      'date-time',
+      'int32',
+      'int64',
+    ]);
+  });
+
+  it('should convert the petstore upload_file declaration into a genai Schema', async () => {
+    const specPath = path.resolve(__dirname, 'fixtures/petstore.yaml');
+    const toolset = new OpenAPIToolset({
+      specStr: fs.readFileSync(specPath, 'utf8'),
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+    const uploadFileTool = tools.find((tool) => tool.name === 'upload_file');
+    if (!uploadFileTool) expect.fail('upload_file tool was not created');
+
+    const parameters = uploadFileTool._getDeclaration()?.parameters;
+
+    expect(parameters?.type).toBe(Type.OBJECT);
+    expect(parameters?.title).toBeUndefined();
+    expect(parameters?.properties?.['pet_id']).toEqual({
+      type: Type.INTEGER,
+      format: 'int64',
+    });
+    // `format: binary` on the request body is what the Gemini API rejects.
+    expect(parameters?.properties?.['body']).toEqual({type: Type.STRING});
+  });
 });
+
+/** Collects every surviving `format` in a genai `Schema` tree. */
+function collectFormats(schema?: Schema): string[] {
+  if (!schema) {
+    return [];
+  }
+  return [
+    ...(schema.format ? [schema.format] : []),
+    ...collectFormats(schema.items),
+    ...(schema.anyOf ?? []).flatMap(collectFormats),
+    ...Object.values(schema.properties ?? {}).flatMap(collectFormats),
+  ];
+}
