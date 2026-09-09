@@ -15,8 +15,10 @@ import {
   LlmAgent,
   PluginManager,
   Runner,
+  SequentialAgent,
   State,
 } from '@google/adk';
+import {Content, Schema, Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -510,5 +512,180 @@ describe('AgentTool', () => {
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
     );
+  });
+});
+
+describe('AgentTool with composite agents', () => {
+  const REQUEST_PARAMETERS: Schema = {
+    type: Type.OBJECT,
+    properties: {request: {type: Type.STRING}},
+    required: ['request'],
+  };
+
+  const QUERY_SCHEMA: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      query: {type: Type.STRING},
+      language: {type: Type.STRING},
+    },
+    required: ['query', 'language'],
+  };
+
+  /**
+   * Runs `tool` against a mocked Runner and returns the message text the
+   * sub-agent received.
+   */
+  async function captureMessageText(
+    tool: AgentTool,
+    agent: SequentialAgent,
+    args: Record<string, unknown>,
+  ): Promise<string | undefined> {
+    let capturedMessage: Content | undefined;
+    const mockRunAsync = async function* (request: {newMessage: Content}) {
+      capturedMessage = request.newMessage;
+      yield createEvent({
+        author: agent.name,
+        content: {role: 'model', parts: [{text: 'done'}]},
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation(
+      (config) =>
+        ({
+          appName: config?.appName,
+          sessionService: config?.sessionService,
+          runAsync: mockRunAsync,
+        }) as unknown as Runner,
+    );
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: agent.name,
+      userId: 'parent-user',
+    });
+
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        agent,
+        session,
+        pluginManager: new PluginManager([]),
+        sessionService: new InMemorySessionService(),
+      }),
+    });
+
+    await tool.runAsync({args, toolContext});
+
+    return capturedMessage?.parts?.[0]?.text;
+  }
+
+  it("exposes the first sub-agent's input schema when wrapping a SequentialAgent", () => {
+    const sequence = new SequentialAgent({
+      name: 'sequence',
+      description: 'Process the query through multiple steps',
+      subAgents: [
+        new LlmAgent({name: 'first_agent', inputSchema: QUERY_SCHEMA}),
+        new LlmAgent({name: 'second_agent'}),
+      ],
+    });
+
+    const declaration = new AgentTool({agent: sequence})._getDeclaration();
+
+    expect(declaration.name).toBe('sequence');
+    expect(declaration.description).toBe(
+      'Process the query through multiple steps',
+    );
+    expect(declaration.parameters).toEqual(QUERY_SCHEMA);
+    expect(declaration.parameters?.properties).not.toHaveProperty('request');
+  });
+
+  it('falls back to the request parameter when no sub-agent has an input schema', () => {
+    const sequence = new SequentialAgent({
+      name: 'sequence',
+      description: 'A sequence without schemas',
+      subAgents: [
+        new LlmAgent({name: 'first_agent'}),
+        new LlmAgent({name: 'second_agent'}),
+      ],
+    });
+
+    const declaration = new AgentTool({agent: sequence})._getDeclaration();
+
+    expect(declaration.parameters).toEqual(REQUEST_PARAMETERS);
+    expect(declaration.parameters?.properties).not.toHaveProperty('query');
+  });
+
+  it('resolves the input schema through nested composite agents', () => {
+    const innerSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {deep_query: {type: Type.STRING}},
+      required: ['deep_query'],
+    };
+    const outerSequence = new SequentialAgent({
+      name: 'outer_sequence',
+      description: 'An outer sequence',
+      subAgents: [
+        new SequentialAgent({
+          name: 'inner_sequence',
+          description: 'An inner sequence',
+          subAgents: [
+            new LlmAgent({name: 'inner_agent', inputSchema: innerSchema}),
+          ],
+        }),
+      ],
+    });
+
+    const declaration = new AgentTool({agent: outerSequence})._getDeclaration();
+
+    expect(declaration.parameters).toEqual(innerSchema);
+    expect(declaration.parameters?.properties).not.toHaveProperty('request');
+  });
+
+  it('falls back to the request parameter for an empty composite agent', () => {
+    const emptySequence = new SequentialAgent({
+      name: 'empty_sequence',
+      description: 'An empty sequence',
+      subAgents: [],
+    });
+
+    const declaration = new AgentTool({agent: emptySequence})._getDeclaration();
+
+    expect(declaration.parameters).toEqual(REQUEST_PARAMETERS);
+  });
+
+  it('sends the args as JSON when the first sub-agent has an input schema', async () => {
+    const sequence = new SequentialAgent({
+      name: 'sequence',
+      description: 'Process the query through multiple steps',
+      subAgents: [
+        new LlmAgent({name: 'first_agent', inputSchema: QUERY_SCHEMA}),
+        new LlmAgent({name: 'second_agent'}),
+      ],
+    });
+    const args = {query: 'hi', language: 'en'};
+
+    const text = await captureMessageText(
+      new AgentTool({agent: sequence}),
+      sequence,
+      args,
+    );
+
+    expect(text).toBe(JSON.stringify(args));
+  });
+
+  it('sends the request string when no sub-agent has an input schema', async () => {
+    const sequence = new SequentialAgent({
+      name: 'sequence',
+      description: 'A sequence without schemas',
+      subAgents: [new LlmAgent({name: 'first_agent'})],
+    });
+
+    const text = await captureMessageText(
+      new AgentTool({agent: sequence}),
+      sequence,
+      {request: 'hello'},
+    );
+
+    expect(text).toBe('hello');
   });
 });
