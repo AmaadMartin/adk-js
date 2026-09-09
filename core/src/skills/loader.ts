@@ -192,7 +192,12 @@ export function parseSkillMdContent(content: string): {
  * symlinks.
  */
 function isDangerousZipEntryName(entryName: string): boolean {
-  if (path.posix.isAbsolute(entryName) || path.win32.isAbsolute(entryName)) {
+  // A drive-relative name like 'C:evil.txt' is rooted on Windows, because it
+  // resolves against that drive's own current directory, but
+  // path.win32.isAbsolute() calls it relative since it carries no root
+  // separator. parse().root catches every rooted shape, a leading '/'
+  // included, so it also subsumes the posix case.
+  if (path.win32.parse(entryName).root !== '') {
     return true;
   }
   return entryName.split(/[/\\]/).some((segment) => segment === '..');

@@ -662,10 +662,27 @@ Instruction body`;
       'references/../../esc.txt',
       'scripts/..',
       'scripts\\..\\..\\pwned.txt',
+      'C:evil.txt',
+      'C:pwned\\x.txt',
     ])('rejects the whole archive for the dangerous entry %s', (entryName) => {
       expect(() =>
         loadSkillFromZipBuffer(createZipWithRawEntryName(entryName)),
       ).toThrow(`Dangerous zip entry ignored: ${entryName}`);
+    });
+
+    it('accepts a reference whose name holds a colon below the root', () => {
+      const zip = new AdmZip();
+      zip.addFile('SKILL.md', Buffer.from(validSkillMd, 'utf-8'));
+      zip.addFile(
+        'references/notes:draft.md',
+        Buffer.from('draft content', 'utf-8'),
+      );
+
+      const skill = loadSkillFromZipBuffer(zip.toBuffer());
+
+      expect(skill.resources?.references?.['notes:draft.md']).toBe(
+        'draft content',
+      );
     });
 
     it('reports the dangerous entry even when SKILL.md is absent', () => {
