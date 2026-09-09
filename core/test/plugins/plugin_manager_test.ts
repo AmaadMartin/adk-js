@@ -239,15 +239,13 @@ describe('PluginManager', () => {
     plugin1.exceptionsToRaise['beforeRunCallback'] = originalException;
     service.registerPlugin(plugin1);
 
-    try {
-      await service.runBeforeRunCallback({
+    await expect(
+      service.runBeforeRunCallback({
         invocationContext: mockInvocationContext,
-      });
-    } catch (e) {
-      expect((e as Error).message).toContain(
-        "Error in plugin 'plugin1' during 'beforeRunCallback' callback",
-      );
-    }
+      }),
+    ).rejects.toThrow(
+      "Error in plugin 'plugin1' during 'beforeRunCallback' callback",
+    );
   });
 
   it('should support all callbacks', async () => {
