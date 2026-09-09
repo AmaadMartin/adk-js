@@ -252,6 +252,37 @@ export function prepareRequestParams(
   return {url, headers, body, bodyData};
 }
 
+function isJsonMimeType(mimeType: string): boolean {
+  return mimeType === 'application/json' || mimeType.endsWith('+json');
+}
+
+/**
+ * adk-python seeds an object-typed body with `{}` and sends it even when no
+ * property was supplied, so an operation whose body properties are all optional
+ * POSTs `{}` rather than no body at all. A `$ref` schema does not count as an
+ * object: OpenApiSpecParser resolves references before a tool is built, so an
+ * unresolved one carries no usable type here.
+ */
+function sendsEmptyJsonObjectBody(
+  requestBody:
+    | OpenAPIV3.RequestBodyObject
+    | OpenAPIV3.ReferenceObject
+    | undefined,
+): boolean {
+  if (!requestBody || !('content' in requestBody)) {
+    return false;
+  }
+  const [mimeType, mediaType] = Object.entries(requestBody.content)[0] ?? [];
+  const schema = mediaType?.schema;
+  return (
+    mimeType !== undefined &&
+    isJsonMimeType(mimeType) &&
+    schema !== undefined &&
+    !('$ref' in schema) &&
+    schema.type === 'object'
+  );
+}
+
 export function prepareRequestBody(
   requestBody:
     | OpenAPIV3.RequestBodyObject
@@ -264,7 +295,8 @@ export function prepareRequestBody(
   const finalData =
     body !== undefined
       ? body
-      : Object.keys(bodyData).length > 0
+      : Object.keys(bodyData).length > 0 ||
+          sendsEmptyJsonObjectBody(requestBody)
         ? bodyData
         : undefined;
 
@@ -272,7 +304,7 @@ export function prepareRequestBody(
     const content = requestBody.content;
     for (const [mimeType, _mediaTypeObject] of Object.entries(content)) {
       if (finalData !== undefined) {
-        if (mimeType === 'application/json' || mimeType.endsWith('+json')) {
+        if (isJsonMimeType(mimeType)) {
           headers['Content-Type'] = mimeType;
           return typeof finalData === 'string'
             ? finalData
