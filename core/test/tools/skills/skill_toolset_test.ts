@@ -18,6 +18,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
+import {logger} from '../../../src/utils/logger.js';
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {
@@ -39,10 +40,13 @@ describe('skill_toolset', () => {
     },
   };
 
-  function createMockContext(agentName = 'test-agent') {
+  function createMockContext(
+    agentName = 'test-agent',
+    state: Record<string, unknown> = {},
+  ) {
     return new Context({
       invocationContext: {
-        session: {state: {}},
+        session: {state},
         agent: {name: agentName},
       } as unknown as InvocationContext,
     });
@@ -315,6 +319,225 @@ describe('skill_toolset', () => {
       const tools2 = await toolset.getTools(context);
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
+    });
+
+    describe('SkillToolset close - additional toolsets', () => {
+      class SpyToolset extends BaseToolset {
+        constructor(private readonly onClose: () => Promise<void>) {
+          super([]);
+        }
+        override async getTools() {
+          return [];
+        }
+        override async close(): Promise<void> {
+          await this.onClose();
+        }
+      }
+
+      function skillActivating(toolName: string): Skill {
+        return {
+          frontmatter: {
+            name: 'skill-with-tools',
+            description: 'desc',
+            metadata: {adk_additional_tools: [toolName]},
+          },
+          instructions: 'instructions',
+        };
+      }
+
+      function activatedContext(): ReadonlyContext {
+        return createMockContext('test-agent', {
+          '_adk_activated_skill_test-agent': ['skill-with-tools'],
+        });
+      }
+
+      it('closes every nested toolset exactly once', async () => {
+        const closeFirst = vi.fn().mockResolvedValue(undefined);
+        const closeSecond = vi.fn().mockResolvedValue(undefined);
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [
+            new SpyToolset(closeFirst),
+            new SpyToolset(closeSecond),
+          ],
+        });
+
+        await toolset.close();
+
+        expect(closeFirst).toHaveBeenCalledTimes(1);
+        expect(closeSecond).toHaveBeenCalledTimes(1);
+      });
+
+      it('leaves plain tools alone', async () => {
+        const toolClose = vi.fn().mockResolvedValue(undefined);
+        class ClosableTool extends BaseTool {
+          constructor() {
+            super({name: 'closable_tool', description: 'dummy'});
+          }
+          close = toolClose;
+          async runAsync() {
+            return 'dummy';
+          }
+        }
+        const toolsetClose = vi.fn().mockResolvedValue(undefined);
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [new ClosableTool(), new SpyToolset(toolsetClose)],
+        });
+
+        await toolset.close();
+
+        expect(toolClose).not.toHaveBeenCalled();
+        expect(toolsetClose).toHaveBeenCalledTimes(1);
+      });
+
+      it('keeps closing after one nested toolset rejects', async () => {
+        const closeFirst = vi.fn().mockResolvedValue(undefined);
+        const closeRejecting = vi.fn().mockRejectedValue(new Error('boom'));
+        const closeLast = vi.fn().mockResolvedValue(undefined);
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [
+            new SpyToolset(closeFirst),
+            new SpyToolset(closeRejecting),
+            new SpyToolset(closeLast),
+          ],
+        });
+
+        await expect(toolset.close()).resolves.toBeUndefined();
+
+        expect(closeFirst).toHaveBeenCalledTimes(1);
+        expect(closeRejecting).toHaveBeenCalledTimes(1);
+        expect(closeLast).toHaveBeenCalledTimes(1);
+      });
+
+      it('still clears the fetched-skill cache when a nested close rejects', async () => {
+        const remoteSkill: Skill = {
+          frontmatter: {
+            name: 'remote-skill',
+            description: 'A remote skill',
+          },
+          instructions: 'Remote instructions',
+        };
+        const registry = {
+          getSkill: vi.fn().mockResolvedValue(remoteSkill),
+          searchSkills: vi.fn(),
+        };
+        const toolset = new SkillToolset([mockSkill], {
+          registry,
+          additionalTools: [
+            new SpyToolset(vi.fn().mockRejectedValue(new Error('boom'))),
+          ],
+        });
+
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+        expect(registry.getSkill).toHaveBeenCalledTimes(1);
+
+        await toolset.close();
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+
+        expect(registry.getSkill).toHaveBeenCalledTimes(2);
+      });
+
+      it('reports a nested toolset that fails to close', async () => {
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [
+            new SpyToolset(vi.fn().mockResolvedValue(undefined)),
+            new SpyToolset(vi.fn().mockRejectedValue(new Error('boom'))),
+          ],
+        });
+        const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+        try {
+          await toolset.close();
+
+          expect(warn).toHaveBeenCalledTimes(1);
+          expect(warn.mock.calls[0][0]).toContain('boom');
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      it('clears the fetched-skill cache before it awaits a nested close', async () => {
+        const remoteSkill: Skill = {
+          frontmatter: {
+            name: 'remote-skill',
+            description: 'A remote skill',
+          },
+          instructions: 'Remote instructions',
+        };
+        const registry = {
+          getSkill: vi.fn().mockResolvedValue(remoteSkill),
+          searchSkills: vi.fn(),
+        };
+        let releaseNestedClose!: () => void;
+        const nestedClose = new Promise<void>((resolve) => {
+          releaseNestedClose = resolve;
+        });
+        const toolset = new SkillToolset([mockSkill], {
+          registry,
+          additionalTools: [new SpyToolset(() => nestedClose)],
+        });
+
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+        expect(registry.getSkill).toHaveBeenCalledTimes(1);
+
+        const closed = toolset.close();
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+
+        expect(registry.getSkill).toHaveBeenCalledTimes(2);
+
+        releaseNestedClose();
+        await expect(closed).resolves.toBeUndefined();
+      });
+
+      it('is safe to call twice', async () => {
+        const nestedClose = vi.fn().mockResolvedValue(undefined);
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [new SpyToolset(nestedClose)],
+        });
+
+        await expect(toolset.close()).resolves.toBeUndefined();
+        await expect(toolset.close()).resolves.toBeUndefined();
+
+        expect(nestedClose).toHaveBeenCalledTimes(2);
+      });
+
+      it('resolves when there are no additional tools', async () => {
+        const toolset = new SkillToolset([mockSkill]);
+
+        await expect(toolset.close()).resolves.toBeUndefined();
+      });
+
+      it('re-resolves the tools of a nested toolset after close', async () => {
+        class DummyTool extends BaseTool {
+          constructor() {
+            super({name: 'reresolved_tool', description: 'dummy'});
+          }
+          async runAsync() {
+            return 'dummy';
+          }
+        }
+        const nestedGetTools = vi.fn().mockResolvedValue([new DummyTool()]);
+        class SourceToolset extends BaseToolset {
+          constructor() {
+            super([]);
+          }
+          override getTools = nestedGetTools;
+          override async close() {}
+        }
+        const toolset = new SkillToolset([skillActivating('reresolved_tool')], {
+          additionalTools: [new SourceToolset()],
+        });
+        const context = activatedContext();
+
+        await toolset.getTools(context);
+        expect(nestedGetTools).toHaveBeenCalledTimes(1);
+
+        await toolset.close();
+        const tools = await toolset.getTools(context);
+
+        expect(nestedGetTools).toHaveBeenCalledTimes(2);
+        expect(tools.map((t) => t.name)).toContain('reresolved_tool');
+      });
     });
   });
 

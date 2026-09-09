@@ -9,6 +9,7 @@ import {
   BaseToolset,
   Context,
   InvocationContext,
+  isBaseToolset,
   LlmRequest,
   ReadonlyContext,
   ToolPredicate,
@@ -60,6 +61,35 @@ class FilteringToolset extends BaseToolset {
 
   async close(): Promise<void> {}
 }
+
+describe('isBaseToolset', () => {
+  it('accepts a toolset instance', () => {
+    expect(isBaseToolset(new DummyToolset())).toBe(true);
+  });
+
+  it('accepts a toolset built by another copy of the package', () => {
+    const foreign = {
+      [Symbol.for('google.adk.baseToolset')]: true,
+      getTools: async () => [],
+      close: async () => {},
+    };
+
+    expect(isBaseToolset(foreign)).toBe(true);
+  });
+
+  it('rejects a tool, a plain object, and a nullish value', () => {
+    expect(isBaseToolset(new DummyTool('tool1'))).toBe(false);
+    expect(isBaseToolset({close: async () => {}})).toBe(false);
+    expect(isBaseToolset(null)).toBe(false);
+    expect(isBaseToolset(undefined)).toBe(false);
+  });
+
+  it('rejects an object whose signature is not true', () => {
+    expect(isBaseToolset({[Symbol.for('google.adk.baseToolset')]: 1})).toBe(
+      false,
+    );
+  });
+});
 
 describe('BaseToolset.isToolSelected', () => {
   const context = {} as unknown as ReadonlyContext;
