@@ -307,6 +307,8 @@ export type {
   ToolOptions,
 } from './tools/function_tool.js';
 export {getUserChoiceTool} from './tools/get_user_choice_tool.js';
+export {GoogleApiTool} from './tools/google_api_tool/google_api_tool.js';
+export type {GoogleApiToolOptions} from './tools/google_api_tool/google_api_tool.js';
 export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,

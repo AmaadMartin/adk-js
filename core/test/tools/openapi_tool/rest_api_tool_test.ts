@@ -10,7 +10,10 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -24,6 +27,16 @@ import {
   prepareRequestBody,
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 describe('RestApiTool', () => {
   afterEach(() => {
@@ -88,6 +101,69 @@ describe('RestApiTool', () => {
       expect.anything(),
       expect.objectContaining({
         headers: expect.objectContaining({'X-Custom-Header': 'custom-value'}),
+      }),
+    );
+  });
+
+  it('should send a header set by setDefaultHeaders', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+    );
+    tool.setDefaultHeaders({'developer-token': 'default-value'});
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'developer-token': 'default-value',
+        }),
+      }),
+    );
+  });
+
+  it('should keep a request header over a default header of the same name', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'developer-token', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      operation,
+    );
+    tool.setDefaultHeaders({'developer-token': 'default-value'});
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({
+      args: {'developer-token': 'request-value'},
+      toolContext: createToolContext(),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'developer-token': 'request-value',
+        }),
       }),
     );
   });
