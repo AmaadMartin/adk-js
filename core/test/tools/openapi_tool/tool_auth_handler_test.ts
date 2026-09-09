@@ -375,8 +375,7 @@ describe('ToolAuthHandler', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       // An OAuth2 exchange can yield an HTTP bearer credential, so the scheme
-      // is oauth2 while the cached credential is not. The refresher is looked
-      // up by the credential's authType, which has none registered.
+      // is oauth2 while the cached credential is not.
       const bearer: AuthCredential = {
         authType: AuthCredentialTypes.HTTP,
         http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
