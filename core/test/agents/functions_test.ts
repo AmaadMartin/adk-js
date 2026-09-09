@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AuthConfig,
+  AuthCredentialTypes,
   BasePlugin,
   BaseTool,
   Context,
@@ -34,6 +36,7 @@ import {
   mergeParallelFunctionResponseEvents,
 } from '../../src/agents/functions.js';
 import {logger} from '../../src/utils/logger.js';
+import {createAuthRequestEvent} from '../../src/workflow/utils/hitl_utils.js';
 
 // Get the test target function
 const {
@@ -778,6 +781,41 @@ describe('handleFunctionCallList', () => {
   });
 });
 
+const AUTH_URI = 'https://example.com/o/oauth2/auth?client_id=test-client';
+
+function oauth2AuthConfig(): AuthConfig {
+  const oauth2 = {clientId: 'test-client', clientSecret: 'test-secret'};
+  return {
+    authScheme: {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/o/oauth2/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {},
+        },
+      },
+    },
+    credentialKey: 'test-credential-key',
+    rawAuthCredential: {authType: AuthCredentialTypes.OAUTH2, oauth2},
+    exchangedAuthCredential: {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {...oauth2, authUri: AUTH_URI},
+    },
+  };
+}
+
+/** Returns the args of the single `adk_request_credential` call in `event`. */
+function credentialCallArgs(event: Event): Record<string, unknown> {
+  const call = event
+    .content!.parts!.map((part) => part.functionCall)
+    .find((functionCall) => functionCall?.name === 'adk_request_credential');
+  if (!call?.args) {
+    expect.fail('event carries no adk_request_credential call with args');
+  }
+  return call.args;
+}
+
 describe('generateAuthEvent', () => {
   let invocationContext: InvocationContext;
   let pluginManager: PluginManager;
@@ -832,18 +870,60 @@ describe('generateAuthEvent', () => {
 
     const parts = event!.content!.parts!;
     const call1 = parts.find(
-      (p) => p.functionCall?.args?.['function_call_id'] === 'call_1',
+      (p) => p.functionCall?.args?.['functionCallId'] === 'call_1',
     );
     expect(call1).toBeDefined();
     expect(call1!.functionCall!.name).toBe('adk_request_credential');
-    expect(call1!.functionCall!.args!['auth_config']).toBe('auth_config_1');
+    expect(call1!.functionCall!.args!['authConfig']).toBe('auth_config_1');
 
     const call2 = parts.find(
-      (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
+      (p) => p.functionCall?.args?.['functionCallId'] === 'call_2',
     );
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
-    expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+    expect(call2!.functionCall!.args!['authConfig']).toBe('auth_config_2');
+  });
+
+  it('emits the camelCase envelope the dev UI reads', () => {
+    const authConfig = oauth2AuthConfig();
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {'originating_call': authConfig},
+      }),
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+
+    const args = credentialCallArgs(event!);
+    expect(Object.keys(args)).toEqual(['functionCallId', 'authConfig']);
+    expect(args['functionCallId']).toBe('originating_call');
+    const emitted = args['authConfig'] as AuthConfig;
+    expect(emitted.exchangedAuthCredential?.oauth2?.authUri).toBe(AUTH_URI);
+  });
+
+  it('agrees with the workflow auth gate on the envelope keys', () => {
+    const authConfig = oauth2AuthConfig();
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {'originating_call': authConfig},
+      }),
+      content: {role: 'model', parts: []},
+    });
+
+    const toolKeys = Object.keys(
+      credentialCallArgs(
+        generateAuthEvent(invocationContext, functionResponseEvent)!,
+      ),
+    );
+    const workflowKeys = Object.keys(
+      credentialCallArgs(createAuthRequestEvent(authConfig, 'interrupt_1')),
+    );
+
+    expect(workflowKeys).toEqual(expect.arrayContaining(toolKeys));
+    expect(workflowKeys.filter((key) => !toolKeys.includes(key))).toEqual([
+      'message',
+    ]);
   });
 
   it('should default the role to user for a content-less event', () => {

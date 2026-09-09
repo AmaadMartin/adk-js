@@ -11,8 +11,7 @@ import {AuthConfig} from './auth_tool.js';
  * Reads a field that may arrive in either casing.
  *
  * Request args are normalised by `camelCaseKeys` before they get here, but a
- * response is whatever the client sent, and the two producers of an
- * `adk_request_credential` call already disagree on casing.
+ * response is whatever the client sent, so either casing can arrive.
  */
 function readField(source: unknown, name: string): unknown {
   if (typeof source !== 'object' || source === null) {
