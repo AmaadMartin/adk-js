@@ -113,7 +113,10 @@ export type {BaseAuthProvider} from './auth/base_auth_provider.js';
 export type {BaseCredentialService} from './auth/credential_service/base_credential_service.js';
 export {InMemoryCredentialService} from './auth/credential_service/in_memory_credential_service.js';
 export {SessionStateCredentialService} from './auth/credential_service/session_state_credential_service.js';
-export {CredentialExchangeError} from './auth/exchanger/base_credential_exchanger.js';
+export {
+  AuthCredentialMissingError,
+  CredentialExchangeError,
+} from './auth/exchanger/base_credential_exchanger.js';
 export type {
   BaseCredentialExchanger,
   ExchangeResult,
@@ -382,8 +385,17 @@ export type {
 } from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
 export type {ApiParameter} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
-export {ToolAuthHandler} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
-export type {AuthPreparationResult} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
+export {
+  ToolAuthHandler,
+  ToolContextCredentialStore,
+} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
+export type {
+  AuthPreparationResult,
+  CredentialStore,
+  // Referenced by the public `ToolAuthHandler` constructor, so `docs:check`
+  // fails as an undocumented reference without it.
+  ToolAuthHandlerOptions,
+} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';
 export {
   RestApiTool,
