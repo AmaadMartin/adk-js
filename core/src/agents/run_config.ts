@@ -10,6 +10,7 @@ import {
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
 } from '@google/genai';
 
@@ -99,6 +100,31 @@ export interface RunConfig {
   contextWindowCompression?: ContextWindowCompressionConfig;
 
   /**
+   * Configures the session resumption mechanism. Both transparent and
+   * non-transparent modes are forwarded as configured. When set, the Live
+   * server restores the state it holds for the handle instead of relying on
+   * client-side history replay.
+   */
+  sessionResumption?: SessionResumptionConfig;
+
+  /**
+   * Saves live audio and video emitted during the run to the artifact service,
+   * and records the artifact reference in the session. Requires an artifact
+   * service on the runner; without one the flag does nothing.
+   */
+  saveLiveBlob?: boolean;
+
+  /**
+   * Whether the client sends explicit voice-activity signals instead of relying
+   * on server-side voice activity detection.
+   *
+   * Setting this only tells the server to expect the signals. The application
+   * still has to call `LiveRequestQueue.sendActivityStart()` and
+   * `sendActivityEnd()` around each user turn.
+   */
+  explicitVadSignal?: boolean;
+
+  /**
    * A limit on the total number of llm calls for a given run.
    *
    * Valid Values:
@@ -171,6 +197,7 @@ export interface RunConfig {
  * - `streamingMode` → {@link StreamingMode.NONE}
  * - `maxLlmCalls` → `500` (validated via `validateMaxLlmCalls`)
  * - `pauseOnToolCalls` → `false`
+ * - `saveLiveBlob` → `false`
  *
  * @param params - Optional partial {@link RunConfig} overriding defaults.
  * @returns A merged {@link RunConfig} object.
@@ -185,6 +212,7 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
     enableAffectiveDialog: false,
     streamingMode: StreamingMode.NONE,
     pauseOnToolCalls: false,
+    saveLiveBlob: false,
     ...params,
     maxLlmCalls: validateMaxLlmCalls(params.maxLlmCalls ?? 500),
   };

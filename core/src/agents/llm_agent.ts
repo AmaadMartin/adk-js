@@ -145,6 +145,7 @@ const LIVE_KEYS = [
   'contextWindowCompression',
   'proactivity',
   'enableAffectiveDialog',
+  'explicitVadSignal',
 ] as const;
 
 function applyLiveRunConfig(
@@ -157,6 +158,12 @@ function applyLiveRunConfig(
     if (runConfig[k] !== undefined) {
       (liveConfig as Record<string, unknown>)[k] = runConfig[k];
     }
+  }
+  if (runConfig.sessionResumption) {
+    // Copy: the reconnect loop and google_llm both mutate this, and `handle`
+    // is owned by the invocation context (withheld from sub-agents).
+    const {handle: _handle, ...resumptionMode} = runConfig.sessionResumption;
+    liveConfig.sessionResumption = resumptionMode;
   }
 }
 
@@ -1005,14 +1012,15 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         return;
       }
 
-      // Apply the latest resumption handle before each connect attempt.
+      // Merge, not replace, so the caller's mode survives a reconnect;
+      // transparent is the default only when they configured none.
       const handle = invocationContext.liveSessionResumptionHandle;
       if (handle) {
         llmRequest.liveConnectConfig ??= {};
-        llmRequest.liveConnectConfig.sessionResumption = {
-          handle,
+        const resumption = (llmRequest.liveConnectConfig.sessionResumption ??= {
           transparent: true,
-        };
+        });
+        resumption.handle = handle;
       }
 
       let connection: BaseLlmConnection;
