@@ -61,6 +61,25 @@ function parseAgentEngineUri(resource: string): AgentEngineResourceName {
   return parsed;
 }
 
+/**
+ * Builds the memory service that a URI names.
+ *
+ * `memory://` returns an in-memory service. `agentengine://` returns a Vertex
+ * AI Memory Bank service, and takes either a bare agent engine id or a full
+ * `projects/{project}/locations/{location}/reasoningEngines/{id}` resource
+ * name. The bare id reads the project and the location from
+ * `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`, and fails when either is
+ * unset. The full resource name carries all three values, so it needs no
+ * environment variable.
+ *
+ * This opens no connection, so a bad URI fails here rather than on the first
+ * request.
+ *
+ * @param uri The service URI, as passed to the CLI's `--memory_service_uri`.
+ * @returns The memory service the URI names.
+ * @throws If the scheme is unsupported, or the agent engine resource does not
+ *     resolve. The message redacts any password the URI carries.
+ */
 export function getMemoryServiceFromUri(uri: string): BaseMemoryService {
   if (isInMemoryConnectionString(uri)) {
     return new InMemoryMemoryService();
