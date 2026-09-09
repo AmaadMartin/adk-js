@@ -22,9 +22,15 @@ import {isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
 import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
+import {assertCardRpcTargetsAllowed} from './agent_card_validation.js';
 
 /**
  * Resolves the AgentCard from the provided source.
+ *
+ * A card fetched over http(s) is remote-controlled data, so its RPC targets
+ * are constrained to the origin the card was fetched from. A card given as an
+ * object or read from a local file is the caller's own configuration and is
+ * exempt.
  */
 export async function resolveAgentCard(
   agentCard: AgentCard | string,
@@ -36,7 +42,9 @@ export async function resolveAgentCard(
   const source = agentCard as string;
   if (source.startsWith('http://') || source.startsWith('https://')) {
     const resolver = new DefaultAgentCardResolver();
-    return await resolver.resolve(source);
+    const card = await resolver.resolve(source);
+    assertCardRpcTargetsAllowed(card, source);
+    return card;
   }
 
   try {
