@@ -131,6 +131,41 @@ describe('OpenAPIToolset Integration', () => {
     });
   });
 
+  it('should call a tool getTool returned through the injected fetch', async () => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response('{"status":"success"}', {
+          headers: {'content-type': 'application/json'},
+        }),
+    );
+    const toolset = new OpenAPIToolset({
+      specStr: truanonSpec,
+      specType: 'yaml',
+      fetchFn,
+    });
+    const getProfileTool = toolset.getTool('get_profile');
+    if (!getProfileTool) expect.fail('get_profile tool was not created');
+
+    const result = await getProfileTool.runAsync({
+      args: {id: 'user1', service: 'myservice'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(result).toEqual({status: 'success'});
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://staging.truanon.com/api/get_profile?id=user1&service=myservice',
+      expect.objectContaining({method: 'GET'}),
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it('should keep a malicious path argument inside the declared endpoint', async () => {
     const apiKeyScheme: OpenAPIV3.ApiKeySecurityScheme = {
       type: 'apiKey',

@@ -385,6 +385,7 @@ export type {ApiParameter} from './tools/openapi_tool/openapi_spec_parser/operat
 export {ToolAuthHandler} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export type {AuthPreparationResult} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';
+export type {OpenAPIToolsetOptions} from './tools/openapi_tool/openapi_toolset.js';
 export {
   RestApiTool,
   createRestApiTool,

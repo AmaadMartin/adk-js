@@ -26,6 +26,7 @@ export class RestApiTool extends BaseTool {
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
+  private fetchFn?: typeof globalThis.fetch;
 
   constructor(
     name: string,
@@ -38,6 +39,7 @@ export class RestApiTool extends BaseTool {
       preservePropertyNames?: boolean;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
       credentialKey?: string;
+      fetchFn?: typeof globalThis.fetch;
     } = {},
   ) {
     super({name, description});
@@ -45,6 +47,7 @@ export class RestApiTool extends BaseTool {
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
+    this.fetchFn = options.fetchFn;
     this.operationParser = new OperationParser(operation, options);
   }
 
@@ -61,6 +64,17 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
+  }
+
+  /**
+   * Sets the `fetch` implementation used for this tool's API call.
+   *
+   * Pass a wrapper to supply a custom certificate authority, a proxy, or
+   * request signing.
+   */
+  @experimental
+  public configureFetch(fetchFn: typeof globalThis.fetch) {
+    this.fetchFn = fetchFn;
   }
 
   @experimental
@@ -131,7 +145,9 @@ export class RestApiTool extends BaseTool {
     }
 
     try {
-      const response = await globalThis.fetch(url, {
+      // Bound: a detached `globalThis.fetch` reference throws in browsers.
+      const fetchFn = this.fetchFn ?? globalThis.fetch.bind(globalThis);
+      const response = await fetchFn(url, {
         method,
         headers,
         // eslint-disable-next-line no-undef
@@ -316,6 +332,7 @@ export function createRestApiTool(
     preservePropertyNames?: boolean;
     headerProvider?: (context: ReadonlyContext) => Record<string, string>;
     credentialKey?: string;
+    fetchFn?: typeof globalThis.fetch;
   } = {},
 ): RestApiTool {
   return new RestApiTool(
