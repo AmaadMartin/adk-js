@@ -13,6 +13,15 @@ import {AuthScheme} from '../auth_schemes.js';
 export class CredentialExchangeError extends Error {}
 
 /**
+ * Raised when the credential an exchange needs is absent or incomplete.
+ *
+ * This is deliberately not a {@link CredentialExchangeError}: "there was
+ * nothing to exchange" is a configuration mistake the caller must fix, while a
+ * {@link CredentialExchangeError} reports an exchange that ran and failed.
+ */
+export class AuthCredentialMissingError extends Error {}
+
+/**
  * Result of a credential exchange.
  */
 export interface ExchangeResult {
