@@ -15,6 +15,7 @@ import type {
 
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {logger} from '../../utils/logger.js';
+import {retryOnce} from '../../utils/retry_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
@@ -63,14 +64,25 @@ export class MCPToolset extends BaseToolset {
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const session = await this.mcpSessionManager.createSession();
+    // Listing is a read-only request, so a second attempt cannot duplicate a
+    // side effect. The retry covers the round trip rather than the whole
+    // method because the filtering that follows is pure, and the second
+    // attempt opens a fresh session.
+    const listResult = await retryOnce(
+      async () => {
+        const session = await this.mcpSessionManager.createSession();
+        try {
+          return (await session.listTools()) as ListToolsResult;
+        } finally {
+          await this.mcpSessionManager.closeSession(session);
+        }
+      },
+      {
+        signal: context?.invocationContext.abortSignal,
+        description: 'MCP tool listing',
+      },
+    );
 
-    let listResult: ListToolsResult;
-    try {
-      listResult = (await session.listTools()) as ListToolsResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
     logger.debug(`number of tools: ${listResult.tools.length}`);
     for (const tool of listResult.tools) {
       logger.debug(`tool: ${tool.name}`);
