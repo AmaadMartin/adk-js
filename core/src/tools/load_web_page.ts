@@ -5,16 +5,39 @@
  */
 
 import {lookup} from 'node:dns/promises';
-import {isIP} from 'node:net';
+import {
+  request as httpRequest,
+  type ClientRequest,
+  type IncomingMessage,
+} from 'node:http';
+import {request as httpsRequest, type RequestOptions} from 'node:https';
+import {isIP, type LookupFunction, type Socket} from 'node:net';
+import {connect as tlsConnect} from 'node:tls';
 
 import {z} from 'zod';
 
+import {
+  isBlockedAddress,
+  isBlockedHostname,
+  normalizeHost,
+} from '../utils/ssrf_utils.js';
 import {FunctionTool} from './function_tool.js';
 
 /** Options for {@link loadWebPage}. */
 export interface LoadWebPageOptions {
   /** Request timeout in milliseconds. Defaults to 30_000 (30s). */
   timeoutMs?: number;
+  /**
+   * Proxy to route the request through, such as
+   * `http://proxy.example.test:8080`. Credentials in the URL are sent as
+   * `Proxy-Authorization: Basic`.
+   *
+   * A proxy resolves the target hostname itself, so a hostname target is not
+   * vetted on this path; an IP-literal target still is. The proxy is therefore
+   * never read from the environment: an ambient `https_proxy` must not be able
+   * to turn address vetting off for every caller on the machine.
+   */
+  proxy?: string;
 }
 
 /** URL schemes that are allowed to be fetched (WHATWG `URL.protocol` form). */
@@ -23,44 +46,24 @@ const ALLOWED_SCHEMES = new Set(['http:', 'https:']);
 /** Default request timeout in milliseconds. */
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/**
- * IPv4 ranges that are not globally routable and therefore blocked to defeat
- * SSRF. Mirrors the non-global ranges rejected by Python's
- * `ipaddress.is_global`.
- */
-const BLOCKED_IPV4_CIDRS = [
-  '0.0.0.0/8', // "this host on this network"
-  '10.0.0.0/8', // private
-  '100.64.0.0/10', // shared address space / CGNAT
-  '127.0.0.0/8', // loopback
-  '169.254.0.0/16', // link-local (includes GCP metadata 169.254.169.254)
-  '172.16.0.0/12', // private
-  '192.0.0.0/24', // IETF protocol assignments
-  '192.0.2.0/24', // TEST-NET-1 (documentation)
-  '192.88.99.0/24', // 6to4 relay anycast (deprecated)
-  '192.168.0.0/16', // private
-  '198.18.0.0/15', // benchmarking
-  '198.51.100.0/24', // TEST-NET-2 (documentation)
-  '203.0.113.0/24', // TEST-NET-3 (documentation)
-  '224.0.0.0/4', // multicast
-  '240.0.0.0/4', // reserved / future use (includes 255.255.255.255)
-].map(parseIpv4Cidr);
+/** Largest response body that is buffered before the request is abandoned. */
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
 /**
- * IPv6 ranges that are not globally routable and therefore blocked. The
- * IPv4-mapped range `::ffff:0:0/96` is handled separately by extracting the
- * embedded IPv4 address and re-checking it with the IPv4 rules.
+ * Python's `requests` decompresses transparently; asking for identity yields
+ * the same text without pulling a decompressor into the path.
  */
-const BLOCKED_IPV6_CIDRS = [
-  '::/128', // unspecified
-  '::1/128', // loopback
-  '64:ff9b:1::/48', // local NAT64
-  '100::/64', // discard-only
-  '2001:db8::/32', // documentation
-  'fc00::/7', // unique-local (ULA, private)
-  'fe80::/10', // link-local
-  'ff00::/8', // multicast
-].map(parseIpv6Cidr);
+const IDENTITY_ENCODING = {'accept-encoding': 'identity'};
+
+/** HTML entities that survive tag stripping, decoded by name. */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  apos: "'",
+  gt: '>',
+  lt: '<',
+  nbsp: ' ',
+  quot: '"',
+};
 
 /** Builds the parity failure message for a URL. */
 function failedToFetchMessage(url: string): string {
@@ -68,191 +71,315 @@ function failedToFetchMessage(url: string): string {
 }
 
 /**
- * Returns `true` for `localhost` and any `*.localhost` name (case-insensitive,
- * ignoring a trailing dot), matching the Python `_is_blocked_hostname` helper.
+ * Validates the URL's scheme up front (before any network access). Throws for
+ * malformed URLs and disallowed schemes. An `http`/`https` URL always carries a
+ * hostname: the WHATWG parser rejects the scheme without one.
  */
-function isBlockedHostname(hostname: string): boolean {
-  const normalized = hostname.replace(/\.+$/, '').toLowerCase();
-  return normalized === 'localhost' || normalized.endsWith('.localhost');
+function parseRequestTarget(url: string): URL {
+  const parsed = new URL(url);
+  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
+    throw new Error(`Unsupported url scheme: ${url}`);
+  }
+  return parsed;
 }
 
-/** Strips the surrounding brackets from an IPv6 URL hostname (`[::1]` → `::1`). */
-function normalizeHost(hostname: string): string {
-  return hostname.startsWith('[') ? hostname.slice(1, -1) : hostname;
+/** Parses the caller's proxy option. Throws for a scheme this tool cannot speak. */
+function parseProxy(proxy: string): URL {
+  const parsed = new URL(proxy);
+  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
+    throw new Error(`Unsupported proxy scheme: ${proxy}`);
+  }
+  return parsed;
 }
 
-/** Parses a dotted-quad IPv4 string into its four octets, or `null`. */
-function parseIpv4(address: string): number[] | null {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);
-  if (!match) {
-    return null;
-  }
-  const octets = match.slice(1).map(Number);
-  if (octets.some((octet) => octet > 255)) {
-    return null;
-  }
-  return octets;
-}
-
-/** Expands a valid IPv6 address string into its eight 16-bit hextets, or `null`. */
-function parseIpv6(address: string): number[] | null {
-  if (isIP(address) !== 6) {
-    return null;
-  }
-  const [head, tail] = address.split('::');
-  const highGroups = head ? expandHextets(head) : [];
-  const lowGroups = tail ? expandHextets(tail) : [];
-  const compressed = address.includes('::')
-    ? new Array(8 - highGroups.length - lowGroups.length).fill(0)
-    : [];
-  return [...highGroups, ...compressed, ...lowGroups];
+/** Returns the port a URL addresses, filling in the scheme default. */
+function portOf(url: URL): number {
+  return Number(url.port || (url.protocol === 'https:' ? 443 : 80));
 }
 
 /**
- * Converts a colon-separated IPv6 fragment into hextets, expanding a trailing
- * embedded IPv4 group (e.g. the `1.2.3.4` in `::ffff:1.2.3.4`) into two hextets.
+ * The TLS server name for `url`, absent for an IP-literal host: RFC 6066
+ * forbids an IP address there, and Node warns and drops it. The certificate is
+ * still checked against the host either way.
  */
-function expandHextets(fragment: string): number[] {
-  const hextets: number[] = [];
-  for (const group of fragment.split(':')) {
-    if (group.includes('.')) {
-      const octets = parseIpv4(group)!;
-      hextets.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
-    } else {
-      hextets.push(parseInt(group, 16));
-    }
-  }
-  return hextets;
-}
-
-/** Packs four IPv4 octets into an unsigned 32-bit integer. */
-function ipv4ToInt(octets: number[]): number {
-  return (
-    ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0
-  );
-}
-
-/** Packs eight IPv6 hextets into a 128-bit BigInt. */
-function hextetsToBigInt(hextets: number[]): bigint {
-  let value = 0n;
-  for (const hextet of hextets) {
-    value = (value << 16n) | BigInt(hextet);
-  }
-  return value;
-}
-
-/** Precomputes the network address and mask for an IPv4 CIDR string. */
-function parseIpv4Cidr(cidr: string): {base: number; mask: number} {
-  const [address, prefix] = cidr.split('/');
-  const mask = (0xffffffff << (32 - Number(prefix))) >>> 0;
-  return {base: (ipv4ToInt(parseIpv4(address)!) & mask) >>> 0, mask};
-}
-
-/** Precomputes the network address and prefix length for an IPv6 CIDR string. */
-function parseIpv6Cidr(cidr: string): {base: bigint; prefix: number} {
-  const [address, prefix] = cidr.split('/');
-  return {base: hextetsToBigInt(parseIpv6(address)!), prefix: Number(prefix)};
-}
-
-/** Returns `true` if the IPv4 octets fall within any blocked range. */
-function isBlockedIpv4(octets: number[]): boolean {
-  const value = ipv4ToInt(octets);
-  return BLOCKED_IPV4_CIDRS.some(
-    ({base, mask}) => (value & mask) >>> 0 === base,
-  );
-}
-
-/** Returns `true` if the IPv6 hextets fall within any blocked range. */
-function isBlockedIpv6(hextets: number[]): boolean {
-  const value = hextetsToBigInt(hextets);
-  // IPv4-mapped (::ffff:0:0/96): re-check the embedded IPv4 address.
-  if (value >> 32n === 0xffffn) {
-    return isBlockedIpv4([
-      Number((value >> 24n) & 0xffn),
-      Number((value >> 16n) & 0xffn),
-      Number((value >> 8n) & 0xffn),
-      Number(value & 0xffn),
-    ]);
-  }
-  return BLOCKED_IPV6_CIDRS.some(
-    ({base, prefix}) =>
-      value >> BigInt(128 - prefix) === base >> BigInt(128 - prefix),
-  );
+function serverNameOf(url: URL): string | undefined {
+  const hostname = normalizeHost(url.hostname);
+  return isIP(hostname) === 0 ? hostname : undefined;
 }
 
 /**
- * Returns `true` when `address` is not globally routable (private, loopback,
- * link-local, shared, reserved, multicast, ...). Unparseable input fails
- * closed (blocked).
+ * Resolves `hostname` to a de-duplicated address list. Throws when resolution
+ * yields nothing, or when *any* resolved address fails vetting.
  */
-function isBlockedAddress(address: string): boolean {
-  const octets = parseIpv4(address);
-  if (octets) {
-    return isBlockedIpv4(octets);
-  }
-  const hextets = parseIpv6(address);
-  if (hextets) {
-    return isBlockedIpv6(hextets);
-  }
-  return true;
-}
-
-/**
- * Resolves `hostname` to a de-duplicated list of IP addresses. IP literals are
- * returned as-is; hostnames are resolved via DNS. Throws when resolution
- * yields no address.
- */
-async function resolveHostAddresses(hostname: string): Promise<string[]> {
-  if (isIP(hostname) !== 0) {
-    return [hostname];
-  }
+async function resolveDirectAddresses(hostname: string): Promise<string[]> {
   const records = await lookup(hostname, {all: true});
   const addresses = [...new Set(records.map((record) => record.address))];
   if (addresses.length === 0) {
     throw new Error(`Unable to resolve host: ${hostname}`);
   }
-  return addresses;
-}
-
-/**
- * Validates the URL's scheme and hostname up front (before any network access).
- * Throws for malformed URLs, disallowed schemes, and blocked hostnames.
- */
-function assertUrlAllowed(url: string): URL {
-  const parsed = new URL(url);
-  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
-    throw new Error(`Unsupported url scheme: ${url}`);
-  }
-  if (isBlockedHostname(parsed.hostname)) {
-    throw new Error(`Blocked host: ${parsed.hostname}`);
-  }
-  return parsed;
-}
-
-/** Resolves the host and throws if any resolved address is not globally routable. */
-async function validateResolvedAddresses(hostname: string): Promise<void> {
-  const addresses = await resolveHostAddresses(hostname);
   if (addresses.some(isBlockedAddress)) {
     throw new Error(`Blocked host: ${hostname}`);
   }
+  return addresses;
 }
 
-/** Decodes the small set of HTML entities that survive tag stripping. */
+/** Builds the `Proxy-Authorization` header when the proxy URL carries credentials. */
+function proxyAuthHeaders(proxy: URL): Record<string, string> {
+  if (!proxy.username) {
+    return {};
+  }
+  const credentials = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+  return {
+    'proxy-authorization': `Basic ${Buffer.from(credentials).toString('base64')}`,
+  };
+}
+
+/**
+ * Builds a DNS lookup that always answers with `address`, so the connection
+ * reaches the vetted IP while the URL, `Host` header and TLS hostname stay as
+ * the caller wrote them.
+ */
+function pinnedLookup(address: string): LookupFunction {
+  const family = isIP(address);
+  return (hostname, options, callback) => {
+    if (options.all) {
+      callback(null, [{address, family}]);
+      return;
+    }
+    callback(null, address, family);
+  };
+}
+
+/** Extracts the charset from a `content-type` header, defaulting to UTF-8. */
+function charsetOf(contentType: string | undefined): string {
+  const match = /charset=\s*"?([^";]+)"?/i.exec(contentType ?? '');
+  return match ? match[1].trim() : 'utf-8';
+}
+
+/** Decodes a response body, falling back to UTF-8 for an unknown charset. */
+function decodeBody(body: Buffer, contentType: string | undefined): string {
+  const charset = charsetOf(contentType);
+  try {
+    return new TextDecoder(charset).decode(body);
+  } catch {
+    return new TextDecoder().decode(body);
+  }
+}
+
+/** Buffers a response body, abandoning the request past {@link MAX_RESPONSE_BYTES}. */
+function readResponse(res: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    res.on('data', (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > MAX_RESPONSE_BYTES) {
+        res.destroy();
+        reject(new Error(`Response exceeds ${MAX_RESPONSE_BYTES} bytes`));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    res.on('end', () => {
+      resolve(decodeBody(Buffer.concat(chunks), res.headers['content-type']));
+    });
+    res.on('error', reject);
+  });
+}
+
+/**
+ * Runs `work` under the call's deadline, destroying `request` when it passes.
+ * `expiresAt` is an absolute time, so every attempt a call makes shares one
+ * budget instead of restarting the clock.
+ */
+async function withDeadline<T>(
+  request: ClientRequest,
+  expiresAt: number,
+  work: () => Promise<T>,
+): Promise<T> {
+  const timer = setTimeout(
+    () => request.destroy(new Error('Request timed out')),
+    expiresAt - Date.now(),
+  );
+  try {
+    return await work();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Sends `request` and returns its body, or `null` when the status is not 200. */
+function sendRequest(
+  request: ClientRequest,
+  expiresAt: number,
+): Promise<string | null> {
+  return withDeadline(request, expiresAt, async () => {
+    const res = await new Promise<IncomingMessage>((resolve, reject) => {
+      request.once('response', resolve);
+      request.once('error', reject);
+      request.end();
+    });
+    if (res.statusCode !== 200) {
+      res.destroy();
+      return null;
+    }
+    return readResponse(res);
+  });
+}
+
+/**
+ * Requests `url` over a connection pinned to `address`. `agent: false`
+ * keeps every attempt on its own connection, matching the per-attempt session
+ * the Python tool opens.
+ */
+function requestPinnedAddress(
+  url: URL,
+  address: string,
+  expiresAt: number,
+): Promise<string | null> {
+  const options: RequestOptions = {
+    agent: false,
+    headers: {...IDENTITY_ENCODING},
+    lookup: pinnedLookup(address),
+  };
+  if (url.protocol === 'https:') {
+    options.servername = serverNameOf(url);
+    return sendRequest(httpsRequest(url, options), expiresAt);
+  }
+  return sendRequest(httpRequest(url, options), expiresAt);
+}
+
+/**
+ * Tries every vetted address in order. A received response wins whatever its
+ * status; only a transport error moves on to the next address.
+ */
+async function requestPinned(
+  url: URL,
+  addresses: string[],
+  expiresAt: number,
+): Promise<string | null> {
+  let lastError: unknown;
+  for (const address of addresses) {
+    try {
+      return await requestPinnedAddress(url, address, expiresAt);
+    } catch (error: unknown) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+/** Opens a TLS tunnel to `url` through `proxy` with an HTTP `CONNECT`. */
+function connectProxyTunnel(
+  url: URL,
+  proxy: URL,
+  expiresAt: number,
+): Promise<Socket> {
+  const request = httpRequest({
+    headers: proxyAuthHeaders(proxy),
+    host: normalizeHost(proxy.hostname),
+    method: 'CONNECT',
+    path: `${url.hostname}:${portOf(url)}`,
+    port: portOf(proxy),
+  });
+  return withDeadline(
+    request,
+    expiresAt,
+    () =>
+      new Promise<Socket>((resolve, reject) => {
+        request.once('connect', (res: IncomingMessage, socket: Socket) => {
+          if (res.statusCode !== 200) {
+            socket.destroy();
+            reject(new Error(`Proxy refused CONNECT: ${res.statusCode}`));
+            return;
+          }
+          resolve(tlsConnect({servername: serverNameOf(url), socket}));
+        });
+        request.once('error', reject);
+        request.end();
+      }),
+  );
+}
+
+/**
+ * Runs the request for `url` over an established tunnel.
+ *
+ * No `agent` option is passed, because Node consults `createConnection` only
+ * for a request that has no agent, and `agent: false` builds a fresh agent
+ * rather than skipping it. A request that lands on any other socket has
+ * connected directly, and this path vets no address, so it fails instead.
+ */
+async function requestThroughTunnel(
+  url: URL,
+  socket: Socket,
+  expiresAt: number,
+): Promise<string | null> {
+  const request = httpsRequest(url, {
+    createConnection: () => socket,
+    headers: {...IDENTITY_ENCODING},
+    servername: serverNameOf(url),
+  });
+  request.once('socket', (used: Socket) => {
+    if (used !== socket) {
+      request.destroy(new Error('Proxy tunnel was bypassed'));
+    }
+  });
+  try {
+    return await sendRequest(request, expiresAt);
+  } finally {
+    socket.destroy();
+  }
+}
+
+/**
+ * Requests `url` through `proxy`. The proxy resolves the hostname itself, so
+ * this path issues no local DNS query.
+ */
+async function requestViaProxy(
+  url: URL,
+  proxy: URL,
+  expiresAt: number,
+): Promise<string | null> {
+  if (url.protocol === 'http:') {
+    const request = httpRequest({
+      agent: false,
+      headers: {
+        ...IDENTITY_ENCODING,
+        ...proxyAuthHeaders(proxy),
+        host: url.host,
+      },
+      host: normalizeHost(proxy.hostname),
+      // Absolute-form request target, as an HTTP proxy expects.
+      path: url.href,
+      port: portOf(proxy),
+    });
+    return sendRequest(request, expiresAt);
+  }
+  const socket = await connectProxyTunnel(url, proxy, expiresAt);
+  return requestThroughTunnel(url, socket, expiresAt);
+}
+
+/** Decodes HTML entities: the named set above plus decimal and hex forms. */
 function decodeHtmlEntities(text: string): string {
-  return text
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&');
+  return text.replace(
+    /&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);/g,
+    (match: string, entity: string) => {
+      if (!entity.startsWith('#')) {
+        return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
+      }
+      const codePoint =
+        entity[1] === 'x' || entity[1] === 'X'
+          ? parseInt(entity.slice(2), 16)
+          : Number(entity.slice(1));
+      return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : match;
+    },
+  );
 }
 
 /**
  * Extracts readable text from an HTML document. Removes `<script>`/`<style>`
- * blocks and comments, strips remaining tags, decodes common entities, and
- * keeps only lines with more than three words (parity with the Python tool).
+ * blocks and comments, strips remaining tags, decodes entities, and keeps only
+ * lines with more than three words (parity with the Python tool).
  */
 function htmlToText(html: string): string {
   const withoutCode = html
@@ -268,37 +395,59 @@ function htmlToText(html: string): string {
 }
 
 /**
+ * Vets `url` and returns its body, or `null` when the status is not 200.
+ * Mirrors the Python `_fetch_response` decision tree: a proxy short-circuits
+ * local resolution, an IP literal is vetted in place, and a hostname is
+ * resolved and vetted before any connection is made.
+ */
+async function fetchBody(
+  url: URL,
+  proxy: URL | null,
+  expiresAt: number,
+): Promise<string | null> {
+  const hostname = normalizeHost(url.hostname);
+  if (isBlockedHostname(hostname)) {
+    throw new Error(`Blocked host: ${hostname}`);
+  }
+  const literal = isIP(hostname) === 0 ? null : hostname;
+  if (literal !== null && isBlockedAddress(literal)) {
+    throw new Error(`Blocked host: ${hostname}`);
+  }
+  if (proxy !== null) {
+    return requestViaProxy(url, proxy, expiresAt);
+  }
+  const addresses =
+    literal === null ? await resolveDirectAddresses(hostname) : [literal];
+  return requestPinned(url, addresses, expiresAt);
+}
+
+/**
  * Fetches the content at `url` and returns its extracted, readable text.
  *
  * Hardened against SSRF: only `http`/`https` URLs are fetched, the host is
- * resolved and rejected up front if it is `localhost`-style or resolves to a
- * private / loopback / link-local / shared / reserved / multicast address, and
- * redirects are never followed. Never throws for expected failures (bad scheme,
- * blocked host, non-200, timeout, network error); returns
- * `Failed to fetch url: <url>` instead.
+ * rejected up front if it is `localhost`-style or resolves to a private /
+ * loopback / link-local / shared / reserved / multicast address, and redirects
+ * are never followed. The connection is pinned to the address that passed
+ * vetting, so a name cannot be re-resolved to a different address after the
+ * check. The body is read up to 10 MiB; a larger response fails.
  *
- * Known limitation: global `fetch` performs its own DNS resolution at connect
- * time, so a residual time-of-check/time-of-use (DNS-rebinding) window exists
- * between this pre-flight lookup and fetch's own lookup. Full connection
- * IP-pinning (e.g. an `undici` Agent with a custom `lookup`) is a possible
- * future hardening.
+ * Never throws for expected failures (bad scheme, blocked host, non-200,
+ * timeout, network error); returns `Failed to fetch url: <url>` instead.
+ *
+ * Passing {@link LoadWebPageOptions.proxy} routes the request through a proxy,
+ * which resolves the hostname itself. A hostname target is not vetted on that
+ * path, so it is opt-in per call and is never read from the environment.
  */
 export async function loadWebPage(
   url: string,
   options?: LoadWebPageOptions,
 ): Promise<string> {
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const expiresAt = Date.now() + (options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const parsed = assertUrlAllowed(url);
-    await validateResolvedAddresses(normalizeHost(parsed.hostname));
-    const response = await fetch(url, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (response.status !== 200) {
-      return failedToFetchMessage(url);
-    }
-    return htmlToText(await response.text());
+    const proxy =
+      options?.proxy === undefined ? null : parseProxy(options.proxy);
+    const body = await fetchBody(parseRequestTarget(url), proxy, expiresAt);
+    return body === null ? failedToFetchMessage(url) : htmlToText(body);
   } catch {
     return failedToFetchMessage(url);
   }
