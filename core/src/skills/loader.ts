@@ -199,13 +199,14 @@ function isDangerousZipEntryName(entryName: string): boolean {
 }
 
 /**
- * Checks that a skill name is a single bare path segment, mirroring
- * adk-python's `pathlib.Path(name).name != name`. '.' and '..' are rejected
- * explicitly because `path.basename('..') === '..'` whereas
- * `pathlib.Path('..').name === ''`.
+ * Checks that a skill name is a single bare path segment. The win32 flavour is
+ * deliberate on every host: it treats '/' and '\' alike and recognises drive
+ * prefixes, so one archive gets the same verdict wherever the loader runs.
+ * '.' and '..' are rejected explicitly because
+ * `path.win32.basename('..') === '..'`.
  */
 function isBareSkillName(name: string): boolean {
-  return name !== '.' && name !== '..' && path.basename(name) === name;
+  return name !== '.' && name !== '..' && path.win32.basename(name) === name;
 }
 
 /**
