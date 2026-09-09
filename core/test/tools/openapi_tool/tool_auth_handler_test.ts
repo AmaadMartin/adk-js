@@ -7,10 +7,21 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
+  AuthScheme,
   Context,
+  ExtendedOAuth2,
+  OAuth2DiscoveryManager,
   ToolAuthHandler,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -262,5 +273,173 @@ describe('ToolAuthHandler', () => {
       'oauth2_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+
+  describe('ExtendedOAuth2 endpoint discovery', () => {
+    const OAUTH2_CREDENTIAL: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+    };
+
+    let discoverSpy: MockInstance<
+      OAuth2DiscoveryManager['discoverAuthServerMetadata']
+    >;
+
+    const newContext = () =>
+      ({
+        state: new State(),
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      }) as unknown as Context;
+
+    beforeEach(() => {
+      discoverSpy = vi
+        .spyOn(OAuth2DiscoveryManager.prototype, 'discoverAuthServerMetadata')
+        .mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      discoverSpy.mockRestore();
+    });
+
+    it('fills a blank tokenUrl from the issuer before the credential is exchanged', async () => {
+      discoverSpy.mockResolvedValue({
+        issuer: 'https://auth.example.com',
+        authorization_endpoint: 'https://auth.example.com/authorize',
+        token_endpoint: 'https://auth.example.com/token',
+      });
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {clientCredentials: {tokenUrl: '', scopes: {}}},
+      };
+      const mockContext = newContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        scheme,
+        OAUTH2_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(discoverSpy).toHaveBeenCalledExactlyOnceWith(
+        'https://auth.example.com',
+      );
+      expect(scheme.flows.clientCredentials?.tokenUrl).toBe(
+        'https://auth.example.com/token',
+      );
+    });
+
+    it('does not discover when the scheme already names its endpoints', async () => {
+      const mockContext = newContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        {
+          type: 'oauth2',
+          flows: {
+            clientCredentials: {
+              tokenUrl: 'https://example.com/token',
+              scopes: {},
+            },
+          },
+        },
+        OAUTH2_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(discoverSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not discover again once the issuer has filled the endpoints', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {
+          clientCredentials: {
+            tokenUrl: 'https://auth.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+      const mockContext = newContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        scheme,
+        OAUTH2_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      // The handler holds the scheme the tool was built with, so a filled
+      // scheme costs no further round trip on later invocations.
+      expect(result.state).toBe('done');
+      expect(discoverSpy).not.toHaveBeenCalled();
+    });
+
+    it('still prepares the credential when discovery finds no metadata', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {clientCredentials: {tokenUrl: '', scopes: {}}},
+      };
+      const mockContext = newContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        scheme,
+        OAUTH2_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      // A failed discovery degrades to the behaviour the handler had before
+      // the scheme named an issuer.
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.http?.credentials.token).toBe(
+        'exchanged-token',
+      );
+      expect(scheme.flows.clientCredentials?.tokenUrl).toBe('');
+    });
+
+    it('does not discover when a cached credential answers the call', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {clientCredentials: {tokenUrl: '', scopes: {}}},
+      };
+      const mockContext = {
+        state: new State({
+          'oauth2_existing_exchanged_credential': {
+            authType: AuthCredentialTypes.HTTP,
+            http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
+          },
+        }),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        scheme,
+        OAUTH2_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      expect(result.authCredential?.http?.credentials.token).toBe(
+        'cached-token',
+      );
+      expect(discoverSpy).not.toHaveBeenCalled();
+    });
+
+    it('asks for a credential when an OAuth2 scheme declares no flows', async () => {
+      // A scheme parsed out of an OpenAPI document is cast, not validated, so
+      // `flows` can be missing however the type declares it.
+      const scheme = {type: 'oauth2'} as AuthScheme;
+      const mockContext = newContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        scheme,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+      expect(discoverSpy).not.toHaveBeenCalled();
+    });
   });
 });

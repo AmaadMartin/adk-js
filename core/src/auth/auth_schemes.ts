@@ -24,12 +24,43 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
- * AuthSchemes contains SecuritySchemes from OpenAPI 3.0 and an extra flattened
- * OpenIdConnectWithConfig.
+ * OAuth2 scheme that names its issuer, so that the authorization and token
+ * endpoints can be discovered instead of configured by hand.
+ * @experimental  (Experimental, subject to change)
+ */
+export interface ExtendedOAuth2 extends OpenAPIV3.OAuth2SecurityScheme {
+  /**
+   * Issuer URL of the authorization server. It is used to discover the
+   * endpoints that are left blank in `flows`.
+   */
+  issuerUrl?: string;
+}
+
+/**
+ * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
+ * OpenIdConnectWithConfig, and an OAuth2 scheme that carries an issuer URL.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
-  | OpenIdConnectWithConfig;
+  | OpenIdConnectWithConfig
+  | ExtendedOAuth2;
+
+/**
+ * Reports whether the scheme is an OAuth2 scheme with a usable issuer URL, and
+ * can therefore have its endpoints discovered.
+ *
+ * An {@link ExtendedOAuth2} without an `issuerUrl` is structurally identical to
+ * a plain OAuth2 scheme, so this predicate rejects it.
+ */
+export function isExtendedOAuth2(
+  authScheme: AuthScheme | undefined,
+): authScheme is ExtendedOAuth2 & {issuerUrl: string} {
+  return (
+    authScheme?.type === 'oauth2' &&
+    'issuerUrl' in authScheme &&
+    !!authScheme.issuerUrl
+  );
+}
 
 /**
  * Represents the OAuth2 flow (or grant type).

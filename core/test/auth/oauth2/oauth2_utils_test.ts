@@ -4,18 +4,45 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme, OAuth2Auth} from '@google/adk';
+import {
+  AuthScheme,
+  ExtendedOAuth2,
+  OAuth2Auth,
+  OAuth2DiscoveryManager,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {AuthorizationServerMetadata} from '../../../src/auth/oauth2/oauth2_discovery.js';
 import {
   AuthorizationCodeParams,
   ClientCredentialsParams,
   createOAuth2TokenRequestBody,
   fetchOAuth2Tokens,
   getTokenEndpoint,
+  hasMissingOAuth2Endpoints,
   isTokenExpired,
   parseAuthorizationCode,
+  populateAuthScheme,
   RefreshTokenParams,
 } from '../../../src/auth/oauth2/oauth2_utils.js';
+
+/**
+ * Discovery manager that answers with a fixed result and records the issuer
+ * URLs it was asked about, so a test can assert that no discovery happened.
+ */
+class StubDiscoveryManager extends OAuth2DiscoveryManager {
+  readonly issuerUrls: string[] = [];
+
+  constructor(private readonly metadata?: AuthorizationServerMetadata) {
+    super();
+  }
+
+  override async discoverAuthServerMetadata(
+    issuerUrl: string,
+  ): Promise<AuthorizationServerMetadata | undefined> {
+    this.issuerUrls.push(issuerUrl);
+    return this.metadata;
+  }
+}
 
 describe('oauth2_utils', () => {
   describe('getTokenEndpoint', () => {
@@ -281,6 +308,325 @@ describe('oauth2_utils', () => {
       expect(isTokenExpired({expiresAt: nearFutureTimeMs} as OAuth2Auth)).toBe(
         true,
       );
+    });
+  });
+
+  describe('hasMissingOAuth2Endpoints', () => {
+    it('returns true when the authorizationCode flow has both endpoints blank', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: '',
+            tokenUrl: '',
+            scopes: {},
+          },
+        },
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(true);
+    });
+
+    it('returns true when only the authorizationCode tokenUrl is blank', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://auth.example.com/authorize',
+            tokenUrl: '',
+            scopes: {},
+          },
+        },
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(true);
+    });
+
+    it('returns true when only the authorizationCode authorizationUrl is blank', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: '',
+            tokenUrl: 'https://auth.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(true);
+    });
+
+    it('returns true when the implicit authorizationUrl is blank', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {implicit: {authorizationUrl: '', scopes: {}}},
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(true);
+    });
+
+    it('returns true when the password tokenUrl is blank', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {password: {tokenUrl: '', scopes: {}}},
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(true);
+    });
+
+    it('returns true when the clientCredentials tokenUrl is blank', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {clientCredentials: {tokenUrl: '', scopes: {}}},
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(true);
+    });
+
+    it('returns false when every declared endpoint is populated', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          implicit: {
+            authorizationUrl: 'https://auth.example.com/authorize',
+            scopes: {},
+          },
+          password: {tokenUrl: 'https://auth.example.com/token', scopes: {}},
+          clientCredentials: {
+            tokenUrl: 'https://auth.example.com/token',
+            scopes: {},
+          },
+          authorizationCode: {
+            authorizationUrl: 'https://auth.example.com/authorize',
+            tokenUrl: 'https://auth.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(false);
+    });
+
+    it('returns false for an openIdConnect scheme', () => {
+      const scheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://auth.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://auth.example.com/authorize',
+        tokenEndpoint: 'https://auth.example.com/token',
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(false);
+    });
+
+    it('returns false for an undefined scheme', () => {
+      expect(hasMissingOAuth2Endpoints(undefined)).toBe(false);
+    });
+
+    it('returns false for an OAuth2 scheme that declares no flows', () => {
+      // A scheme parsed out of an OpenAPI document is cast, not validated, so
+      // `flows` can be missing however the type declares it.
+      const scheme = {type: 'oauth2'} as AuthScheme;
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(false);
+    });
+  });
+
+  describe('populateAuthScheme', () => {
+    const METADATA = {
+      issuer: 'https://auth.example.com',
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+    };
+
+    it('fills both authorizationCode endpoints on the scheme it was given', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: '',
+            tokenUrl: '',
+            scopes: {read: 'Read access'},
+          },
+        },
+      };
+      const discovery = new StubDiscoveryManager(METADATA);
+
+      await expect(populateAuthScheme(scheme, discovery)).resolves.toBe(true);
+
+      expect(discovery.issuerUrls).toEqual(['https://auth.example.com']);
+      expect(scheme.flows.authorizationCode?.authorizationUrl).toBe(
+        'https://auth.example.com/authorize',
+      );
+      expect(scheme.flows.authorizationCode?.tokenUrl).toBe(
+        'https://auth.example.com/token',
+      );
+    });
+
+    it('fills the implicit authorizationUrl', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {implicit: {authorizationUrl: '', scopes: {}}},
+      };
+
+      await expect(
+        populateAuthScheme(scheme, new StubDiscoveryManager(METADATA)),
+      ).resolves.toBe(true);
+
+      expect(scheme.flows.implicit?.authorizationUrl).toBe(
+        'https://auth.example.com/authorize',
+      );
+    });
+
+    it('fills the password tokenUrl', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {password: {tokenUrl: '', scopes: {}}},
+      };
+
+      await expect(
+        populateAuthScheme(scheme, new StubDiscoveryManager(METADATA)),
+      ).resolves.toBe(true);
+
+      expect(scheme.flows.password?.tokenUrl).toBe(
+        'https://auth.example.com/token',
+      );
+    });
+
+    it('fills the clientCredentials tokenUrl', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {clientCredentials: {tokenUrl: '', scopes: {}}},
+      };
+
+      await expect(
+        populateAuthScheme(scheme, new StubDiscoveryManager(METADATA)),
+      ).resolves.toBe(true);
+
+      expect(scheme.flows.clientCredentials?.tokenUrl).toBe(
+        'https://auth.example.com/token',
+      );
+    });
+
+    it('keeps an endpoint that is already set', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: '',
+            tokenUrl: 'https://preset.example.com/token',
+            scopes: {},
+          },
+          implicit: {
+            authorizationUrl: 'https://preset.example.com/authorize',
+            scopes: {},
+          },
+          password: {tokenUrl: 'https://preset.example.com/token', scopes: {}},
+          clientCredentials: {
+            tokenUrl: 'https://preset.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+
+      await expect(
+        populateAuthScheme(scheme, new StubDiscoveryManager(METADATA)),
+      ).resolves.toBe(true);
+
+      expect(scheme.flows.authorizationCode?.authorizationUrl).toBe(
+        'https://auth.example.com/authorize',
+      );
+      expect(scheme.flows.authorizationCode?.tokenUrl).toBe(
+        'https://preset.example.com/token',
+      );
+      expect(scheme.flows.implicit?.authorizationUrl).toBe(
+        'https://preset.example.com/authorize',
+      );
+      expect(scheme.flows.password?.tokenUrl).toBe(
+        'https://preset.example.com/token',
+      );
+      expect(scheme.flows.clientCredentials?.tokenUrl).toBe(
+        'https://preset.example.com/token',
+      );
+    });
+
+    it('does not create a flow the scheme never declared', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {implicit: {authorizationUrl: '', scopes: {}}},
+      };
+
+      await expect(
+        populateAuthScheme(scheme, new StubDiscoveryManager(METADATA)),
+      ).resolves.toBe(true);
+
+      expect(Object.keys(scheme.flows)).toEqual(['implicit']);
+    });
+
+    it('returns false and discovers nothing when the scheme has no issuerUrl', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: '',
+            tokenUrl: '',
+            scopes: {},
+          },
+        },
+      };
+      const before = structuredClone(scheme);
+      const discovery = new StubDiscoveryManager(METADATA);
+
+      await expect(populateAuthScheme(scheme, discovery)).resolves.toBe(false);
+
+      expect(discovery.issuerUrls).toEqual([]);
+      expect(scheme).toEqual(before);
+    });
+
+    it('returns false and discovers nothing for an openIdConnect scheme', async () => {
+      const scheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://auth.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://auth.example.com/authorize',
+        tokenEndpoint: 'https://auth.example.com/token',
+      };
+      const discovery = new StubDiscoveryManager(METADATA);
+
+      await expect(populateAuthScheme(scheme, discovery)).resolves.toBe(false);
+
+      expect(discovery.issuerUrls).toEqual([]);
+    });
+
+    it('returns false without throwing when discovery finds no metadata', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: '',
+            tokenUrl: '',
+            scopes: {},
+          },
+        },
+      };
+
+      await expect(
+        populateAuthScheme(scheme, new StubDiscoveryManager(undefined)),
+      ).resolves.toBe(false);
+
+      expect(scheme.flows.authorizationCode?.authorizationUrl).toBe('');
+      expect(scheme.flows.authorizationCode?.tokenUrl).toBe('');
+    });
+
+    it('returns false and discovers nothing when the scheme declares no flows', async () => {
+      const scheme = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+      } as AuthScheme;
+      const discovery = new StubDiscoveryManager(METADATA);
+
+      await expect(populateAuthScheme(scheme, discovery)).resolves.toBe(false);
+
+      expect(discovery.issuerUrls).toEqual([]);
     });
   });
 });

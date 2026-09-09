@@ -8,6 +8,10 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {
+  hasMissingOAuth2Endpoints,
+  populateAuthScheme,
+} from '../../../auth/oauth2/oauth2_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -78,6 +82,13 @@ export class ToolAuthHandler {
 
     if (existingCredential) {
       return {state: 'done', authCredential: existingCredential};
+    }
+
+    if (hasMissingOAuth2Endpoints(this.authScheme)) {
+      // A blank endpoint is recoverable when the scheme names an issuer. A
+      // failed discovery is not fatal here: the downstream endpoint checks
+      // report it.
+      await populateAuthScheme(this.authScheme);
     }
 
     const authConfig: AuthConfig = {
