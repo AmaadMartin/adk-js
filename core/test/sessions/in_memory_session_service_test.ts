@@ -882,4 +882,158 @@ describe('InMemorySessionService', () => {
       expect(session?.id).toBe('poc_sid');
     });
   });
+
+  describe('null-prototype state on returned sessions', () => {
+    const clearPollution = () => {
+      delete (Object.prototype as Record<string, unknown>)['isAdmin'];
+    };
+
+    beforeEach(clearPollution);
+    afterEach(clearPollution);
+
+    const parseInitialState = (json: string): Record<string, unknown> =>
+      JSON.parse(json) as Record<string, unknown>;
+
+    it('createSession returns a null-prototype state map', async () => {
+      const session = await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+        state: {name: 'Alice'},
+      });
+
+      expect(Object.getPrototypeOf(session.state)).toBeNull();
+      expect(session.state['name']).toBe('Alice');
+    });
+
+    it('createSession returns a null-prototype state map without an initial state', async () => {
+      const session = await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      expect(Object.getPrototypeOf(session.state)).toBeNull();
+    });
+
+    it('getSession returns a null-prototype state map', async () => {
+      await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+        state: {name: 'Alice'},
+      });
+
+      const session = await service.getSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      expect(Object.getPrototypeOf(session!.state)).toBeNull();
+      expect(session!.state['name']).toBe('Alice');
+    });
+
+    it('does not expose inherited members on the returned state', async () => {
+      await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+        state: {name: 'Alice'},
+      });
+
+      const session = await service.getSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      expect('toString' in session!.state).toBe(false);
+      expect(session!.state['constructor']).toBeUndefined();
+    });
+
+    it('round-trips an own __proto__ key in the initial state', async () => {
+      await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+        state: parseInitialState(
+          '{"__proto__": {"isAdmin": true}, "foo": "bar"}',
+        ),
+      });
+
+      const session = await service.getSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      expect(session!.state['foo']).toBe('bar');
+      expect(
+        Object.getOwnPropertyDescriptor(session!.state, '__proto__')?.value,
+      ).toEqual({isAdmin: true});
+      expect(Object.getPrototypeOf(session!.state)).toBeNull();
+      expect(({} as Record<string, unknown>)['isAdmin']).toBeUndefined();
+    });
+
+    it('keeps app: and user: state merged into the null-prototype map', async () => {
+      const session = await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+        state: {name: 'Alice'},
+      });
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({
+            stateDelta: {
+              [`${State.APP_PREFIX}theme`]: 'dark',
+              [`${State.USER_PREFIX}locale`]: 'en-GB',
+            },
+          }),
+        }),
+      });
+
+      const stored = await service.getSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      expect(stored!.state).toEqual({
+        name: 'Alice',
+        [`${State.APP_PREFIX}theme`]: 'dark',
+        [`${State.USER_PREFIX}locale`]: 'en-GB',
+      });
+      expect(Object.getPrototypeOf(stored!.state)).toBeNull();
+    });
+
+    it('leaves the returned stateDelta as an ordinary object', async () => {
+      // Deliberate: only the state map is null-prototype, not the delta.
+      const session = await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({stateDelta: {name: 'Alice'}}),
+        }),
+      });
+
+      const stored = await service.getSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      expect(Object.getPrototypeOf(stored!.events[0].actions.stateDelta)).toBe(
+        Object.prototype,
+      );
+    });
+  });
 });
