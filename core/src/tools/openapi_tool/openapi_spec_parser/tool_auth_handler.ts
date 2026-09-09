@@ -8,6 +8,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {BaseCredentialExchanger} from '../../../auth/exchanger/base_credential_exchanger.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -45,11 +46,17 @@ class ToolContextCredentialStore {
 
 @experimental
 export class ToolAuthHandler {
+  /**
+   * @param credentialExchanger - Exchanges the credential before the tool
+   *   call. Defaults to {@link AutoAuthCredentialExchanger}, which picks a
+   *   built-in exchanger from the credential type.
+   */
   constructor(
     private readonly context: Context,
     private readonly authScheme?: OpenAPIV3.SecuritySchemeObject,
     private readonly authCredential?: AuthCredential,
     private readonly credentialKey?: string,
+    private readonly credentialExchanger: BaseCredentialExchanger = new AutoAuthCredentialExchanger(),
   ) {}
 
   @experimental
@@ -57,13 +64,17 @@ export class ToolAuthHandler {
     context: Context,
     authScheme?: OpenAPIV3.SecuritySchemeObject,
     authCredential?: AuthCredential,
-    options: {credentialKey?: string} = {},
+    options: {
+      credentialKey?: string;
+      credentialExchanger?: BaseCredentialExchanger;
+    } = {},
   ): ToolAuthHandler {
     return new ToolAuthHandler(
       context,
       authScheme,
       authCredential,
       options.credentialKey,
+      options.credentialExchanger,
     );
   }
 
@@ -101,8 +112,7 @@ export class ToolAuthHandler {
       return {state: 'pending'};
     }
 
-    const exchanger = new AutoAuthCredentialExchanger();
-    const result = await exchanger.exchange({
+    const result = await this.credentialExchanger.exchange({
       authScheme: this.authScheme,
       authCredential: credential,
     });

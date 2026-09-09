@@ -118,6 +118,7 @@ export type {
   BaseCredentialExchanger,
   ExchangeResult,
 } from './auth/exchanger/base_credential_exchanger.js';
+export {CredentialExchangerRegistry} from './auth/exchanger/credential_exchanger_registry.js';
 export {OAuth2CredentialExchanger} from './auth/oauth2/oauth2_credential_exchanger.js';
 export {OAuth2DiscoveryManager} from './auth/oauth2/oauth2_discovery.js';
 export type {BaseCredentialRefresher} from './auth/refresher/base_credential_refresher.js';
@@ -375,6 +376,7 @@ export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
+export {AutoAuthCredentialExchanger} from './tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
   OperationEndpoint,
