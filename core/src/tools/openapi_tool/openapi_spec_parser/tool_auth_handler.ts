@@ -31,22 +31,17 @@ REFRESHER_REGISTRY.register(
 );
 
 /**
- * Returns a refreshed copy of the credential, or the credential itself when no
- * refresher is registered for its type or its token is still valid.
+ * Returns a refreshed copy of the credential. Returns the credential itself
+ * when no refresher is registered for its type, when the token is still valid,
+ * or when the refresh fails.
  */
 async function refreshIfNeeded(
   credential: AuthCredential,
   authScheme: AuthScheme,
 ): Promise<AuthCredential> {
   const refresher = REFRESHER_REGISTRY.getRefresher(credential.authType);
-  if (
-    !refresher ||
-    !(await refresher.isRefreshNeeded(credential, authScheme))
-  ) {
-    return credential;
-  }
 
-  return refresher.refresh(credential, authScheme);
+  return refresher ? refresher.refresh(credential, authScheme) : credential;
 }
 
 class ToolContextCredentialStore {
