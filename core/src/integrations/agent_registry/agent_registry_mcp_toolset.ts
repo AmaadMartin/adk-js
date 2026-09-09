@@ -126,6 +126,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
         {...tool, name: prefixedName},
         sessionManager,
         tool.name,
+        {authScheme: this.authScheme, authCredential: this.authCredential},
       );
 
       // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
