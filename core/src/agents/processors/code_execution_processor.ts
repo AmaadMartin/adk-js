@@ -60,9 +60,16 @@ export class CodeExecutionRequestProcessor extends BaseLlmRequestProcessor {
     }
 
     for (const content of llmRequest.contents) {
+      // An executor may declare no delimiters. The list keeps one empty pair
+      // so the selector always has a pair to fall back to.
+      const delimiters: Array<[string, string]> = invocationContext.agent
+        .codeExecutor.codeBlockDelimiters.length
+        ? invocationContext.agent.codeExecutor.codeBlockDelimiters
+        : [['', '']];
+
       convertCodeExecutionParts(
         content,
-        invocationContext.agent.codeExecutor.codeBlockDelimiters,
+        delimiters,
         invocationContext.agent.codeExecutor.executionResultDelimiters,
       );
     }
