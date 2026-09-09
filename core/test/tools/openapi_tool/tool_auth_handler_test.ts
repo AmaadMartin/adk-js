@@ -8,6 +8,7 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  InvocationContext,
   ToolAuthHandler,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
@@ -291,8 +292,14 @@ describe('ToolAuthHandler', () => {
       };
     }
 
-    function contextWith(state: State): Context {
-      return {state} as unknown as Context;
+    function contextFor(sessionState: Record<string, unknown>): Context {
+      // A real Context, so the credential write-back lands in the event's
+      // state delta the same way it does in a live run.
+      return new Context({
+        invocationContext: {
+          session: {state: sessionState},
+        } as unknown as InvocationContext,
+      });
     }
 
     afterEach(() => {
@@ -312,10 +319,12 @@ describe('ToolAuthHandler', () => {
       );
       vi.stubGlobal('fetch', fetchMock);
 
-      const state = new State({[CACHE_KEY]: oauth2Credential(Date.now() - 1)});
+      const context = contextFor({
+        [CACHE_KEY]: oauth2Credential(Date.now() - 1),
+      });
 
       const result = await new ToolAuthHandler(
-        contextWith(state),
+        context,
         OAUTH2_SCHEME,
       ).prepareAuthCredentials();
 
@@ -324,12 +333,11 @@ describe('ToolAuthHandler', () => {
       expect(result.authCredential?.oauth2?.refreshToken).toBe(
         'new-refresh-token',
       );
-      // The refreshed credential is persisted, so the next tool call in this
-      // session reuses it instead of refreshing again.
-      expect(state.get<AuthCredential>(CACHE_KEY)?.oauth2?.accessToken).toBe(
-        'fresh-token',
+      // The refreshed credential reaches the state delta, so it is persisted
+      // and the next tool call in this session reuses it.
+      expect(context.eventActions.stateDelta[CACHE_KEY]).toBe(
+        result.authCredential,
       );
-      expect(state.hasDelta()).toBe(true);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [endpoint, init] = fetchMock.mock.calls[0];
@@ -350,16 +358,16 @@ describe('ToolAuthHandler', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       const live = oauth2Credential(Date.now() + 3_600_000);
-      const state = new State({[CACHE_KEY]: live});
+      const context = contextFor({[CACHE_KEY]: live});
 
       const result = await new ToolAuthHandler(
-        contextWith(state),
+        context,
         OAUTH2_SCHEME,
       ).prepareAuthCredentials();
 
       expect(result.authCredential).toBe(live);
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(state.hasDelta()).toBe(false);
+      expect(context.eventActions.stateDelta).toEqual({});
     });
 
     it('leaves a cached non-OAuth2 credential alone', async () => {
@@ -373,16 +381,16 @@ describe('ToolAuthHandler', () => {
         authType: AuthCredentialTypes.HTTP,
         http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
       };
-      const state = new State({[CACHE_KEY]: bearer});
+      const context = contextFor({[CACHE_KEY]: bearer});
 
       const result = await new ToolAuthHandler(
-        contextWith(state),
+        context,
         OAUTH2_SCHEME,
       ).prepareAuthCredentials();
 
       expect(result.authCredential).toBe(bearer);
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(state.hasDelta()).toBe(false);
+      expect(context.eventActions.stateDelta).toEqual({});
     });
 
     it('returns the stale credential when the token endpoint fails', async () => {
@@ -392,10 +400,10 @@ describe('ToolAuthHandler', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       const stale = oauth2Credential(Date.now() - 1);
-      const state = new State({[CACHE_KEY]: stale});
+      const context = contextFor({[CACHE_KEY]: stale});
 
       const result = await new ToolAuthHandler(
-        contextWith(state),
+        context,
         OAUTH2_SCHEME,
       ).prepareAuthCredentials();
 
@@ -403,7 +411,7 @@ describe('ToolAuthHandler', () => {
       expect(result.state).toBe('done');
       expect(result.authCredential).toBe(stale);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(state.hasDelta()).toBe(false);
+      expect(context.eventActions.stateDelta).toEqual({});
     });
 
     it('returns the stale credential when the credential has no refresh token', async () => {
@@ -419,16 +427,16 @@ describe('ToolAuthHandler', () => {
           expiresAt: Date.now() - 1,
         },
       };
-      const state = new State({[CACHE_KEY]: stale});
+      const context = contextFor({[CACHE_KEY]: stale});
 
       const result = await new ToolAuthHandler(
-        contextWith(state),
+        context,
         OAUTH2_SCHEME,
       ).prepareAuthCredentials();
 
       expect(result.authCredential).toBe(stale);
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(state.hasDelta()).toBe(false);
+      expect(context.eventActions.stateDelta).toEqual({});
     });
   });
 });
