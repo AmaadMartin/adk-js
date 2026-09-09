@@ -221,6 +221,27 @@ export const rootAgent = new LlmAgent({
 `tools` accepts a `ToolUnion`, which is a `BaseTool`, a `BaseToolset`, or a
 `BaseNode`, so a tool instance, a toolset, and a node all go in the same array.
 
+### Keep fixtures out of `agent.ts`
+
+A spec, a corpus, a document the sample reads: put it in its own file beside the
+agent and load it, rather than pasting it into a template literal.
+
+```ts
+const SPEC = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), 'httpbin_spec.yaml'),
+  'utf8',
+);
+```
+
+Two reasons, and the first is the one review raised. A fixture inlined at the
+top of the file stands in front of the sample's subject — the openapi_tool
+sample opened with sixty lines of YAML, so a reader scrolling for the
+`OpenAPIToolset` call read the whole httpbin document first. And loading a file
+is what a caller actually does; they are handed a document, not a string baked
+into their source.
+
+A handful of lines is fine inline. A screenful is not.
+
 ## 3. Register the sample
 
 Add a row to the category `README.md`, following
