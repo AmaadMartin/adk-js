@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isCancel, select, text} from '@clack/prompts';
+import {isCancel, password, select, text} from '@clack/prompts';
 import {execSync} from 'node:child_process';
 import {
   afterEach,
@@ -27,6 +27,7 @@ import {
 
 vi.mock('@clack/prompts', () => ({
   isCancel: vi.fn(),
+  password: vi.fn(),
   select: vi.fn(),
   text: vi.fn(),
 }));
@@ -167,7 +168,7 @@ describe('createAgent', () => {
       (select as Mock).mockResolvedValueOnce('gemini-2.5-pro'); // Model
       (select as Mock).mockResolvedValueOnce('ts'); // Language
       (select as Mock).mockResolvedValueOnce('googleai'); // Backend
-      (text as Mock).mockResolvedValueOnce('test-key'); // API Key
+      (password as Mock).mockResolvedValueOnce('test-key'); // API Key
 
       await createAgent(getFreshOptions());
 
@@ -195,7 +196,7 @@ describe('createAgent', () => {
       (select as Mock).mockResolvedValueOnce('gemini-2.5-flash');
       (select as Mock).mockResolvedValueOnce('js');
       (select as Mock).mockResolvedValueOnce('googleai');
-      (text as Mock).mockResolvedValueOnce('test-key');
+      (password as Mock).mockResolvedValueOnce('test-key');
 
       await createAgent(getFreshOptions());
 
@@ -283,6 +284,61 @@ describe('createAgent', () => {
 
       expect(saveToFile).not.toHaveBeenCalled();
     });
+
+    it('should collect the API key through a masked prompt', async () => {
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash'); // Model
+      (select as Mock).mockResolvedValueOnce('ts'); // Language
+      (select as Mock).mockResolvedValueOnce('googleai'); // Backend
+      (password as Mock).mockResolvedValueOnce('secret-key'); // API Key
+
+      await createAgent(getFreshOptions());
+
+      expect(password).toHaveBeenCalledWith(
+        expect.objectContaining({message: 'Enter the Google API Key'}),
+      );
+      expect(text).not.toHaveBeenCalledWith(
+        expect.objectContaining({message: 'Enter the Google API Key'}),
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_GENAI_API_KEY=secret-key'),
+      );
+    });
+
+    it('should exit without writing files if the API key prompt is cancelled', async () => {
+      // Mirror clack's contract: only the raw cancel symbol counts as a cancel.
+      vi.mocked(isCancel).mockImplementation(
+        (value: unknown): value is symbol => typeof value === 'symbol',
+      );
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash'); // Model
+      (select as Mock).mockResolvedValueOnce('ts'); // Language
+      (select as Mock).mockResolvedValueOnce('googleai'); // Backend
+      (password as Mock).mockResolvedValueOnce(Symbol('clack:cancel'));
+
+      await expect(createAgent(getFreshOptions())).rejects.toThrow(
+        /process\.exit/,
+      );
+
+      expect(saveToFile).not.toHaveBeenCalled();
+    });
+
+    it('should keep the Vertex project and region prompts unmasked', async () => {
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash'); // Model
+      (select as Mock).mockResolvedValueOnce('ts'); // Language
+      (select as Mock).mockResolvedValueOnce('vertex'); // Backend
+      (text as Mock).mockResolvedValueOnce('my-project');
+      (text as Mock).mockResolvedValueOnce('my-region');
+
+      await createAgent(getFreshOptions());
+
+      expect(text).toHaveBeenCalledWith(
+        expect.objectContaining({message: 'Enter the Google Cloud Project ID'}),
+      );
+      expect(text).toHaveBeenCalledWith(
+        expect.objectContaining({message: 'Enter the Google Cloud Region'}),
+      );
+      expect(password).not.toHaveBeenCalled();
+    });
   });
 
   describe('Folder Handling', () => {
@@ -294,7 +350,7 @@ describe('createAgent', () => {
       (select as Mock).mockResolvedValue('gemini-2.5-flash');
       (select as Mock).mockResolvedValue('ts');
       (select as Mock).mockResolvedValue('googleai');
-      (text as Mock).mockResolvedValue('key');
+      (password as Mock).mockResolvedValue('key');
 
       await createAgent(getFreshOptions());
 
