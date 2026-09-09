@@ -551,5 +551,135 @@ describe('remote_agent_utils', () => {
       expect(dumped).toContain('get_weather');
       expect(dumped).toContain('Pimpri');
     });
+
+    it('drops a partial AuthConfig that names only one credential field', () => {
+      // Fail-closed: one AuthConfig top-level key is enough. The previous
+      // rule needed authScheme AND a credential field, so this shape was
+      // forwarded unredacted.
+      const partialResponse = createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'fc-1',
+                name: 'some_other_tool_name',
+                response: {
+                  exchangedAuthCredential: {
+                    oauth2: {accessToken: 'PARTIAL_SHAPE_SECRET'},
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      const session = {events: [partialResponse]} as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      expect(JSON.stringify(result.parts)).not.toContain(
+        'PARTIAL_SHAPE_SECRET',
+      );
+    });
+
+    it('drops an AuthConfig wrapped in a single-key result envelope', () => {
+      const wrappedResponse = createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'fc-1',
+                name: 'some_other_tool_name',
+                response: {
+                  result: {
+                    authScheme: {type: 'oauth2'},
+                    exchangedAuthCredential: {
+                      oauth2: {accessToken: 'WRAPPED_SECRET'},
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      const session = {events: [wrappedResponse]} as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      expect(JSON.stringify(result.parts)).not.toContain('WRAPPED_SECRET');
+    });
+
+    it('keeps an ordinary call that takes an authScheme argument', () => {
+      // The probe reads the AuthConfig one level down, under `authConfig`, so
+      // a tool whose own arguments happen to be named `authScheme` survives.
+      const ordinaryCall = createEvent({
+        author: 'root_agent',
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'fc-1',
+                name: 'describe_scheme',
+                args: {authScheme: 'oauth2', label: 'KEEP_ME'},
+              },
+            },
+          ],
+        },
+      });
+
+      const session = {events: [ordinaryCall]} as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      expect(JSON.stringify(result.parts)).toContain('KEEP_ME');
+    });
+
+    it('keeps a call that carries no arguments at all', () => {
+      const noArgsCall = createEvent({
+        author: 'root_agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: 'fc-1', name: 'NO_ARGS_KEPT'}}],
+        },
+      });
+
+      const session = {events: [noArgsCall]} as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      expect(JSON.stringify(result.parts)).toContain('NO_ARGS_KEPT');
+    });
+
+    it('keeps a response whose result envelope holds a plain value', () => {
+      const plainResponse = createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'fc-1',
+                name: 'get_weather',
+                response: {result: 'SUNNY_IN_PIMPRI'},
+              },
+            },
+          ],
+        },
+      });
+
+      const session = {events: [plainResponse]} as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      expect(JSON.stringify(result.parts)).toContain('SUNNY_IN_PIMPRI');
+    });
   });
 });

@@ -104,6 +104,7 @@ export type {
   ServiceAccountCredential,
 } from './auth/auth_credential.js';
 export {AuthHandler} from './auth/auth_handler.js';
+export {buildAuthHeaders} from './auth/auth_headers.js';
 export {AUTH_PREPROCESSOR, AuthPreprocessor} from './auth/auth_preprocessor.js';
 export {AuthProviderRegistry} from './auth/auth_provider_registry.js';
 export {OAuthGrantType} from './auth/auth_schemes.js';
@@ -344,6 +345,13 @@ export type {
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {
+  QUOTED_CONTENT_BEGIN,
+  QUOTED_CONTENT_ELIDED,
+  QUOTED_CONTENT_END,
+  elideQuoteMarkers,
+  quoteUntrusted,
+} from './utils/fencing_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';

@@ -108,45 +108,51 @@ export function getFunctionResponseCallId(event: AdkEvent): string | undefined {
 // Top-level keys of a serialized AuthConfig that indicate credential
 // material, the shape an adk_request_credential call's arguments (one level
 // down, under `authConfig`) and its response (flat) both carry.
-const AUTH_CONFIG_SCHEME_KEY = 'authScheme';
-const AUTH_CONFIG_CREDENTIAL_KEYS: ReadonlyArray<string> = [
-  // camelCase only by design: callers normalise the payload with
-  // camelCaseKeys() before these keys are looked up, so the snake_case
-  // spellings (raw_auth_credential, exchanged_auth_credential) are covered.
+//
+// camelCase only by design: callers normalise the payload with camelCaseKeys()
+// before these keys are looked up, so the snake_case spellings
+// (auth_scheme, raw_auth_credential, exchanged_auth_credential) are covered.
+const AUTH_CONFIG_KEYS: ReadonlyArray<string> = [
+  'authScheme',
   'rawAuthCredential',
   'exchangedAuthCredential',
 ];
 
-/**
- * Whether `payload` looks like a serialized AuthConfig carrying credential
- * material. Requires `authScheme` plus at least one credential-bearing
- * field, rather than requiring every field AuthConfig's type declares --
- * a config read back off a function call's args can arrive missing fields
- * its type promises (see credential_response_binding.ts), so requiring all
- * of them would leave a gap for an incomplete-but-still-credential-bearing
- * envelope.
- *
- * NOTE: this check is fail-OPEN, not fail-closed: a payload that doesn't
- * match is forwarded unredacted, not dropped. Ambiguous input is treated as
- * safe to forward, which is the direction that risks a leak, not the
- * direction that risks over-dropping legitimate content.
- */
-function payloadIsAuthConfig(payload: unknown): boolean {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return false;
-  }
-  const keys = new Set(Object.keys(payload as Record<string, unknown>));
-  if (!keys.has(AUTH_CONFIG_SCHEME_KEY)) {
-    return false;
-  }
-  return AUTH_CONFIG_CREDENTIAL_KEYS.some((key) => keys.has(key));
-}
+/** The key a mock human-input payload wraps its single value under. */
+const RESULT_KEY = 'result';
 
 /**
- * Whether a function_call carries credential material.
+ * Whether `payload` looks like a serialized AuthConfig carrying credential
+ * material.
  *
- * NOTE: fail-open, as above -- an ambiguous call is left unscrubbed.
+ * Fail-closed: any one of the AuthConfig top-level keys is enough. A config
+ * read back off a function call's args can arrive missing fields its type
+ * promises (see credential_response_binding.ts), so requiring a combination
+ * would leave a gap for an incomplete-but-still-credential-bearing envelope.
+ * Mirrors `_payload_is_auth_config` in `google/adk-python`.
  */
+function payloadIsAuthConfig(payload: unknown): boolean {
+  const candidate = unwrapResult(payload);
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return false;
+  }
+  const keys = new Set(Object.keys(candidate as Record<string, unknown>));
+  return AUTH_CONFIG_KEYS.some((key) => keys.has(key));
+}
+
+/** Unwraps a single-key `{result: value}` envelope, if that is what it is. */
+function unwrapResult(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const entries = Object.entries(payload as Record<string, unknown>);
+  if (entries.length === 1 && entries[0][0] === RESULT_KEY) {
+    return entries[0][1];
+  }
+  return payload;
+}
+
+/** Whether a function_call carries credential material (fail closed). */
 function isCredentialFunctionCall(functionCall: {
   name?: string;
   args?: unknown;
@@ -168,11 +174,7 @@ function isCredentialFunctionCall(functionCall: {
   return payloadIsAuthConfig(authConfig);
 }
 
-/**
- * Whether a function_response carries credential material.
- *
- * NOTE: fail-open, as above -- an ambiguous response is left unscrubbed.
- */
+/** Whether a function_response carries credential material (fail closed). */
 function isCredentialFunctionResponse(functionResponse: {
   name?: string;
   response?: unknown;
