@@ -5,9 +5,27 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {camelCaseKeys, snakeCase} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
+  describe('snakeCase', () => {
+    it.each([
+      ['camelCase', 'camel_case'],
+      ['UpperCamelCase', 'upper_camel_case'],
+      ['space separated', 'space_separated'],
+      ['REST API', 'rest_api'],
+      ['RESTApiCall', 'rest_api_call'],
+      ['X-Trace-Id', 'x_trace_id'],
+      ['already_snake', 'already_snake'],
+      ['with2Digits', 'with2_digits'],
+      ['--leading--', 'leading'],
+      ['_a__b_', 'a_b'],
+      ['', ''],
+    ])('should convert %s to %s', (input, expected) => {
+      expect(snakeCase(input)).toBe(expected);
+    });
+  });
+
   describe('camelCaseKeys', () => {
     it('should convert simple object keys', () => {
       const input = {

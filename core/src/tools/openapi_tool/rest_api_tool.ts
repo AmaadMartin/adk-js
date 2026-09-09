@@ -11,11 +11,9 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {ApiParameter} from './api_parameter.js';
 import {applyCredential} from './auth/auth_helpers.js';
-import {
-  ApiParameter,
-  OperationParser,
-} from './openapi_spec_parser/operation_parser.js';
+import {OperationParser} from './openapi_spec_parser/operation_parser.js';
 import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';

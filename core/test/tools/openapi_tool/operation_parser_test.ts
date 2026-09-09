@@ -93,3 +93,124 @@ describe('OperationParser', () => {
     expect(schema.title).toBe('testOp_Arguments');
   });
 });
+
+describe('OperationParser naming', () => {
+  function parseWithParameter(name: string): string {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [{name, in: 'query', schema: {type: 'string'}}],
+      responses: {},
+    };
+    return new OperationParser(op).getParameters()[0].name;
+  }
+
+  it.each([
+    ['petId', 'pet_id'],
+    ['X-Trace-Id', 'x_trace_id'],
+    ['RESTApiCall', 'rest_api_call'],
+    ['already_snake', 'already_snake'],
+  ])('should name the parameter %s as %s', (original, expected) => {
+    expect(parseWithParameter(original)).toBe(expected);
+  });
+
+  it('should keep the original parameter name when asked to preserve it', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [
+        {name: 'X-Trace-Id', in: 'header', schema: {type: 'string'}},
+      ],
+      responses: {},
+    };
+
+    const parser = new OperationParser(op, {preservePropertyNames: true});
+
+    expect(parser.getParameters()[0].name).toBe('X-Trace-Id');
+  });
+
+  it.each([
+    ['findPetsByStatus', 'find_pets_by_status'],
+    ['RESTApiCall', 'rest_api_call'],
+  ])('should name the function for %s as %s', (operationId, expected) => {
+    const op: OpenAPIV3.OperationObject = {operationId, responses: {}};
+
+    expect(new OperationParser(op).getFunctionName()).toBe(expected);
+  });
+
+  it('should keep the operation id when asked to preserve names', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'RESTApiCall',
+      responses: {},
+    };
+
+    const parser = new OperationParser(op, {preservePropertyNames: true});
+
+    expect(parser.getFunctionName()).toBe('RESTApiCall');
+  });
+
+  it('should name a request body property', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {petName: {type: 'string'}},
+              required: ['petName'],
+            },
+          },
+        },
+      },
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params[0].name).toBe('pet_name');
+    expect(params[0].required).toBe(true);
+  });
+
+  it('should treat a parameter with no schema as unconstrained', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [{name: 'petId', in: 'query'}],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params[0].paramSchema).toEqual({});
+  });
+
+  it('should treat a boolean parameter schema as unconstrained', () => {
+    // JSON Schema allows a boolean where OpenAPI 3.0's typings require an
+    // object, and a parsed document can carry one.
+    const booleanSchema = true as unknown as OpenAPIV3.SchemaObject;
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [{name: 'petId', in: 'query', schema: booleanSchema}],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params[0].name).toBe('pet_id');
+    expect(params[0].paramSchema).toEqual({});
+  });
+
+  it('should keep every parameter when one schema is a dangling reference', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [
+        {name: 'broken', in: 'query', schema: {$ref: '#/components/x'}},
+        {name: 'petId', in: 'query', schema: {type: 'string'}},
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params.map((param) => param.name)).toEqual(['broken', 'pet_id']);
+    expect(params[0].paramSchema).toEqual({});
+  });
+});
