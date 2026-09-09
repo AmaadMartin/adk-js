@@ -5,13 +5,13 @@
  */
 import {GenerateContentConfig} from '@google/genai';
 
-import {isGemini2OrAbove, isGeminiModel} from '../utils/model_name.js';
+import {isGeminiModel} from '../utils/model_name.js';
 
 import {ToolProcessLlmRequest} from './base_tool.js';
 import {BuiltInTool} from './built_in_tool.js';
 
 /**
- * A built-in tool that allows Gemini 2+ models to retrieve content from URLs
+ * A built-in tool that allows Gemini models to retrieve content from URLs
  * provided in the conversation.
  *
  * This tool operates internally within the model and does not require or
@@ -32,12 +32,6 @@ export class UrlContextTool extends BuiltInTool {
     if (!isGeminiModel(llmRequest.model)) {
       throw new Error(
         `URL context tool is not supported for model ${llmRequest.model}`,
-      );
-    }
-
-    if (!isGemini2OrAbove(llmRequest.model)) {
-      throw new Error(
-        `URL context tool requires Gemini 2 or above, but got ${llmRequest.model}`,
       );
     }
 
