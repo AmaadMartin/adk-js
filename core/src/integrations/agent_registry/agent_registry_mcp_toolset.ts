@@ -36,6 +36,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
   ) => Promise<Record<string, string>> | Record<string, string>;
   readonly authScheme?: AuthScheme;
   readonly authCredential?: AuthCredential;
+  readonly credentialKey?: string;
 
   /**
    * @param options - Configuration for the MCP toolset.
@@ -49,6 +50,10 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
    *   {@link getTools} invocation to supply or refresh request headers (e.g. GCP auth tokens).
    * @param options.authScheme - Optional auth scheme forwarded to each resolved tool.
    * @param options.authCredential - Optional credential forwarded to each resolved tool.
+   * @param options.credentialKey - Optional namespace for the credential the
+   *   resolved tools request and cache. Set it when one agent reaches two MCP
+   *   servers that share an auth scheme type, so their tokens do not share a
+   *   session-state slot.
    */
   constructor(options: {
     destinationResourceId?: string;
@@ -60,6 +65,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     ) => Promise<Record<string, string>> | Record<string, string>;
     authScheme?: AuthScheme;
     authCredential?: AuthCredential;
+    credentialKey?: string;
   }) {
     super(options.toolFilter || [], options.prefix);
     this.destinationResourceId = options.destinationResourceId;
@@ -67,6 +73,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     this.headerProvider = options.headerProvider;
     this.authScheme = options.authScheme;
     this.authCredential = options.authCredential;
+    this.credentialKey = options.credentialKey;
   }
 
   /**
@@ -126,7 +133,11 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
         {...tool, name: prefixedName},
         sessionManager,
         tool.name,
-        {authScheme: this.authScheme, authCredential: this.authCredential},
+        {
+          authScheme: this.authScheme,
+          authCredential: this.authCredential,
+          credentialKey: this.credentialKey,
+        },
       );
 
       // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
