@@ -194,6 +194,36 @@ export function generateRequestConfirmationEvent({
   });
 }
 
+/**
+ * The error type a tool reports for its own response, for telemetry only.
+ *
+ * Detection is skipped while the tool is asking for credentials or for
+ * confirmation, because such a response carries an `error` key without the
+ * tool having failed. A detector that throws is logged and treated as "no
+ * error type", so telemetry can never break a tool call.
+ */
+function detectErrorTypeForTelemetry(
+  tool: BaseTool,
+  toolContext: Context,
+  response: unknown,
+): string | undefined {
+  if (
+    !isEmpty(toolContext.actions.requestedAuthConfigs) ||
+    !isEmpty(toolContext.actions.requestedToolConfirmations)
+  ) {
+    return undefined;
+  }
+  try {
+    return tool.detectErrorInResponse?.(response);
+  } catch (error) {
+    logger.error(
+      `Error while detecting the error type of tool '${tool.name}'.`,
+      error,
+    );
+    return undefined;
+  }
+}
+
 async function callToolAsync(
   tool: BaseTool,
   args: Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -213,6 +243,7 @@ async function callToolAsync(
           toolContext,
           toolContext.invocationContext,
         ),
+        errorType: detectErrorTypeForTelemetry(tool, toolContext, result),
       });
       return result;
     } finally {
