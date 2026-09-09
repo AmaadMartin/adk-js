@@ -133,6 +133,13 @@ export class GeminiLlmConnection implements BaseLlmConnection {
   }
 
   /**
+   * Sends an audio stream end signal to the model.
+   */
+  async sendAudioStreamEnd(): Promise<void> {
+    this.geminiSession.sendRealtimeInput({audioStreamEnd: true});
+  }
+
+  /**
    * Builds a full text response.
    *
    * The text should not be partial and the returned LlmResponse is not be

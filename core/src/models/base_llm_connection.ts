@@ -57,6 +57,12 @@ export interface BaseLlmConnection {
   sendActivityEnd?(): Promise<void>;
 
   /**
+   * Optionally signals that the audio input stream has ended (e.g. the
+   * microphone was switched off) so the model flushes buffered audio.
+   */
+  sendAudioStreamEnd?(): Promise<void>;
+
+  /**
    * Receives the model response using the llm server connection.
    *
    * @return A generator of LlmResponse.
