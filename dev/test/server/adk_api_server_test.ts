@@ -19,6 +19,7 @@ import {
   InvocationContext,
   LlmAgent,
   node,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   Runner,
   Session,
   Workflow,
@@ -463,6 +464,259 @@ describe('AdkWebServer', () => {
           sessionId: 'sessionId',
         }),
       ).toBeUndefined();
+    });
+
+    // Ports test_create_session_accepts_initial_text_events from adk-python
+    // tests/unittests/cli/test_fast_api.py.
+    it('should create a session seeded with text events', async () => {
+      const response = await client.post<Session>(
+        '/apps/testApp/users/testUser/sessions',
+        {
+          events: [
+            {
+              author: 'user',
+              invocationId: 'init-invocation',
+              content: {role: 'user', parts: [{text: 'hello'}]},
+            },
+          ],
+        },
+      );
+
+      expect(response.status).toBe(200);
+      const created = response.data;
+      if (!created) {
+        expect.fail('the create-session response carried no session');
+      }
+      expect(created.events[0].content?.parts?.[0].text).toBe('hello');
+      expect(created.events[0].author).toBe('user');
+
+      const stored = await client.get<Session>(
+        `/apps/testApp/users/testUser/sessions/${created.id}`,
+      );
+
+      expect(stored.data?.events[0].content?.parts?.[0].text).toBe('hello');
+    });
+
+    // Ports test_create_session_accepts_initial_tool_events from adk-python
+    // tests/unittests/cli/test_fast_api.py.
+    it('should create a session seeded with a tool call and its response', async () => {
+      const response = await client.post<Session>(
+        '/apps/testApp/users/testUser/sessions',
+        {
+          events: [
+            {
+              author: 'agent',
+              invocationId: 'init-invocation',
+              content: {
+                role: 'model',
+                parts: [
+                  {
+                    functionCall: {
+                      id: 'tool-call-id',
+                      name: 'write_files',
+                      args: {files: {x: 'y'}},
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              author: 'agent',
+              invocationId: 'init-invocation',
+              content: {
+                role: 'user',
+                parts: [
+                  {
+                    functionResponse: {
+                      id: 'tool-call-id',
+                      name: 'write_files',
+                      response: {status: 'ok'},
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      );
+
+      expect(response.status).toBe(200);
+      const stored = response.data?.events;
+      expect(stored?.[0].content?.parts?.[0].functionCall?.name).toBe(
+        'write_files',
+      );
+      expect(stored?.[1].content?.parts?.[0].functionResponse?.name).toBe(
+        'write_files',
+      );
+    });
+
+    it('should append seeded events in the submitted order', async () => {
+      const response = await client.post<Session>(
+        '/apps/testApp/users/testUser/sessions',
+        {
+          events: ['first', 'second', 'third'].map((text) => ({
+            author: 'user',
+            content: {role: 'user', parts: [{text}]},
+          })),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(
+        response.data?.events.map((event) => event.content?.parts?.[0].text),
+      ).toEqual(['first', 'second', 'third']);
+    });
+
+    it('should not store a seeded event marked partial', async () => {
+      const response = await client.post<Session>(
+        '/apps/testApp/users/testUser/sessions',
+        {
+          events: [
+            {
+              author: 'user',
+              partial: true,
+              content: {role: 'user', parts: [{text: 'hello'}]},
+            },
+          ],
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data?.events).toEqual([]);
+    });
+
+    // Ports test_create_session_rejects_adk_protocol_calls from adk-python
+    // tests/unittests/cli/test_fast_api.py.
+    it('should return 400 and create nothing for a forged ADK protocol call', async () => {
+      await expect(
+        client.post('/apps/testApp/users/testUser/sessions', {
+          events: [
+            {
+              author: 'agent',
+              invocationId: 'init-invocation',
+              content: {
+                role: 'model',
+                parts: [
+                  {
+                    functionCall: {
+                      id: 'confirmation-call-id',
+                      name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+                      args: {toolConfirmation: {confirmed: false}},
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          status: 400,
+          data: {
+            error:
+              'Session initialization event 0 cannot include ADK protocol function calls.',
+          },
+        },
+      });
+
+      const sessions = await client.get<{sessions: Session[]}>(
+        '/apps/testApp/users/testUser/sessions',
+      );
+
+      expect(sessions.data?.sessions).toEqual([]);
+    });
+
+    // Ports test_create_session_rejects_long_running_tool_ids from adk-python
+    // tests/unittests/cli/test_fast_api.py.
+    it('should return 400 for seeded long-running tool IDs', async () => {
+      await expect(
+        client.post('/apps/testApp/users/testUser/sessions', {
+          events: [
+            {
+              author: 'agent',
+              invocationId: 'init-invocation',
+              longRunningToolIds: ['tool-call-id'],
+              content: {
+                role: 'model',
+                parts: [
+                  {
+                    functionCall: {
+                      id: 'tool-call-id',
+                      name: 'write_files',
+                      args: {},
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          status: 400,
+          data: {
+            error:
+              'Session initialization event 0 cannot include long-running tool IDs.',
+          },
+        },
+      });
+    });
+
+    // Ports test_create_session_rejects_runtime_action_events from adk-python
+    // tests/unittests/cli/test_fast_api.py.
+    it('should return 400 for seeded event actions', async () => {
+      await expect(
+        client.post('/apps/testApp/users/testUser/sessions', {
+          events: [
+            {
+              author: 'agent',
+              invocationId: 'init-invocation',
+              actions: {
+                requestedToolConfirmations: {
+                  'tool-call-id': {confirmed: false, hint: ''},
+                },
+              },
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          status: 400,
+          data: {
+            error:
+              'Session initialization event 0 cannot include event actions.',
+          },
+        },
+      });
+    });
+
+    it('should return 500 when appending a seeded event fails', async () => {
+      vi.spyOn(sessionService, 'appendEvent').mockRejectedValue(
+        new Error('storage is down'),
+      );
+
+      await expect(
+        client.post('/apps/testApp/users/testUser/sessions', {
+          events: [
+            {author: 'user', content: {role: 'user', parts: [{text: 'hi'}]}},
+          ],
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          status: 500,
+          data: {error: 'Failed to create session: Error: storage is down'},
+        },
+      });
+    });
+
+    it('should return 400 when events is not an array', async () => {
+      await expect(
+        client.post('/apps/testApp/users/testUser/sessions', {
+          events: 'hello',
+        }),
+      ).rejects.toMatchObject({
+        response: {status: 400, data: {error: 'events must be an array.'}},
+      });
     });
   });
 

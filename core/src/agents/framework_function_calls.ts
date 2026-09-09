@@ -27,7 +27,7 @@ export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
  * function *response*; a client that writes the *call* is writing the question
  * itself.
  */
-const RESERVED_FUNCTION_CALL_NAMES: ReadonlySet<string> = new Set([
+export const RESERVED_FUNCTION_CALL_NAMES: ReadonlySet<string> = new Set([
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
