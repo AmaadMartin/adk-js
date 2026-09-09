@@ -6,8 +6,6 @@
 
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {Context} from '../../src/agents/context.js';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import {
   AgentRegistrySingleMCPToolset,
@@ -15,6 +13,7 @@ import {
 } from '../../src/index.js';
 import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
 import {logger} from '../../src/utils/logger.js';
+import {createToolContext} from '../agents/context_test_utils.js';
 
 const mockListTools = vi.fn().mockResolvedValue({
   tools: [
@@ -260,21 +259,11 @@ describe('AgentRegistrySingleMCPToolset', () => {
       });
 
       const [tool] = await toolset.getTools();
-      const invocationContext = {
-        abortSignal: new AbortController().signal,
-        session: {state: {}},
-      } as unknown as InvocationContext;
-      await tool.runAsync({
-        args: {},
-        toolContext: new Context({
-          invocationContext,
-          functionCallId: 'function-call-1',
-        }),
-      });
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
 
       expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
-        {requestInit: {headers: {Authorization: 'Bearer registry-token'}}},
+        {requestInit: {headers: {authorization: 'Bearer registry-token'}}},
       );
     });
 
@@ -286,14 +275,7 @@ describe('AgentRegistrySingleMCPToolset', () => {
       });
 
       const [tool] = await toolset.getTools();
-      const invocationContext = {
-        abortSignal: new AbortController().signal,
-        session: {state: {}},
-      } as unknown as InvocationContext;
-      const toolContext = new Context({
-        invocationContext,
-        functionCallId: 'function-call-1',
-      });
+      const toolContext = createToolContext();
       vi.spyOn(toolContext, 'getAuthResponse').mockReturnValue({
         authType: AuthCredentialTypes.HTTP,
         http: {scheme: 'bearer', credentials: {token: 'granted-token'}},

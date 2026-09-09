@@ -119,8 +119,12 @@ nothing.
 
 Headers set on `transportOptions.requestInit.headers` are still sent. The
 resolved credential is merged over them, so a header of the same name is
-replaced for that call only. The connection parameters you construct the
-toolset with are never modified.
+replaced for that call only. The match ignores capitalization, as HTTP does: a
+resolved `Authorization` replaces a configured `authorization` rather than
+being sent alongside it. Merging lowercases the names, which is how they go on
+the wire; a connection with no auth configured is passed through exactly as you
+wrote it. The connection parameters you construct the toolset with are never
+modified.
 
 ## When no credential is available
 

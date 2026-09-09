@@ -78,42 +78,14 @@ type TransportRequestInit = NonNullable<
 >;
 
 /**
- * Flattens any header shape the transport accepts into a plain record.
- *
- * A `Headers` instance and an entry array both spread to nonsense, so a
- * caller that used either would lose its headers the moment ADK merged one in.
- * A record is copied as it stands, which keeps the caller's capitalization.
- *
- * @param headers The configured headers, in any of the three shapes.
- * @return The equivalent record, or `undefined` when there are none.
- */
-function toHeaderRecord(
-  headers?: TransportRequestInit['headers'],
-): Record<string, string> | undefined {
-  if (!headers) {
-    return undefined;
-  }
-  if (Array.isArray(headers)) {
-    return Object.fromEntries(headers);
-  }
-  // A `Headers` instance keeps its entries behind an iterator rather than on
-  // the object, so it is recognised by its method instead of by `instanceof`,
-  // which fails across two copies of a package in one runtime.
-  if (typeof (headers as Headers).forEach === 'function') {
-    const record: Record<string, string> = {};
-    (headers as Headers).forEach((value, name) => {
-      record[name] = value;
-    });
-    return record;
-  }
-  return {...(headers as Record<string, string>)};
-}
-
-/**
  * Combines the headers configured on a connection with per-call headers.
  *
- * Per-call headers win over configured ones of the same name, so a credential
- * resolved for the current invocation replaces a stale static value.
+ * With nothing to add, the configured headers pass through untouched, so a
+ * connection without auth reaches the transport exactly as it does today.
+ * Otherwise `Headers` does the merge: it accepts every shape the transport
+ * allows, and its overlay is case-insensitive, so a per-call `Authorization`
+ * replaces a configured `authorization` rather than joining it and sending
+ * both credentials. That merge lowercases the names, as they go on the wire.
  *
  * @param params The connection the session is created for.
  * @param additionalHeaders Headers for this one call, such as the ones
@@ -121,21 +93,33 @@ function toHeaderRecord(
  * @return The headers to send, or `undefined` when there are none and when the
  *   transport is stdio, which carries no headers at all.
  */
-export function mergeConnectionHeaders(
+function mergeConnectionHeaders(
   params: MCPConnectionParams,
   additionalHeaders?: Record<string, string>,
-): Record<string, string> | undefined {
+): TransportRequestInit['headers'] {
   if (params.type !== 'StreamableHTTPConnectionParams') {
     return undefined;
   }
 
   const requestInit = params.transportOptions?.requestInit;
   const configured = requestInit
-    ? toHeaderRecord(requestInit.headers)
-    : toHeaderRecord(params.header as Record<string, string> | undefined);
+    ? requestInit.headers
+    : (params.header as Record<string, string> | undefined);
 
-  const merged = {...configured, ...additionalHeaders};
-  return Object.keys(merged).length > 0 ? merged : undefined;
+  if (!additionalHeaders) {
+    return configured;
+  }
+
+  const merged = new Headers(configured);
+  for (const [name, value] of Object.entries(additionalHeaders)) {
+    merged.set(name, value);
+  }
+
+  const record: Record<string, string> = {};
+  merged.forEach((value, name) => {
+    record[name] = value;
+  });
+  return Object.keys(record).length > 0 ? record : undefined;
 }
 
 /**

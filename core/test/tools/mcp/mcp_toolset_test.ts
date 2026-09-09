@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthCredentialTypes, Context, InvocationContext} from '@google/adk';
+import {AuthCredentialTypes} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+import {createToolContext} from '../../agents/context_test_utils.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -61,15 +62,6 @@ const stdioParams = {
   type: 'StdioConnectionParams',
   serverParams: {command: 'test'},
 } as unknown as MCPConnectionParams;
-
-/** A tool context with the session state a credential lookup reads. */
-function createToolContext(): Context {
-  const invocationContext = {
-    abortSignal: new AbortController().signal,
-    session: {state: {}},
-  } as unknown as InvocationContext;
-  return new Context({invocationContext, functionCallId: 'function-call-1'});
-}
 
 describe('MCPToolset', () => {
   it('discovers tools without prefix', async () => {
@@ -392,7 +384,7 @@ describe('MCPToolset', () => {
 
       expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
-        {requestInit: {headers: {Authorization: 'Bearer toolset-token'}}},
+        {requestInit: {headers: {authorization: 'Bearer toolset-token'}}},
       );
     });
   });

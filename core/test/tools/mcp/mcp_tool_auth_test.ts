@@ -8,8 +8,6 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   AuthScheme,
-  Context,
-  InvocationContext,
   MCPSessionManager,
   MCPTool,
   MCPToolAuthOptions,
@@ -17,6 +15,7 @@ import {
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
+import {createToolContext} from '../../agents/context_test_utils.js';
 
 /**
  * The `test_*` cases below are ported from adk-python,
@@ -73,20 +72,6 @@ function createSessionManager() {
       closeSession: vi.fn().mockResolvedValue(undefined),
     } as unknown as MCPSessionManager,
   };
-}
-
-/**
- * A real `Context` over `sessionState`, so a credential the handler caches is
- * observable through the same state the next call reads.
- */
-function createToolContext(
-  sessionState: Record<string, unknown> = {},
-): Context {
-  const invocationContext = {
-    abortSignal: new AbortController().signal,
-    session: {state: sessionState},
-  } as unknown as InvocationContext;
-  return new Context({invocationContext, functionCallId: 'function-call-1'});
 }
 
 function createTool(

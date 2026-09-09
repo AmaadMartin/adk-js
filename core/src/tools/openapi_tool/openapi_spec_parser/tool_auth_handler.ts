@@ -18,6 +18,18 @@ export interface AuthPreparationResult {
   authCredential?: AuthCredential;
 }
 
+/**
+ * What a tool returns while it waits for the end user to authorize it.
+ *
+ * Every tool that resolves credentials through {@link ToolAuthHandler} returns
+ * this same value, so a client only has to recognise one shape. It is frozen
+ * because it is shared between them.
+ */
+export const PENDING_AUTH_RESULT = Object.freeze({
+  pending: true,
+  message: 'Needs your authorization to access your data.',
+});
+
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 

@@ -16,7 +16,10 @@ import {AuthScheme} from '../../auth/auth_schemes.js';
 import {authCredentialToHeaders} from '../../auth/credential_header_utils.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {ToolAuthHandler} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
+import {
+  PENDING_AUTH_RESULT,
+  ToolAuthHandler,
+} from '../openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
 
@@ -115,10 +118,7 @@ export class MCPTool extends BaseTool {
       );
       const authResult = await authHandler.prepareAuthCredentials();
       if (authResult.state === 'pending') {
-        return {
-          pending: true,
-          message: 'Needs your authorization to access your data.',
-        };
+        return PENDING_AUTH_RESULT;
       }
       authHeaders = authCredentialToHeaders(
         authResult.authCredential,
