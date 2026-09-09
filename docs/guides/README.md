@@ -14,6 +14,10 @@ Versioned binary and text storage (`Part` payloads) scoped to an individual sess
 
 - [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
 
+### Auth
+
+- [OAuth2 credential refresh](auth/oauth2_credential_refresh/index.md) - Trading a refresh token for a new access token, and how an OpenAPI tool does it for you.
+
 ### Tools
 
 #### Retrieval
