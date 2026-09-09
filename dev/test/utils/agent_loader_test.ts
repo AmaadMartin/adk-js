@@ -771,6 +771,40 @@ describe('AgentLoader', () => {
       await agentLoader.disposeAll();
     });
 
+    it('loads the same agent instance the agent file holds', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+
+      const loaded = await agentLoader.loadAgent('agent1');
+      const fromFile = await (await agentLoader.getAgentFile('agent1')).load();
+
+      expect(loaded.name).toEqual('agent1');
+      expect(loaded).toBe(fromFile);
+      await agentLoader.disposeAll();
+    });
+
+    it('rejects with the loader error when the agent name is unknown', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+
+      await expect(agentLoader.loadAgent('nope')).rejects.toThrow(
+        /Agent 'nope' not found[\s\S]*Available agents:/,
+      );
+      await agentLoader.disposeAll();
+    });
+
+    it('leaves the agent file usable for the next caller', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+
+      await agentLoader.loadAgent('agent1');
+
+      // `getAgentFile` hands out one cached, shared `AgentFile` per name, so
+      // disposing it after a load would break every later caller.
+      const agentFile = await agentLoader.getAgentFile('agent1');
+      expect(() => agentFile.getFilePath()).not.toThrow();
+      await expect(agentLoader.loadAgent('agent1')).resolves.toBeDefined();
+
+      await agentLoader.disposeAll();
+    });
+
     /**
      * An agent whose module throws while constructing (a malformed workflow
      * graph, a bad config) must not stop the other agents from loading —

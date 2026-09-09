@@ -163,6 +163,21 @@ exports.rootAgent = new NodeModulesAgent();`,
   );
 
   it(
+    'should load a real compiled App through loadAgent and leave it usable',
+    async () => {
+      const loaded = await loader.loadAgent('service_alpha');
+      const appFile = await loader.getAppFile('service_alpha');
+
+      expect(isApp(loaded)).toBe(true);
+      expect(loaded).toBe(await appFile.load());
+      // The cached file is shared, so `loadAgent` must leave the compiled
+      // bundle on disk for the next caller.
+      expect(() => appFile.getFilePath()).not.toThrow();
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it(
     'should synthesize App when loadApp() is called on BaseAgent file',
     async () => {
       const agentFile = await loader.getAppFile('service_beta');
