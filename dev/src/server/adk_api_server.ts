@@ -1205,12 +1205,9 @@ export class AdkApiServer {
     appName: string,
   ): Promise<Runner> {
     if (!(appName in this.runnerCache)) {
-      const isAppInstance = isApp(agentOrApp);
-      const agent = isAppInstance ? agentOrApp.rootAgent : agentOrApp;
       this.runnerCache[appName] = new Runner({
-        app: isAppInstance ? agentOrApp : undefined,
+        ...(isApp(agentOrApp) ? {app: agentOrApp} : {agent: agentOrApp}),
         appName,
-        agent,
         memoryService: this.memoryService,
         sessionService: this.sessionService,
         artifactService: this.artifactService,
