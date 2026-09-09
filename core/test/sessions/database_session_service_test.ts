@@ -290,8 +290,95 @@ describe('DatabaseSessionService', () => {
       sessionId: 's1',
       config: {afterTimestamp: now},
     });
-    expect(after2?.events.length).toBe(1);
-    expect(after2?.events[0].id).toBe(e3.id);
+    expect(after2?.events.length).toBe(2);
+    expect(after2?.events[0].id).toBe(e2.id);
+    expect(after2?.events[1].id).toBe(e3.id);
+  });
+
+  it('should include an event whose timestamp equals afterTimestamp', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 's1',
+    });
+
+    const now = Date.now();
+    const e1 = createEvent({timestamp: now - 1000});
+    const e2 = createEvent({timestamp: now});
+    const e3 = createEvent({timestamp: now + 1000});
+
+    await service.appendEvent({session, event: e1});
+    await service.appendEvent({session, event: e2});
+    await service.appendEvent({session, event: e3});
+
+    const retrieved = await service.getSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 's1',
+      config: {afterTimestamp: now},
+    });
+
+    expect(retrieved?.events.length).toBe(2);
+    expect(retrieved?.events.map((event) => event.id)).toEqual([e2.id, e3.id]);
+  });
+
+  for (const appendOrder of [
+    ['event_a', 'event_m', 'event_z'],
+    ['event_z', 'event_m', 'event_a'],
+  ]) {
+    it(`should order events with tied timestamps by id, appended ${appendOrder.join(', ')}`, async () => {
+      const sessionId = `tied-${appendOrder[0]}`;
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'user1',
+        sessionId,
+      });
+
+      const timestamp = Date.now();
+      for (const id of appendOrder) {
+        await service.appendEvent({
+          session,
+          event: createEvent({id, timestamp}),
+        });
+      }
+
+      const retrieved = await service.getSession({
+        appName: 'test-app',
+        userId: 'user1',
+        sessionId,
+      });
+
+      expect(retrieved?.events.map((event) => event.id)).toEqual([
+        'event_a',
+        'event_m',
+        'event_z',
+      ]);
+    });
+  }
+
+  it('should truncate a tie by id when numRecentEvents is set', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 's1',
+    });
+
+    const timestamp = Date.now();
+    for (const id of ['event_a', 'event_m', 'event_z']) {
+      await service.appendEvent({session, event: createEvent({id, timestamp})});
+    }
+
+    const retrieved = await service.getSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 's1',
+      config: {numRecentEvents: 2},
+    });
+
+    expect(retrieved?.events.map((event) => event.id)).toEqual([
+      'event_m',
+      'event_z',
+    ]);
   });
 
   it('should filter sessions by userId in listSessions', async () => {
