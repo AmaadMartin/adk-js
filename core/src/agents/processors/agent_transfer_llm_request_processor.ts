@@ -15,6 +15,23 @@ import {isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
+ * Whether the agent is a workflow node rather than a conversational agent.
+ *
+ * A `single_turn` or `task` agent runs once against the input the graph hands
+ * it and then finishes, so it neither services a conversation handed to it nor
+ * hands its own away. An agent with no mode — every non-LlmAgent, and every
+ * conversational LlmAgent — is not a workflow node.
+ *
+ * @param agent - The agent to classify.
+ * @returns True when the agent is a workflow node.
+ */
+function isWorkflowNodeAgent(agent: BaseAgent): boolean {
+  return (
+    isLlmAgent(agent) && (agent.mode === 'single_turn' || agent.mode === 'task')
+  );
+}
+
+/**
  * Augments the {@link LlmRequest} to support agent transfer. When the current
  * agent has reachable transfer targets (sub-agents, peer agents, or a parent
  * agent), this processor registers a `transfer_to_agent` function tool and
@@ -60,13 +77,18 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    appendInstructions(llmRequest, [
-      this.buildTargetAgentsInstructions(
-        invocationContext.agent,
-        transferTargets,
-      ),
-    ]);
+    if (!isWorkflowNodeAgent(invocationContext.agent)) {
+      appendInstructions(llmRequest, [
+        this.buildTargetAgentsInstructions(
+          invocationContext.agent,
+          transferTargets,
+        ),
+      ]);
+    }
 
+    // The tool stays registered even for a workflow node agent, which gets no
+    // instructions: adk-python registers it unconditionally, and the
+    // confirmation-resume path re-injects it.
     const toolContext = new Context({invocationContext});
     await this.tool.processLlmRequest({toolContext, llmRequest});
   }
@@ -108,7 +130,7 @@ to your parent agent.
 
   private getTransferTargets(agent: LlmAgent): BaseAgent[] {
     const targets: BaseAgent[] = [];
-    targets.push(...agent.subAgents);
+    targets.push(...agent.subAgents.filter((sub) => !isWorkflowNodeAgent(sub)));
 
     if (!agent.parentAgent || !isLlmAgent(agent.parentAgent)) {
       return targets;
@@ -121,7 +143,8 @@ to your parent agent.
     if (!agent.disallowTransferToPeers) {
       targets.push(
         ...agent.parentAgent.subAgents.filter(
-          (peerAgent) => peerAgent.name !== agent.name,
+          (peerAgent) =>
+            peerAgent.name !== agent.name && !isWorkflowNodeAgent(peerAgent),
         ),
       );
     }
