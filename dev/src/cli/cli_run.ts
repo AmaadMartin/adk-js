@@ -28,6 +28,7 @@ import * as path from 'node:path';
 import * as readline from 'node:readline';
 
 import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
+import {loadDotenvForAgent} from '../utils/envs.js';
 import {
   getAbsolutePath,
   loadFileData,
@@ -335,8 +336,12 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     options.artifactService || new InMemoryArtifactService();
   const sessionService = options.sessionService || new InMemorySessionService();
   const memoryService = options.memoryService || new InMemoryMemoryService();
+  const agentAbsPath = getAbsolutePath(options.agentPath);
+  // The agent module reads `process.env` while it is imported, so the `.env`
+  // has to be in place before `load()` runs.
+  loadDotenvForAgent(agentAbsPath);
   await using agentFile = new AgentFile(
-    getAbsolutePath(options.agentPath),
+    agentAbsPath,
     options.agentFileLoadOptions,
   );
   const loaded = await agentFile.load();

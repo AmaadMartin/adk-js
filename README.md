@@ -83,6 +83,11 @@ echo "GOOGLE_GENAI_API_KEY=your-api-key-here" > .env
 > `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION` in place of the API key,
 > and authenticate with `gcloud auth application-default login`.
 
+The CLI reads the nearest `.env` at or above the agent, so each agent in an
+agents directory can keep its own keys. A variable you exported in your shell
+always wins over a `.env`, and `ADK_DISABLE_LOAD_DOTENV=1` stops the CLI from
+reading any `.env` at all.
+
 Define an agent in `agent.ts`:
 
 ```typescript

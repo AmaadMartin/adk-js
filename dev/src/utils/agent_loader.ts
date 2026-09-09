@@ -13,6 +13,7 @@ import {createRequire} from 'node:module';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
+import {loadDotenvForAgent} from './envs.js';
 import {
   createTempDir,
   isFile,
@@ -541,23 +542,22 @@ export class AgentLoader {
       ? [await getFileMetadata(this.agentsDirPath)]
       : await getDirFiles(this.agentsDirPath);
 
-    await Promise.all(
-      files.map(async (fileOrDir: FileMetadata) => {
-        if (fileOrDir.isFile && isJsFile(fileOrDir.ext)) {
-          return this.loadAgentFromFile(fileOrDir);
-        }
+    // One agent at a time: `process.env` holds one agent's `.env` at a time,
+    // and an agent module reads it while it is imported.
+    for (const fileOrDir of files) {
+      if (fileOrDir.isFile && isJsFile(fileOrDir.ext)) {
+        await this.loadAgentFromFile(fileOrDir);
+        continue;
+      }
 
-        if (fileOrDir.isDirectory) {
-          if (
-            fileOrDir.name === 'node_modules' ||
-            fileOrDir.name.startsWith('.')
-          ) {
-            return;
-          }
-          return this.loadAgentFromDirectory(fileOrDir);
-        }
-      }),
-    );
+      if (
+        fileOrDir.isDirectory &&
+        fileOrDir.name !== 'node_modules' &&
+        !fileOrDir.name.startsWith('.')
+      ) {
+        await this.loadAgentFromDirectory(fileOrDir);
+      }
+    }
 
     this.agentsAlreadyPreloaded = true;
 
@@ -571,6 +571,7 @@ export class AgentLoader {
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
     try {
       const agentFile = new AgentFile(file.path, this.options);
+      loadDotenvForAgent(file.path);
       await agentFile.load();
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
@@ -590,6 +591,7 @@ export class AgentLoader {
 
     try {
       const agentFile = new AgentFile(possibleEntryFile.path, this.options);
+      loadDotenvForAgent(dir.path);
       await agentFile.load();
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
@@ -598,8 +600,8 @@ export class AgentLoader {
   }
 
   /**
-   * Propagating here would reject the `Promise.all` in `preloadAgents`, failing
-   * every endpoint that lists or resolves agents — so record instead of throw.
+   * Propagating here would abort the preload loop, failing every endpoint that
+   * lists or resolves agents — so record instead of throw.
    */
   private recordLoadFailure(name: string, filePath: string, e: unknown): void {
     if (e instanceof AgentFileLoadingError) {
