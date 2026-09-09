@@ -12,6 +12,13 @@ import {logger} from '../utils/logger.js';
  */
 export enum FeatureName {
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
+  /**
+   * Reports a failed MCP tool call as an `{error}` result instead of a thrown
+   * exception, so one failed call cannot end the agent turn. Set
+   * `ADK_DISABLE_MCP_GRACEFUL_ERROR_HANDLING=1` to restore the throwing
+   * behaviour.
+   */
+  MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
 }
 
 /**
@@ -36,6 +43,10 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
+  },
+  [FeatureName.MCP_GRACEFUL_ERROR_HANDLING]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
   },
 };
 
