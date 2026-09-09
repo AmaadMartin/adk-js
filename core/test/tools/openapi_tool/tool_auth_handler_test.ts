@@ -263,4 +263,102 @@ describe('ToolAuthHandler', () => {
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
   });
+  describe('credentialKey namespacing', () => {
+    const API_KEY_SCHEME = {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    } as const;
+
+    it('does not read a credential cached under another credentialKey', async () => {
+      const state = new State({
+        'server_a_existing_exchanged_credential': {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'server-a-token'}},
+        },
+      });
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        API_KEY_SCHEME,
+        undefined,
+        'server_b',
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+
+    it('reads the credential cached under its own credentialKey', async () => {
+      const state = new State({
+        'server_a_existing_exchanged_credential': {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'server-a-token'}},
+        },
+      });
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        API_KEY_SCHEME,
+        undefined,
+        'server_a',
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.http?.credentials.token).toBe(
+        'server-a-token',
+      );
+    });
+
+    it('writes an exchanged credential under its credentialKey', async () => {
+      const state = new State();
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue({
+          authType: AuthCredentialTypes.API_KEY,
+          apiKey: 'key',
+        }),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      await new ToolAuthHandler(
+        mockContext,
+        API_KEY_SCHEME,
+        undefined,
+        'server_a',
+      ).prepareAuthCredentials();
+
+      expect(state.get('server_a_existing_exchanged_credential')).toBeDefined();
+      expect(state.get('apiKey_existing_exchanged_credential')).toBeUndefined();
+    });
+
+    it('keeps the scheme-type slot when no credentialKey is given', async () => {
+      const state = new State();
+      const mockContext = {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue({
+          authType: AuthCredentialTypes.API_KEY,
+          apiKey: 'key',
+        }),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      await new ToolAuthHandler(
+        mockContext,
+        API_KEY_SCHEME,
+      ).prepareAuthCredentials();
+
+      expect(state.get('apiKey_existing_exchanged_credential')).toBeDefined();
+    });
+  });
 });

@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {Context} from '../../src/agents/context.js';
+import {InvocationContext} from '../../src/agents/invocation_context.js';
+import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import {
   AgentRegistrySingleMCPToolset,
   GCP_MCP_SERVER_DESTINATION_ID,
@@ -21,12 +25,14 @@ const mockListTools = vi.fn().mockResolvedValue({
 
 const mockConnect = vi.fn().mockResolvedValue(undefined);
 const mockClose = vi.fn().mockResolvedValue(undefined);
+const mockCallTool = vi.fn().mockResolvedValue({content: []});
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: vi.fn().mockImplementation(() => ({
     connect: mockConnect,
     close: mockClose,
     listTools: mockListTools,
+    callTool: mockCallTool,
   })),
 }));
 
@@ -240,6 +246,36 @@ describe('AgentRegistrySingleMCPToolset', () => {
         connectionParams: BASE_PARAMS,
       });
       await expect(toolset.close()).resolves.toBeUndefined();
+    });
+  });
+  describe('authentication', () => {
+    it('sends the configured credential as a header on a tool call', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+        authScheme: {type: 'http', scheme: 'bearer'},
+        authCredential: {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'registry-token'}},
+        },
+      });
+
+      const [tool] = await toolset.getTools();
+      const invocationContext = {
+        abortSignal: new AbortController().signal,
+        session: {state: {}},
+      } as unknown as InvocationContext;
+      await tool.runAsync({
+        args: {},
+        toolContext: new Context({
+          invocationContext,
+          functionCallId: 'function-call-1',
+        }),
+      });
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {Authorization: 'Bearer registry-token'}}},
+      );
     });
   });
 });

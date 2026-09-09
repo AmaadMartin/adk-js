@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthCredentialTypes, Context, InvocationContext} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
@@ -49,10 +51,25 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   };
 });
 
+vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
+  return {
+    StreamableHTTPClientTransport: vi.fn(),
+  };
+});
+
 const stdioParams = {
   type: 'StdioConnectionParams',
   serverParams: {command: 'test'},
 } as unknown as MCPConnectionParams;
+
+/** A tool context with the session state a credential lookup reads. */
+function createToolContext(): Context {
+  const invocationContext = {
+    abortSignal: new AbortController().signal,
+    session: {state: {}},
+  } as unknown as InvocationContext;
+  return new Context({invocationContext, functionCallId: 'function-call-1'});
+}
 
 describe('MCPToolset', () => {
   it('discovers tools without prefix', async () => {
@@ -331,6 +348,52 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+  describe('authentication', () => {
+    it('sends the configured credential as a header on a tool call', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: noop(),
+              close: noop(),
+              listTools: vi.fn().mockResolvedValue({
+                tools: [{name: 'search', description: 'd', inputSchema: {}}],
+              }),
+            }) as unknown as Client,
+        )
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: noop(),
+              close: noop(),
+              callTool: vi.fn().mockResolvedValue({content: []}),
+            }) as unknown as Client,
+        );
+
+      const toolset = new MCPToolset(
+        {type: 'StreamableHTTPConnectionParams', url: 'http://test-url'},
+        [],
+        undefined,
+        {
+          authScheme: {type: 'http', scheme: 'bearer'},
+          authCredential: {
+            authType: AuthCredentialTypes.HTTP,
+            http: {scheme: 'bearer', credentials: {token: 'toolset-token'}},
+          },
+        },
+      );
+
+      const [tool] = await toolset.getTools();
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {Authorization: 'Bearer toolset-token'}}},
+      );
     });
   });
 });
