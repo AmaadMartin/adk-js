@@ -5,9 +5,19 @@
  */
 
 import {BaseAgent, BaseSessionService, Runner} from '@google/adk';
+import {Content} from '@google/genai';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  Mock,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {AgentFile} from '../../src/utils/agent_loader.js';
 import {loadFileData, saveToFile} from '../../src/utils/file_utils.js';
@@ -714,6 +724,455 @@ describe('cli_run', () => {
       });
 
       expect(output).not.toContain('[streamer]');
+    });
+  });
+  /**
+   * A turn that pauses hands the CLI the question; these cases pin how the
+   * answer gets back to the runner.
+   */
+  describe('answering a pause', () => {
+    interface RecordedTurn {
+      newMessage: Content;
+      abortSignal?: AbortSignal;
+    }
+
+    /** An `adk_request_input` call, as a paused turn emits it. */
+    const inputRequest = (interruptId: string, message: string) => ({
+      author: 'step1',
+      longRunningToolIds: [interruptId],
+      content: {
+        parts: [
+          {
+            functionCall: {
+              name: 'adk_request_input',
+              id: interruptId,
+              args: {interruptId, message},
+            },
+          },
+        ],
+      },
+    });
+
+    /** An `adk_request_confirmation` call, as a paused turn emits it. */
+    const confirmationRequest = (interruptId: string) => ({
+      author: 'step1',
+      longRunningToolIds: [interruptId],
+      content: {
+        parts: [
+          {
+            functionCall: {
+              name: 'adk_request_confirmation',
+              id: interruptId,
+              args: {
+                originalFunctionCall: {name: 'delete_orders', args: {}},
+                toolConfirmation: {hint: 'This deletes orders.'},
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    /**
+     * Replies with one batch of events per turn, and records what each turn
+     * was asked to run.
+     */
+    function recordTurns(eventsPerTurn: unknown[][]): RecordedTurn[] {
+      const turns: RecordedTurn[] = [];
+      (Runner as unknown as Mock).mockImplementation(() => ({
+        runAsync: async function* (params: RecordedTurn) {
+          turns.push(params);
+          for (const event of eventsPerTurn[turns.length - 1] ?? []) {
+            yield event;
+          }
+        },
+      }));
+      return turns;
+    }
+
+    /** Queues the answers the prompts receive, in order. */
+    function queueAnswers(answers: string[]): void {
+      const question = mockRl.question as Mock;
+      for (const answer of answers) {
+        question.mockImplementationOnce(
+          (_prompt: string, cb: (a: string) => void) => cb(answer),
+        );
+      }
+    }
+
+    it('sends a plain answer back as the interrupt result', async () => {
+      const turns = recordTurns([[inputRequest('interrupt-1', 'Which city?')]]);
+      queueAnswers(['start', 'Paris', 'exit']);
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(turns).toHaveLength(2);
+      expect(turns[1].newMessage.parts).toEqual([
+        {
+          functionResponse: {
+            id: 'interrupt-1',
+            name: 'adk_request_input',
+            response: {result: 'Paris'},
+          },
+        },
+      ]);
+    });
+
+    it('sends a JSON object answer through as the response itself', async () => {
+      const turns = recordTurns([[inputRequest('interrupt-1', 'Which city?')]]);
+      queueAnswers(['start', '{"city":"Paris","days":2}', 'exit']);
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(turns[1].newMessage.parts?.[0].functionResponse?.response).toEqual(
+        {city: 'Paris', days: 2},
+      );
+    });
+
+    it.each([
+      ['yes', true],
+      ['Y', true],
+      ['confirm', true],
+      ['nope', false],
+      ['', false],
+    ])(
+      'answers a confirmation %o as confirmed=%s',
+      async (answer, confirmed) => {
+        const turns = recordTurns([[confirmationRequest('confirm-1')]]);
+        queueAnswers(['start', answer, 'exit']);
+
+        await runAgent({
+          agentPath: 'agent.ts',
+          sessionService: createMockSessionService(),
+        });
+
+        expect(turns[1].newMessage.parts?.[0].functionResponse).toEqual({
+          id: 'confirm-1',
+          name: 'adk_request_confirmation',
+          response: {confirmed},
+        });
+      },
+    );
+
+    it('passes a JSON confirmation payload through', async () => {
+      const turns = recordTurns([[confirmationRequest('confirm-1')]]);
+      queueAnswers([
+        'start',
+        '{"confirmed":true,"reason":"already reviewed"}',
+        'exit',
+      ]);
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      // Collapsing this to {confirmed: false} loses what the user answered.
+      expect(turns[1].newMessage.parts?.[0].functionResponse?.response).toEqual(
+        {confirmed: true, reason: 'already reviewed'},
+      );
+    });
+
+    it('answers every request a turn raised in one message', async () => {
+      const turns = recordTurns([
+        [
+          inputRequest('interrupt-1', 'Which city?'),
+          inputRequest('interrupt-2', 'Which day?'),
+        ],
+      ]);
+      queueAnswers(['start', 'Paris', 'Monday', 'exit']);
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(turns).toHaveLength(2);
+      expect(turns[1].newMessage.parts).toEqual([
+        {
+          functionResponse: {
+            id: 'interrupt-1',
+            name: 'adk_request_input',
+            response: {result: 'Paris'},
+          },
+        },
+        {
+          functionResponse: {
+            id: 'interrupt-2',
+            name: 'adk_request_input',
+            response: {result: 'Monday'},
+          },
+        },
+      ]);
+    });
+
+    it('stops answering an interrupt the agent keeps raising', async () => {
+      const request = inputRequest('interrupt-1', 'Which city?');
+      const turns = recordTurns([[request], [request]]);
+      queueAnswers(['start', 'Paris', 'exit']);
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      // Turn 3 would be a second answer to the same interrupt, which never
+      // makes progress; the CLI asks for a new query instead.
+      expect(turns).toHaveLength(2);
+      expect(mockRl.question as Mock).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not answer a request the same turn already resolved', async () => {
+      const turns = recordTurns([
+        [
+          inputRequest('interrupt-1', 'Which city?'),
+          {
+            author: 'user',
+            content: {
+              parts: [
+                {
+                  functionResponse: {
+                    id: 'interrupt-1',
+                    name: 'adk_request_input',
+                    response: {result: 'Paris'},
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      ]);
+      queueAnswers(['start', 'exit']);
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(turns).toHaveLength(1);
+    });
+  });
+
+  describe('--state', () => {
+    it('seeds the session with the parsed state', async () => {
+      const sessionService = createMockSessionService();
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        state: '{"tier":"gold"}',
+        sessionService,
+      });
+
+      expect(sessionService.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({state: {tier: 'gold'}}),
+      );
+    });
+
+    it('reports invalid JSON and runs nothing', async () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const sessionService = createMockSessionService();
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        state: '{tier: gold}',
+        sessionService,
+      });
+
+      expect(
+        errors.mock.calls.map((call) => call.join(' ')).join('\n'),
+      ).toContain('Error: Invalid JSON for --state:');
+      expect(Runner as unknown as Mock).not.toHaveBeenCalled();
+      expect(sessionService.createSession).not.toHaveBeenCalled();
+    });
+
+    it('rejects state that is not a JSON object', async () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        state: '"gold"',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(
+        errors.mock.calls.map((call) => call.join(' ')).join('\n'),
+      ).toContain('expected a JSON object');
+    });
+  });
+
+  describe('--timeout', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('abandons a turn that overruns and keeps the REPL alive', async () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const signals: AbortSignal[] = [];
+      let turn = 0;
+      (Runner as unknown as Mock).mockImplementation(() => ({
+        runAsync: async function* (params: {abortSignal?: AbortSignal}) {
+          turn++;
+          if (turn === 1) {
+            const signal = params.abortSignal;
+            expect(signal).toBeDefined();
+            signals.push(signal!);
+            await new Promise<void>((resolve) => {
+              signal!.addEventListener('abort', () => resolve());
+            });
+            return;
+          }
+          yield {author: 'model', content: {parts: [{text: 'recovered'}]}};
+        },
+      }));
+      (mockRl.question as Mock)
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('slow'),
+        )
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('again'),
+        )
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('exit'),
+        );
+      vi.useFakeTimers();
+
+      const pending = runAgent({
+        agentPath: 'agent.ts',
+        timeout: '30s',
+        sessionService: createMockSessionService(),
+      });
+      await vi.advanceTimersByTimeAsync(30000);
+      await pending;
+
+      expect(signals[0].aborted).toBe(true);
+      expect(
+        errors.mock.calls.map((call) => call.join(' ')).join('\n'),
+      ).toContain('Error: Command timed out after 30s');
+      expect(
+        (console.log as Mock).mock.calls
+          .map((call) => call.join(' '))
+          .join('\n'),
+      ).toContain('recovered');
+    });
+
+    it('refuses a malformed timeout before running a turn', async () => {
+      await expect(
+        runAgent({
+          agentPath: 'agent.ts',
+          timeout: 'soon',
+          sessionService: createMockSessionService(),
+        }),
+      ).rejects.toThrow('Invalid timeout format: soon');
+    });
+  });
+
+  describe('--jsonl', () => {
+    let stdoutWrites: MockInstance<typeof process.stdout.write>;
+    let stderrWrites: MockInstance<typeof process.stderr.write>;
+
+    beforeEach(() => {
+      stdoutWrites = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true);
+      stderrWrites = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+    });
+
+    it('writes one JSON line per event and no readable transcript', async () => {
+      runnerState.events = [
+        {
+          author: 'model',
+          id: 'e1',
+          actions: {stateDelta: {}, artifactDelta: {}},
+          content: {parts: [{text: 'Sunny in Paris.'}]},
+        },
+      ];
+      (mockRl.question as Mock)
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('weather?'),
+        )
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('exit'),
+        );
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        jsonl: true,
+        sessionService: createMockSessionService(),
+      });
+
+      // Read the real stream: a record goes to stdout directly, so a stubbed
+      // console cannot make a polluted stdout look clean.
+      const chunks = stdoutWrites.mock.calls.map((call) => String(call[0]));
+      expect(chunks).toHaveLength(1);
+      expect(JSON.parse(chunks[0])).toEqual({
+        author: 'model',
+        session_id: 'session-123',
+        id: 'e1',
+        content: {parts: [{text: 'Sunny in Paris.'}]},
+      });
+    });
+
+    it('moves a write from the agent off stdout', async () => {
+      runnerState.events = [
+        {
+          author: 'model',
+          id: 'e1',
+          actions: {},
+          content: {parts: [{text: 'Sunny in Paris.'}]},
+        },
+      ];
+      (Runner as unknown as Mock).mockImplementation(() => ({
+        runAsync: async function* () {
+          // What the copy of the ADK logger an agent loads does, and what the
+          // CLI cannot silence by setting its own log level.
+          process.stdout.write('WARN: [ADK] Class Workflow is experimental.\n');
+          for (const event of runnerState.events) {
+            yield event;
+          }
+        },
+      }));
+      (mockRl.question as Mock)
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('weather?'),
+        )
+        .mockImplementationOnce((_p: string, cb: (a: string) => void) =>
+          cb('exit'),
+        );
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        jsonl: true,
+        sessionService: createMockSessionService(),
+      });
+
+      for (const call of stdoutWrites.mock.calls) {
+        expect(() => JSON.parse(String(call[0]))).not.toThrow();
+      }
+      expect(
+        stderrWrites.mock.calls.map((call) => String(call[0])).join(''),
+      ).toContain('Class Workflow is experimental');
+    });
+
+    it('keeps the startup banner off stdout', async () => {
+      await runAgent({
+        agentPath: 'agent.ts',
+        jsonl: true,
+        sessionService: createMockSessionService(),
+      });
+
+      expect(
+        (console.log as Mock).mock.calls
+          .map((call) => call.join(' '))
+          .join('\n'),
+      ).not.toContain('type exit to exit');
     });
   });
 });

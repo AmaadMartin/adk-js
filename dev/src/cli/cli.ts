@@ -386,6 +386,18 @@ export function createProgram(): Command {
       '--resume <string>',
       'The json file that contains a previously saved session (by --save_session option). The previous session will be re-displayed. And user can continue to interact with the agent.',
     )
+    .option(
+      '--state <string>',
+      'Optional. Initial state for the run as a JSON object string.',
+    )
+    .option(
+      '--timeout <string>',
+      'Optional. Timeout for a single turn or query (e.g. 30s, 5m).',
+    )
+    .option(
+      '--jsonl',
+      'Optional. Output structured JSONL instead of human-readable text.',
+    )
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
@@ -405,6 +417,9 @@ export function createProgram(): Command {
           savedSessionFile: options['resume'],
           saveSession: getBoolean(options['save_session']),
           sessionId: options['session_id'],
+          state: options['state'],
+          timeout: options['timeout'],
+          jsonl: getBoolean(options['jsonl']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
