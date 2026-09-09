@@ -31,7 +31,7 @@ describe('GoogleSearchTool', () => {
       expect(req.config?.tools).toEqual([]);
     });
 
-    it('adds googleSearchRetrieval for Gemini 1.x model', async () => {
+    it('adds googleSearch for a Gemini 1.x model id', async () => {
       const tool = new GoogleSearchTool();
       const req = makeRequest('gemini-1.5-pro');
       await tool.processLlmRequest({
@@ -39,20 +39,21 @@ describe('GoogleSearchTool', () => {
         toolContext: {} as never,
       });
 
-      expect(req.config!.tools).toEqual([{googleSearchRetrieval: {}}]);
+      expect(req.config!.tools).toEqual([{googleSearch: {}}]);
     });
 
-    it('throws when Gemini 1.x model already has other tools', async () => {
+    it('adds googleSearch for a Gemini 1.x model id that already has other tools', async () => {
       const tool = new GoogleSearchTool();
       const req = makeRequest('gemini-1.5-pro', [{functionDeclarations: []}]);
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: {} as never,
-        }),
-      ).rejects.toThrow(
-        'Google search tool can not be used with other tools in Gemini 1.x.',
-      );
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([
+        {functionDeclarations: []},
+        {googleSearch: {}},
+      ]);
     });
 
     it('adds googleSearch for Gemini 2+ model', async () => {

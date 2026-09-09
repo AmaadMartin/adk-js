@@ -8,7 +8,6 @@ import {GenerateContentConfig, Tool} from '@google/genai';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import {getLogger} from '../utils/logger.js';
 import {
-  isGemini1Model,
   isGeminiModel,
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
@@ -32,6 +31,10 @@ export interface VertexAISearchConfig {
 export interface BaseVertexAiSearchToolParams {
   filter?: string;
   maxResults?: number;
+  /**
+   * Has no effect yet. adk-python reads this one level up, to swap the tool
+   * for `DiscoveryEngineSearchTool`, which adk-js has not ported.
+   */
   bypassMultiToolsLimit?: boolean;
 }
 
@@ -131,17 +134,6 @@ export class VertexAiSearchTool extends BuiltInTool {
     if (!isGeminiModel(llmRequest.model) && !modelCheckDisabled) {
       throw new Error(
         `Vertex AI search tool is not supported for model ${llmRequest.model}`,
-      );
-    }
-
-    // Guard against multi-tool usage in Gemini 1.x unless explicitly bypassed.
-    if (
-      isGemini1Model(llmRequest.model) &&
-      llmRequest.config.tools.length > 0 &&
-      !this.bypassMultiToolsLimit
-    ) {
-      throw new Error(
-        'Vertex AI search tool cannot be used with other tools in Gemini 1.x.',
       );
     }
 
