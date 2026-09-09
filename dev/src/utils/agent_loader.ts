@@ -579,21 +579,18 @@ export class AgentLoader {
   }
 
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
-    const subFiles = await getDirFiles(dir.path);
-    const possibleEntryFile =
-      subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
-      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext));
+    const entryFile = await findAgentEntryFile(dir.path);
 
-    if (!possibleEntryFile) {
+    if (!entryFile) {
       return;
     }
 
     try {
-      const agentFile = new AgentFile(possibleEntryFile.path, this.options);
+      const agentFile = new AgentFile(entryFile, this.options);
       await agentFile.load();
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
-      this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
+      this.recordLoadFailure(dir.name, entryFile, e);
     }
   }
 
@@ -617,6 +614,24 @@ export class AgentLoader {
 
 function isJsFile(fileExt?: string): boolean {
   return !!fileExt && JS_FILES_EXTENSIONS.includes(fileExt);
+}
+
+/**
+ * Finds the entry file of an agent directory: `app.*` if there is one, else
+ * `agent.*`, in any supported JavaScript or TypeScript extension.
+ *
+ * @param dir The directory to look in.
+ * @returns The entry file path, or `undefined` if the directory holds none.
+ */
+export async function findAgentEntryFile(
+  dir: string,
+): Promise<string | undefined> {
+  const subFiles = await getDirFiles(dir);
+  const entryFile =
+    subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
+    subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext));
+
+  return entryFile?.path;
 }
 
 async function getDirFiles(dir: string): Promise<FileMetadata[]> {

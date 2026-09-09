@@ -5,7 +5,12 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {
+  rebuildAgentTests,
+  runAgentTests,
+} from '../../src/cli/agent_test_runner.js';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
@@ -35,6 +40,11 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+}));
+
+vi.mock('../../src/cli/agent_test_runner', () => ({
+  runAgentTests: vi.fn(),
+  rebuildAgentTests: vi.fn(),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -298,6 +308,66 @@ describe('CLI Entrypoint', () => {
           otelToCloud: true,
         }),
       );
+    });
+  });
+
+  describe('command: test', () => {
+    const originalExitCode = process.exitCode;
+
+    beforeEach(() => {
+      (runAgentTests as Mock).mockResolvedValue([]);
+    });
+
+    afterEach(() => {
+      process.exitCode = originalExitCode;
+    });
+
+    it('replays the current directory by default', async () => {
+      await parse(['test']);
+
+      expect(runAgentTests).toHaveBeenCalledWith({
+        folder: process.cwd(),
+        agentFileLoadOptions: {
+          compile: true,
+          bundle: true,
+          moduleType: undefined,
+        },
+      });
+      expect(rebuildAgentTests).not.toHaveBeenCalled();
+    });
+
+    it('replays the folder it is given', async () => {
+      await parse(['test', 'dev']);
+
+      expect(runAgentTests).toHaveBeenCalledWith(
+        expect.objectContaining({folder: path.join(process.cwd(), 'dev')}),
+      );
+    });
+
+    it('routes --rebuild to rebuildAgentTests', async () => {
+      await parse(['test', 'dev', '--rebuild']);
+
+      expect(rebuildAgentTests).toHaveBeenCalledWith(
+        expect.objectContaining({folder: path.join(process.cwd(), 'dev')}),
+      );
+      expect(runAgentTests).not.toHaveBeenCalled();
+    });
+
+    it('exits 1 when a fixture failed', async () => {
+      (runAgentTests as Mock).mockResolvedValue([
+        {name: 'agent/a.json', status: 'failed', message: 'mismatch'},
+      ]);
+
+      await parse(['test']);
+
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('exits 2 without running anything when the folder does not exist', async () => {
+      await parse(['test', 'no_such_folder']);
+
+      expect(process.exitCode).toBe(2);
+      expect(runAgentTests).not.toHaveBeenCalled();
     });
   });
 
