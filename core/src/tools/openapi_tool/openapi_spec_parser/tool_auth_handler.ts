@@ -19,15 +19,26 @@ export interface AuthPreparationResult {
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
-  getCredentialKey(authScheme?: OpenAPIV3.SecuritySchemeObject): string {
-    const schemeName = authScheme?.type || 'default';
-    return `${schemeName}_existing_exchanged_credential`;
+  /**
+   * Names the session-state slot a credential is cached in.
+   *
+   * `credentialKey` namespaces the slot, so two tools sharing a scheme type
+   * but authenticating against different servers do not read each other's
+   * token. A caller that supplies none keeps the scheme-type slot.
+   */
+  getCredentialKey(
+    authScheme?: OpenAPIV3.SecuritySchemeObject,
+    credentialKey?: string,
+  ): string {
+    const namespace = credentialKey ?? authScheme?.type ?? 'default';
+    return `${namespace}_existing_exchanged_credential`;
   }
 
   getCredential(
     authScheme?: OpenAPIV3.SecuritySchemeObject,
+    credentialKey?: string,
   ): AuthCredential | undefined {
-    const key = this.getCredentialKey(authScheme);
+    const key = this.getCredentialKey(authScheme, credentialKey);
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
     // bracket access would bypass its value/delta store and always miss.
@@ -74,7 +85,10 @@ export class ToolAuthHandler {
     }
 
     const store = new ToolContextCredentialStore(this.context);
-    const existingCredential = store.getCredential(this.authScheme);
+    const existingCredential = store.getCredential(
+      this.authScheme,
+      this.credentialKey,
+    );
 
     if (existingCredential) {
       return {state: 'done', authCredential: existingCredential};
@@ -113,7 +127,7 @@ export class ToolAuthHandler {
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
     if (authResponseCredential || result.wasExchanged) {
-      const key = store.getCredentialKey(this.authScheme);
+      const key = store.getCredentialKey(this.authScheme, this.credentialKey);
       store.storeCredential(key, result.credential);
     }
 
