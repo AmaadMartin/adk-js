@@ -6,8 +6,14 @@
 
 import {Part} from '@google/genai';
 
+import {validatePathSegment} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
+import {
+  isArtifactUri,
+  nextArtifactRequest,
+  validateArtifactReference,
+} from './artifact_util.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -31,7 +37,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     {part: Part; metadata: ArtifactVersion}[]
   > = {};
 
-  saveArtifact({
+  async saveArtifact({
     appName,
     userId,
     sessionId,
@@ -40,18 +46,12 @@ export class InMemoryArtifactService implements BaseArtifactService {
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
     if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
-      return Promise.reject(
-        new Error('Artifact must have either inlineData or text content.'),
-      );
+      throw new Error('Artifact must have either inlineData or text content.');
     }
 
     const path = artifactPath(appName, userId, sessionId, filename);
-
-    if (!this.artifacts[path]) {
-      this.artifacts[path] = [];
-    }
-
-    const version = this.artifacts[path].length;
+    const versions = this.artifacts[path] ?? [];
+    const version = versions.length;
     const metadata: ArtifactVersion = {
       version,
       customMetadata,
@@ -60,26 +60,40 @@ export class InMemoryArtifactService implements BaseArtifactService {
     if (!artifact.inlineData && artifact.text === undefined) {
       const fileData = artifact.fileData!;
 
-      metadata.mimeType = fileData.mimeType;
+      if (isArtifactUri(fileData.fileUri)) {
+        // A reference carries no mime type; it is known once resolved.
+        validateArtifactReference({
+          appName,
+          userId,
+          sessionId,
+          fileUri: fileData.fileUri,
+        });
+      } else {
+        metadata.mimeType = fileData.mimeType;
+      }
     }
 
-    this.artifacts[path].push({part: artifact, metadata});
+    versions.push({part: artifact, metadata});
+    this.artifacts[path] = versions;
 
-    return Promise.resolve(version);
+    return version;
   }
 
-  loadArtifact({
-    appName,
-    userId,
-    sessionId,
-    filename,
-    version,
-  }: LoadArtifactRequest): Promise<Part | undefined> {
+  async loadArtifact(request: LoadArtifactRequest): Promise<Part | undefined> {
+    return this.loadArtifactAtDepth(request, 0);
+  }
+
+  private async loadArtifactAtDepth(
+    request: LoadArtifactRequest,
+    depth: number,
+  ): Promise<Part | undefined> {
+    const {appName, userId, sessionId, filename} = request;
+    let {version} = request;
     const path = artifactPath(appName, userId, sessionId, filename);
     const versions = this.artifacts[path];
 
     if (!versions) {
-      return Promise.resolve(undefined);
+      return undefined;
     }
 
     if (version === undefined) {
@@ -90,17 +104,31 @@ export class InMemoryArtifactService implements BaseArtifactService {
       logger.warn(
         `[InMemoryArtifactService] loadArtifact: Artifact ${filename} version ${version} not found`,
       );
-      return Promise.resolve(undefined);
+      return undefined;
     }
 
-    return Promise.resolve(versions[version].part);
+    const part = versions[version].part;
+    const fileUri = part.fileData?.fileUri;
+
+    if (isArtifactUri(fileUri)) {
+      return this.loadArtifactAtDepth(
+        nextArtifactRequest(request, fileUri, depth),
+        depth + 1,
+      );
+    }
+
+    return part;
   }
 
-  listArtifactKeys({
+  async listArtifactKeys({
     appName,
     userId,
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
+    validatePathSegment(appName, 'appName');
+    validatePathSegment(userId, 'userId');
+    validatePathSegment(sessionId, 'sessionId');
+
     const sessionPrefix = artifactPrefix('session', appName, userId, sessionId);
     const userPrefix = artifactPrefix('user', appName, userId);
     const filenames: string[] = [];
@@ -113,10 +141,10 @@ export class InMemoryArtifactService implements BaseArtifactService {
       }
     }
 
-    return Promise.resolve(filenames.sort());
+    return filenames.sort();
   }
 
-  deleteArtifact({
+  async deleteArtifact({
     appName,
     userId,
     sessionId,
@@ -124,14 +152,12 @@ export class InMemoryArtifactService implements BaseArtifactService {
   }: DeleteArtifactRequest): Promise<void> {
     const path = artifactPath(appName, userId, sessionId, filename);
     if (!this.artifacts[path]) {
-      return Promise.resolve();
+      return;
     }
     delete this.artifacts[path];
-
-    return Promise.resolve();
   }
 
-  listVersions({
+  async listVersions({
     appName,
     userId,
     sessionId,
@@ -141,7 +167,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     const artifacts = this.artifacts[path];
 
     if (!artifacts) {
-      return Promise.resolve([]);
+      return [];
     }
 
     const versions: number[] = [];
@@ -149,10 +175,10 @@ export class InMemoryArtifactService implements BaseArtifactService {
       versions.push(i);
     }
 
-    return Promise.resolve(versions);
+    return versions;
   }
 
-  listArtifactVersions({
+  async listArtifactVersions({
     appName,
     userId,
     sessionId,
@@ -162,13 +188,13 @@ export class InMemoryArtifactService implements BaseArtifactService {
     const artifacts = this.artifacts[path];
 
     if (!artifacts) {
-      return Promise.resolve([]);
+      return [];
     }
 
-    return Promise.resolve(artifacts.map((a) => a.metadata));
+    return artifacts.map((a) => a.metadata);
   }
 
-  getArtifactVersion({
+  async getArtifactVersion({
     appName,
     userId,
     sessionId,
@@ -179,7 +205,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     const versions = this.artifacts[path];
 
     if (!versions) {
-      return Promise.resolve(undefined);
+      return undefined;
     }
 
     if (version === undefined) {
@@ -187,10 +213,10 @@ export class InMemoryArtifactService implements BaseArtifactService {
     }
 
     if (versions[version]) {
-      return Promise.resolve(versions[version].metadata);
+      return versions[version].metadata;
     }
 
-    return Promise.resolve(undefined);
+    return undefined;
   }
 }
 
@@ -209,9 +235,14 @@ function artifactPath(
   sessionId: string,
   filename: string,
 ): string {
+  validatePathSegment(appName, 'appName');
+  validatePathSegment(userId, 'userId');
+
   if (fileHasUserNamespace(filename)) {
     return `${artifactPrefix('user', appName, userId)}${encodeURIComponent(filename)}`;
   }
+
+  validatePathSegment(sessionId, 'sessionId');
 
   return `${artifactPrefix('session', appName, userId, sessionId)}${encodeURIComponent(filename)}`;
 }

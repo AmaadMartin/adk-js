@@ -25,6 +25,42 @@ function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
   );
 }
 
+const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
+
+/**
+ * Rejects values that could alter the path they are concatenated into.
+ *
+ * @param value The caller-supplied identifier (e.g. userId or sessionId).
+ * @param fieldName Human-readable name used in the error message.
+ * @throws Error if the value is empty, contains a null byte or traversal
+ *     segments, starts with a slash, or is drive-qualified.
+ */
+export function validatePathSegment(value: string, fieldName: string): void {
+  if (!value) {
+    throw new Error(`${fieldName} must not be empty.`);
+  }
+  if (value.includes('\x00')) {
+    throw new Error(`${fieldName} must not contain null bytes.`);
+  }
+  if (value.startsWith('/') || value.startsWith('\\')) {
+    throw new Error(
+      `${fieldName} '${value}' must not be an absolute path or start with a slash.`,
+    );
+  }
+  if (WINDOWS_DRIVE_RE.test(value)) {
+    throw new Error(`${fieldName} '${value}' must not be drive-qualified.`);
+  }
+  if (
+    value === '.' ||
+    value === '..' ||
+    value.replace(/\\/g, '/').split('/').includes('..')
+  ) {
+    throw new Error(
+      `${fieldName} '${value}' must not contain traversal segments.`,
+    );
+  }
+}
+
 /**
  * Writes `files` into `dir`, refusing any entry that resolves outside of it.
  *

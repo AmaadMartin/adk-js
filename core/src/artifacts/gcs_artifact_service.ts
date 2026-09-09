@@ -6,9 +6,15 @@
 
 import type {Bucket, File, StorageOptions} from '@google-cloud/storage';
 import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
+import {validatePathSegment} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
+import {
+  isArtifactUri,
+  nextArtifactRequest,
+  validateArtifactReference,
+} from './artifact_util.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -23,6 +29,7 @@ const GCS_FILE_URI_METADATA_KEY = 'adkFileUri';
 const GCS_FILE_MIME_TYPE_METADATA_KEY = 'adkFileMimeType';
 const GCS_DISPLAY_NAME_METADATA_KEY = 'adkDisplayName';
 const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
+const USER_NAMESPACE_PREFIX = 'user:';
 
 export class GcsArtifactService implements BaseArtifactService {
   private readonly bucketName: string;
@@ -100,6 +107,14 @@ export class GcsArtifactService implements BaseArtifactService {
       if (!fileUri) {
         throw new Error('Artifact fileData must have a fileUri.');
       }
+      if (isArtifactUri(fileUri)) {
+        validateArtifactReference({
+          appName: request.appName,
+          userId: request.userId,
+          sessionId: request.sessionId,
+          fileUri,
+        });
+      }
       // Store the URI and mime_type (if any) as blob metadata; no content to upload.
       customMetadata[GCS_FILE_URI_METADATA_KEY] = fileUri;
       if (fileData.mimeType) {
@@ -114,6 +129,33 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async loadArtifact(request: LoadArtifactRequest): Promise<Part | undefined> {
+    return this.loadArtifactAtDepth(request, 0);
+  }
+
+  private async loadArtifactAtDepth(
+    request: LoadArtifactRequest,
+    depth: number,
+  ): Promise<Part | undefined> {
+    // Runs outside readStoredArtifact so a rejection is not reported as a
+    // missing artifact.
+    validateBlobPathSegments(request);
+
+    const part = await this.readStoredArtifact(request);
+    const fileUri = part?.fileData?.fileUri;
+
+    if (isArtifactUri(fileUri)) {
+      return this.loadArtifactAtDepth(
+        nextArtifactRequest(request, fileUri, depth),
+        depth + 1,
+      );
+    }
+
+    return part;
+  }
+
+  private async readStoredArtifact(
+    request: LoadArtifactRequest,
+  ): Promise<Part | undefined> {
     try {
       let version = request.version;
       if (version === undefined) {
@@ -182,6 +224,10 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async listArtifactKeys(request: ListArtifactKeysRequest): Promise<string[]> {
+    validatePathSegment(request.appName, 'appName');
+    validatePathSegment(request.userId, 'userId');
+    validatePathSegment(request.sessionId, 'sessionId');
+
     const sessionPrefix = `${request.appName}/${request.userId}/${request.sessionId}/`;
     const usernamePrefix = `${request.appName}/${request.userId}/user/`;
     const bucket = await this.getBucket();
@@ -292,15 +338,33 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 }
 
-function getFileName({
+/**
+ * Rejects identifiers that would alter the blob name they are built into.
+ *
+ * @param request The request whose scope identifiers are about to be used.
+ */
+function validateBlobPathSegments({
   appName,
   userId,
   sessionId,
   filename,
-  version,
-}: LoadArtifactRequest): string {
-  const isUser = filename.startsWith('user:');
-  const cleanFilename = isUser ? filename.substring(5) : filename;
+}: LoadArtifactRequest): void {
+  validatePathSegment(appName, 'appName');
+  validatePathSegment(userId, 'userId');
+
+  if (!filename.startsWith(USER_NAMESPACE_PREFIX)) {
+    validatePathSegment(sessionId, 'sessionId');
+  }
+}
+
+function getFileName(request: LoadArtifactRequest): string {
+  validateBlobPathSegments(request);
+
+  const {appName, userId, sessionId, filename, version} = request;
+  const isUser = filename.startsWith(USER_NAMESPACE_PREFIX);
+  const cleanFilename = isUser
+    ? filename.substring(USER_NAMESPACE_PREFIX.length)
+    : filename;
 
   const prefix = isUser
     ? `${appName}/${userId}/user/${cleanFilename}`

@@ -12,6 +12,11 @@ import {fileURLToPath, pathToFileURL} from 'url';
 import {logger} from '../utils/logger.js';
 
 import {
+  isArtifactUri,
+  nextArtifactRequest,
+  validateArtifactReference,
+} from './artifact_util.js';
+import {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
@@ -71,6 +76,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact({
+    appName,
     userId,
     sessionId,
     filename,
@@ -114,6 +120,9 @@ export class FileArtifactService implements BaseArtifactService {
       if (!fileUri) {
         throw new Error('Artifact fileData must have a fileUri.');
       }
+      if (isArtifactUri(fileUri)) {
+        validateArtifactReference({appName, userId, sessionId, fileUri});
+      }
       mimeType = artifact.fileData!.mimeType;
     }
 
@@ -138,7 +147,28 @@ export class FileArtifactService implements BaseArtifactService {
     return nextVersion;
   }
 
-  async loadArtifact({
+  async loadArtifact(request: LoadArtifactRequest): Promise<Part | undefined> {
+    return this.loadArtifactAtDepth(request, 0);
+  }
+
+  private async loadArtifactAtDepth(
+    request: LoadArtifactRequest,
+    depth: number,
+  ): Promise<Part | undefined> {
+    const part = await this.readStoredArtifact(request);
+    const fileUri = part?.fileData?.fileUri;
+
+    if (isArtifactUri(fileUri)) {
+      return this.loadArtifactAtDepth(
+        nextArtifactRequest(request, fileUri, depth),
+        depth + 1,
+      );
+    }
+
+    return part;
+  }
+
+  private async readStoredArtifact({
     userId,
     sessionId,
     filename,
