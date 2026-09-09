@@ -30,6 +30,7 @@ import {logger} from '../utils/logger.js';
 import {
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
   getExpressModeApiKey,
+  REASONING_ENGINE_NAME_PATTERN,
 } from '../utils/vertex_ai_utils.js';
 
 import {partialCopy} from '../utils/partial_copy.js';
@@ -153,9 +154,7 @@ export class VertexAiSessionService extends BaseSessionService {
     if (/^\d+$/.test(appName)) {
       return appName;
     }
-    const pattern =
-      /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
-    const match = appName.match(pattern);
+    const match = appName.match(REASONING_ENGINE_NAME_PATTERN);
     if (!match) {
       throw new Error(
         `App name ${appName} is not valid. It should either be the full ReasoningEngine resource name, or the reasoning engine id.`,

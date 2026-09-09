@@ -6,6 +6,13 @@
 
 import {isEnterpriseModeEnabled} from './env_aware_utils.js';
 
+/**
+ * Matches a fully qualified Agent Engine resource name, capturing the project,
+ * the location and the reasoning engine id in that order.
+ */
+export const REASONING_ENGINE_NAME_PATTERN =
+  /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
+
 export const EXPRESS_MODE_UNSUPPORTED_MESSAGE =
   'Vertex AI Express Mode (expressModeApiKey / GOOGLE_API_KEY) is not ' +
   'supported: the @google-cloud/vertexai Agent Engine client cannot send an ' +

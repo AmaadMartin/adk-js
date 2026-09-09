@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {InMemoryMemoryService, LogLevel, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -146,6 +146,31 @@ describe('CLI Entrypoint', () => {
       expect(args.artifactService).toBeDefined();
     });
 
+    it('defaults the memory service when no memory service uri is given', async () => {
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+
+    it('should handle memory service uri', async () => {
+      await parse(['web', '--memory_service_uri', 'memory://']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+
+    it('reports an unsupported memory service uri and starts no server', async () => {
+      const exit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as typeof process.exit);
+
+      await parse(['web', '--memory_service_uri', 'redis://x']);
+
+      expect(AdkApiServer).not.toHaveBeenCalled();
+      expect(exit).toHaveBeenCalledWith(1);
+    });
+
     it('should start AdkApiServer with a2a: true when --a2a is set', async () => {
       await parse(['web', '--a2a']);
 
@@ -192,6 +217,13 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should handle memory service uri', async () => {
+      await parse(['api_server', '--memory_service_uri', 'memory://']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
   });
 
@@ -243,7 +275,7 @@ describe('CLI Entrypoint', () => {
       );
       const exit = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => undefined) as never);
+        .mockImplementation((() => undefined) as typeof process.exit);
 
       await parse(['run', '/nope/agent.ts']);
 
@@ -296,6 +328,16 @@ describe('CLI Entrypoint', () => {
           inputFile: 'replay.json',
           savedSessionFile: 'resume.json',
           otelToCloud: true,
+        }),
+      );
+    });
+
+    it('should forward the memory service to runAgent', async () => {
+      await parse(['run', 'agent.ts', '--memory_service_uri', 'memory://']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          memoryService: expect.any(InMemoryMemoryService),
         }),
       );
     });
@@ -352,6 +394,14 @@ describe('CLI Entrypoint', () => {
         withUi: true,
         adkVersion: '1.0.0',
         extraGcloudArgs: ['--extra-arg=foo'],
+      });
+    });
+
+    it('should pass memoryServiceUri to deployToCloudRun', async () => {
+      await parse(['deploy', 'cloud_run', '--memory_service_uri', 'memory://']);
+
+      expect(vi.mocked(deployToCloudRun).mock.calls[0][0]).toMatchObject({
+        memoryServiceUri: 'memory://',
       });
     });
 
@@ -427,6 +477,19 @@ describe('CLI Entrypoint', () => {
         port: 8080,
         withUi: true,
         adkVersion: '1.0.0',
+      });
+    });
+
+    it('should pass memoryServiceUri to deployToAgentEngine', async () => {
+      await parse([
+        'deploy',
+        'agent_engine',
+        '--memory_service_uri',
+        'memory://',
+      ]);
+
+      expect(vi.mocked(deployToAgentEngine).mock.calls[0][0]).toMatchObject({
+        memoryServiceUri: 'memory://',
       });
     });
 

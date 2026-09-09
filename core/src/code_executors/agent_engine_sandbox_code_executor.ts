@@ -8,6 +8,7 @@ import {Client} from '@google-cloud/vertexai';
 import {Language} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {experimental} from '../utils/experimental.js';
 import {guessMimeType} from '../utils/file_utils.js';
+import {REASONING_ENGINE_NAME_PATTERN} from '../utils/vertex_ai_utils.js';
 
 interface LocalChunk {
   data?: string;
@@ -19,8 +20,6 @@ interface LocalChunk {
 
 const SANDBOX_PATTERN =
   /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)\/sandboxEnvironments\/(\d+)$/;
-const ENGINE_PATTERN =
-  /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
 
 import {InvocationContext} from '../agents/invocation_context.js';
 import {logger} from '../utils/logger.js';
@@ -115,7 +114,9 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
         );
       }
     } else if (this.agentEngineResourceName) {
-      const match = this.agentEngineResourceName.match(ENGINE_PATTERN);
+      const match = this.agentEngineResourceName.match(
+        REASONING_ENGINE_NAME_PATTERN,
+      );
       if (match) {
         this.projectId = match[1];
         this.location = match[2];
