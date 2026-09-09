@@ -41,7 +41,7 @@ export class RunSkillScriptTool extends BaseTool {
             type: Type.STRING,
             description: 'The name of the skill.',
           },
-          script_path: {
+          file_path: {
             type: Type.STRING,
             description:
               "The relative path to the script (e.g., 'scripts/setup.js').",
@@ -52,7 +52,7 @@ export class RunSkillScriptTool extends BaseTool {
               'Optional arguments to pass to the script as key-value pairs.',
           },
         },
-        required: ['skill_name', 'script_path'],
+        required: ['skill_name', 'file_path'],
       },
     };
   }
@@ -62,19 +62,19 @@ export class RunSkillScriptTool extends BaseTool {
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
     const skillName = args['skill_name'] as string;
-    const scriptPath = args['script_path'] as string;
+    const scriptPath = args['file_path'] as string;
     const scriptArgs =
       (args['args'] as Record<string, string | number | boolean>) || {};
 
     if (!skillName) {
       return {
-        error: 'Skill name is required.',
+        error: "Argument 'skill_name' is required.",
         errorCode: 'MISSING_SKILL_NAME',
       };
     }
     if (!scriptPath) {
       return {
-        error: 'Script path is required.',
+        error: "Argument 'file_path' is required.",
         errorCode: 'MISSING_SCRIPT_PATH',
       };
     }
