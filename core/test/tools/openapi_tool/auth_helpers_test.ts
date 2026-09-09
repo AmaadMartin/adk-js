@@ -82,6 +82,118 @@ describe('auth_helpers', () => {
       expect(result).toBe('http://example.com?foo=bar&api_key=secret_key');
     });
 
+    it('should apply API key in cookie', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret_key',
+      };
+      const authScheme: OpenAPIV3.SecuritySchemeObject = {
+        type: 'apiKey',
+        name: 'session_id',
+        in: 'cookie',
+      };
+
+      const result = applyCredential(url, headers, credential, authScheme);
+
+      expect(result).toBe(url);
+      expect(headers).toEqual({Cookie: 'session_id=secret_key'});
+    });
+
+    it('should append API key to an existing Cookie header', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {Cookie: 'theme=dark'};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret_key',
+      };
+      const authScheme: OpenAPIV3.SecuritySchemeObject = {
+        type: 'apiKey',
+        name: 'session_id',
+        in: 'cookie',
+      };
+
+      applyCredential(url, headers, credential, authScheme);
+
+      expect(headers['Cookie']).toBe('theme=dark; session_id=secret_key');
+    });
+
+    it('should append to an existing lowercase cookie header', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {cookie: 'theme=dark'};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret_key',
+      };
+      const authScheme: OpenAPIV3.SecuritySchemeObject = {
+        type: 'apiKey',
+        name: 'session_id',
+        in: 'cookie',
+      };
+
+      applyCredential(url, headers, credential, authScheme);
+
+      expect(headers['cookie']).toBe('theme=dark; session_id=secret_key');
+      expect(headers['Cookie']).toBeUndefined();
+    });
+
+    it('should percent-encode the cookie value', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'a b;c',
+      };
+      const authScheme: OpenAPIV3.SecuritySchemeObject = {
+        type: 'apiKey',
+        name: 'session_id',
+        in: 'cookie',
+      };
+
+      applyCredential(url, headers, credential, authScheme);
+
+      expect(headers['Cookie']).toBe('session_id=a%20b%3Bc');
+    });
+
+    it('should apply API key in cookie for a scheme built by createApiKeyScheme', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret_key',
+      };
+
+      const result = applyCredential(
+        url,
+        headers,
+        credential,
+        createApiKeyScheme('session_id', 'cookie'),
+      );
+
+      expect(result).toBe(url);
+      expect(headers).toEqual({Cookie: 'session_id=secret_key'});
+    });
+
+    it('should throw for an unrecognised API key location', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret_key',
+      };
+      const authScheme: OpenAPIV3.SecuritySchemeObject = {
+        type: 'apiKey',
+        name: 'session_id',
+        in: 'cookies',
+      };
+
+      expect(() =>
+        applyCredential(url, headers, credential, authScheme),
+      ).toThrow('Invalid API Key location: cookies');
+      expect(headers).toEqual({});
+    });
+
     it('should fallback to Authorization header for API key if location is not specified', () => {
       const url = 'http://example.com';
       const headers: Record<string, string> = {};

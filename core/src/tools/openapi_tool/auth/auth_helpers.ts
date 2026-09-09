@@ -15,6 +15,8 @@ import {AuthCredential} from '../../../auth/auth_credential.js';
  * @param credential The auth credential.
  * @param authScheme The auth scheme from OpenAPI spec.
  * @returns The updated URL (if modified by query params).
+ * @throws {Error} If an apiKey scheme declares a location other than `header`,
+ *   `query` or `cookie`.
  */
 export function applyCredential(
   url: string,
@@ -39,9 +41,20 @@ export function applyCredential(
     } else if (inLocation === 'query') {
       const separator = url.includes('?') ? '&' : '?';
       url += `${separator}${name}=${encodeURIComponent(credential.apiKey)}`;
-    } else {
-      // Default to header Authorization if not specified or unknown location
+    } else if (inLocation === 'cookie') {
+      // Reuse the existing cookie header as spelled: header names are
+      // case-insensitive, so a second entry would be joined with ', ', which
+      // is invalid cookie syntax.
+      const key =
+        Object.keys(headers).find((h) => h.toLowerCase() === 'cookie') ??
+        'Cookie';
+      const cookie = `${name}=${encodeURIComponent(credential.apiKey)}`;
+      headers[key] = headers[key] ? `${headers[key]}; ${cookie}` : cookie;
+    } else if (inLocation === undefined) {
+      // No apiKey scheme was supplied, so the location is unknown.
       headers['Authorization'] = credential.apiKey;
+    } else {
+      throw new Error(`Invalid API Key location: ${inLocation}`);
     }
   } else if (
     credential.http &&
