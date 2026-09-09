@@ -72,6 +72,43 @@ export type MCPConnectionParams =
   | StdioConnectionParams
   | StreamableHTTPConnectionParams;
 
+/** The request options the StreamableHTTP transport is configured with. */
+type TransportRequestInit = NonNullable<
+  StreamableHTTPClientTransportOptions['requestInit']
+>;
+
+/**
+ * Flattens any header shape the transport accepts into a plain record.
+ *
+ * A `Headers` instance and an entry array both spread to nonsense, so a
+ * caller that used either would lose its headers the moment ADK merged one in.
+ * A record is copied as it stands, which keeps the caller's capitalization.
+ *
+ * @param headers The configured headers, in any of the three shapes.
+ * @return The equivalent record, or `undefined` when there are none.
+ */
+function toHeaderRecord(
+  headers?: TransportRequestInit['headers'],
+): Record<string, string> | undefined {
+  if (!headers) {
+    return undefined;
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  // A `Headers` instance keeps its entries behind an iterator rather than on
+  // the object, so it is recognised by its method instead of by `instanceof`,
+  // which fails across two copies of a package in one runtime.
+  if (typeof (headers as Headers).forEach === 'function') {
+    const record: Record<string, string> = {};
+    (headers as Headers).forEach((value, name) => {
+      record[name] = value;
+    });
+    return record;
+  }
+  return {...(headers as Record<string, string>)};
+}
+
 /**
  * Combines the headers configured on a connection with per-call headers.
  *
@@ -94,8 +131,8 @@ export function mergeConnectionHeaders(
 
   const requestInit = params.transportOptions?.requestInit;
   const configured = requestInit
-    ? (requestInit.headers as Record<string, string> | undefined)
-    : (params.header as Record<string, string> | undefined);
+    ? toHeaderRecord(requestInit.headers)
+    : toHeaderRecord(params.header as Record<string, string> | undefined);
 
   const merged = {...configured, ...additionalHeaders};
   return Object.keys(merged).length > 0 ? merged : undefined;

@@ -29,6 +29,12 @@ Two pieces describe what the server wants:
 Only the StreamableHTTP transport carries headers. A stdio server runs as a
 local child process, so it receives none.
 
+Only a tool call is authenticated. Tool discovery is not: `getTools`,
+`listResources`, `getResourceInfo` and `readResource` open their session with
+no credential. A server that rejects an unauthenticated `tools/list` therefore
+needs a header on `transportOptions.requestInit.headers` to be discovered at
+all. adk-python has the same gap.
+
 ## Get started
 
 This toolset sends a bearer token to a remote MCP server. Every tool it
@@ -133,8 +139,47 @@ and starts a new run.
 A credential that fails to resolve throws. ADK does not fall back to an
 unauthenticated call.
 
+## OAuth2
+
+The grant decides how far ADK can get on its own.
+
+- **Client credentials.** A credential holding a client id and secret is
+  exchanged at the scheme's `tokenUrl` on the first call. Nothing is asked of
+  the end user.
+- **Authorization code, and every other grant.** The user must authorize
+  first. A credential holding only a client id and secret is not sent to the
+  exchanger; ADK returns the pending envelope above and puts an authorization
+  URL in `eventActions.requestedAuthConfigs`. Your application sends the user
+  there and starts a new run with the redirect it lands on, in
+  `oauth2.authResponseUri`. ADK then exchanges the code for a token and caches
+  it.
+- **A token you already hold.** Put it in `oauth2.accessToken` and it is sent
+  as `Authorization: Bearer <token>` with no exchange.
+
+```ts
+const toolset = new MCPToolset(connectionParams, [], undefined, {
+  authScheme: {
+    type: 'oauth2',
+    flows: {
+      authorizationCode: {
+        authorizationUrl: 'https://example.com/o/oauth2/auth',
+        tokenUrl: 'https://example.com/token',
+        scopes: {'read:tools': 'Read your tools'},
+      },
+    },
+  },
+  authCredential: {
+    authType: AuthCredentialTypes.OAUTH2,
+    oauth2: {
+      clientId: process.env.OAUTH_CLIENT_ID,
+      clientSecret: process.env.OAUTH_CLIENT_SECRET,
+    },
+  },
+});
+```
+
 ## Auth on `AgentRegistrySingleMCPToolset`
 
-`AgentRegistrySingleMCPToolset` accepts `authScheme` and `authCredential` and
-forwards them to every tool it resolves. Its `headerProvider` still applies,
-but only at discovery time.
+`AgentRegistrySingleMCPToolset` accepts `authScheme`, `authCredential` and
+`credentialKey`, and forwards all three to every tool it resolves. Its
+`headerProvider` still applies, but only at discovery time.

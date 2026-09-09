@@ -361,4 +361,136 @@ describe('ToolAuthHandler', () => {
       expect(state.get('apiKey_existing_exchanged_credential')).toBeDefined();
     });
   });
+  describe('oauth2 consent', () => {
+    const AUTHORIZATION_CODE_SCHEME = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/o/oauth2/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {'read:things': 'read'},
+        },
+      },
+    } as const;
+
+    function createMockContext(state = new State()) {
+      return {
+        state,
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+    }
+
+    it('requests consent for a credential holding only client details', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        AUTHORIZATION_CODE_SCHEME,
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+
+    it('does not request consent once an access token is present', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        AUTHORIZATION_CODE_SCHEME,
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'client-id', accessToken: 'token'},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    });
+
+    it('does not request consent once an authorization code is present', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        AUTHORIZATION_CODE_SCHEME,
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            clientId: 'client-id',
+            clientSecret: 'client-secret',
+            authCode: 'code',
+          },
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    });
+
+    it('does not request consent for a client credentials grant', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        {
+          type: 'oauth2',
+          flows: {
+            clientCredentials: {
+              tokenUrl: 'https://example.com/token',
+              scopes: {},
+            },
+          },
+        },
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    });
+
+    it('does not request consent for a non-oauth2 scheme', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        {type: 'http', scheme: 'bearer'},
+        {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'token'}},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(mockContext.requestCredential).not.toHaveBeenCalled();
+    });
+
+    it('requests consent for an openIdConnect credential with no token', async () => {
+      const mockContext = createMockContext();
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        {
+          type: 'openIdConnect',
+          openIdConnectUrl:
+            'https://example.com/.well-known/openid-configuration',
+        },
+        {
+          authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+          oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
+    });
+  });
 });

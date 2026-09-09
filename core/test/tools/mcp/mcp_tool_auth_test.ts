@@ -218,6 +218,50 @@ describe('MCPTool authentication', () => {
       ).toBeUndefined();
     });
 
+    it('asks for consent when an oauth2 credential holds only client details', async () => {
+      const {manager} = createSessionManager();
+      const toolContext = createToolContext();
+      const tool = createTool(
+        {
+          authScheme: OAUTH2_SCHEME,
+          authCredential: {
+            authType: AuthCredentialTypes.OAUTH2,
+            oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+          },
+        },
+        manager,
+      );
+
+      const result = await tool.runAsync({args: {}, toolContext});
+
+      expect(result).toEqual({
+        pending: true,
+        message: 'Needs your authorization to access your data.',
+      });
+      expect(manager.createSession).not.toHaveBeenCalled();
+      const requested =
+        toolContext.eventActions.requestedAuthConfigs['function-call-1'];
+      expect(requested?.exchangedAuthCredential?.oauth2?.authUri).toContain(
+        'https://example.com/o/oauth2/auth',
+      );
+    });
+
+    it('sends the token from the consent round trip on the next call', async () => {
+      const {manager} = createSessionManager();
+      const toolContext = createToolContext();
+      vi.spyOn(toolContext, 'getAuthResponse').mockReturnValue({
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {accessToken: 'consented-token'},
+      });
+      const tool = createTool({authScheme: OAUTH2_SCHEME}, manager);
+
+      await tool.runAsync({args: {}, toolContext});
+
+      expect(manager.createSession).toHaveBeenCalledWith({
+        Authorization: 'Bearer consented-token',
+      });
+    });
+
     it('ignores a credential given without a scheme', async () => {
       const {manager} = createSessionManager();
       const tool = createTool({authCredential: BEARER_CREDENTIAL}, manager);
@@ -256,7 +300,11 @@ describe('MCPTool authentication', () => {
           authScheme: OAUTH2_SCHEME,
           authCredential: {
             authType: AuthCredentialTypes.OAUTH2,
-            oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+            oauth2: {
+              clientId: 'client-id',
+              clientSecret: 'client-secret',
+              authResponseUri: 'https://example.com/callback?error=denied',
+            },
           },
         },
         manager,
@@ -264,7 +312,7 @@ describe('MCPTool authentication', () => {
 
       await expect(
         tool.runAsync({args: {}, toolContext: createToolContext()}),
-      ).rejects.toThrow(/authCode or authResponseUri are required/);
+      ).rejects.toThrow(/Authorization code not found/);
       expect(manager.createSession).not.toHaveBeenCalled();
     });
 

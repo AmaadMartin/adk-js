@@ -16,7 +16,7 @@ import {AuthEchoServer, startAuthEchoServer} from './mcp_auth_server.js';
 
 /**
  * End-to-end test with NO mocks: a real `MCPToolset` talks to a real MCP
- * server over StreamableHTTP (see `mcp_auth_server.mjs`), which echoes back the
+ * server over StreamableHTTP (see `mcp_auth_server.ts`), which echoes back the
  * `authorization` header it received. This proves a configured credential
  * actually reaches the server.
  */

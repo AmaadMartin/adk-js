@@ -277,5 +277,38 @@ describe('AgentRegistrySingleMCPToolset', () => {
         {requestInit: {headers: {Authorization: 'Bearer registry-token'}}},
       );
     });
+
+    it('caches the credential under the configured credentialKey', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+        authScheme: {type: 'http', scheme: 'bearer'},
+        credentialKey: 'registry_server_a',
+      });
+
+      const [tool] = await toolset.getTools();
+      const invocationContext = {
+        abortSignal: new AbortController().signal,
+        session: {state: {}},
+      } as unknown as InvocationContext;
+      const toolContext = new Context({
+        invocationContext,
+        functionCallId: 'function-call-1',
+      });
+      vi.spyOn(toolContext, 'getAuthResponse').mockReturnValue({
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'granted-token'}},
+      });
+
+      await tool.runAsync({args: {}, toolContext});
+
+      expect(
+        toolContext.state.get(
+          'registry_server_a_existing_exchanged_credential',
+        ),
+      ).toBeDefined();
+      expect(
+        toolContext.state.get('mcp_http_existing_exchanged_credential'),
+      ).toBeUndefined();
+    });
   });
 });

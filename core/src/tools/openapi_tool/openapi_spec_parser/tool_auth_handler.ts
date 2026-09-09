@@ -7,7 +7,9 @@
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
+import {OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -52,6 +54,33 @@ class ToolContextCredentialStore {
     // exchanged credential would be re-created on every tool invocation.
     this.context.state.set(key, credential);
   }
+}
+
+/**
+ * Decides whether the end user must authorize before `credential` is usable.
+ *
+ * An OAuth2 or OpenID Connect credential that holds only a client id and
+ * secret cannot be exchanged: every grant except client credentials needs the
+ * user to authorize first and hand back an authorization code. Sending such a
+ * credential to the exchanger fails, so the client is asked for consent
+ * instead.
+ *
+ * @param authScheme The scheme the tool authenticates with.
+ * @param credential The best credential available so far.
+ * @return True when the client must collect an authorization from the user.
+ */
+function needsUserConsent(
+  authScheme: OpenAPIV3.SecuritySchemeObject,
+  credential: AuthCredential,
+): boolean {
+  if (authScheme.type !== 'oauth2' && authScheme.type !== 'openIdConnect') {
+    return false;
+  }
+  const {accessToken, authCode, authResponseUri} = credential.oauth2 ?? {};
+  if (accessToken || authCode || authResponseUri) {
+    return false;
+  }
+  return determineGrantType(authScheme) !== OAuthGrantType.CLIENT_CREDENTIALS;
 }
 
 @experimental
@@ -108,8 +137,8 @@ export class ToolAuthHandler {
     const authResponseCredential = this.context.getAuthResponse(authConfig);
     const credential = authResponseCredential ?? this.authCredential;
 
-    if (!credential) {
-      // No credential to work with, so ask the client for one.
+    if (!credential || needsUserConsent(this.authScheme, credential)) {
+      // Nothing usable yet, so ask the client to collect a credential.
       this.context.requestCredential(authConfig);
 
       return {state: 'pending'};

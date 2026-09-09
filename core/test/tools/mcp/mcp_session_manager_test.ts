@@ -283,6 +283,46 @@ describe('MCPSessionManager', () => {
       });
     });
 
+    it('keeps static headers given as a Headers instance', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: new Headers({'x-tenant': 'acme'})},
+        },
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-tenant': 'acme', Authorization: 'Bearer per-call'},
+          },
+        },
+      );
+    });
+
+    it('keeps static headers given as an entry array', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: [['x-tenant', 'acme']]}},
+      });
+
+      await manager.createSession({Authorization: 'Bearer per-call'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-tenant': 'acme', Authorization: 'Bearer per-call'},
+          },
+        },
+      );
+    });
+
     it('does not mutate the connection params it was constructed with', async () => {
       const connectionParams: MCPConnectionParams = {
         type: 'StreamableHTTPConnectionParams',
