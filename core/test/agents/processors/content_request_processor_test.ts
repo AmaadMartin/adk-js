@@ -8,8 +8,8 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createEvent,
   Event,
-  EventActions,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -18,38 +18,36 @@ import {
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
+import {createCompactedEvent} from '../../../src/events/compacted_event.js';
+
 function createMockEvent(id: string, timestamp: number, text: string): Event {
-  return {
+  return createEvent({
     id,
     invocationId: 'test-invoc',
     author: 'user',
-    actions: {} as EventActions,
     timestamp,
     content: {
       role: 'user',
       parts: [{text}],
     },
-  };
+  });
 }
 
-function createCompactedEvent(
+function createMockCompactedEvent(
   id: string,
   timestamp: number,
   startTime: number,
   endTime: number,
   compactedContent: string,
 ): CompactedEvent {
-  return {
+  return createCompactedEvent({
     id,
-    invocationId: 'test-invoc',
     author: 'system',
-    actions: {} as EventActions,
     timestamp,
-    isCompacted: true,
     startTime,
     endTime,
     compactedContent,
-  };
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
@@ -79,7 +77,13 @@ describe('ContentRequestProcessor', () => {
       createMockEvent('1', 1000, 'Original message 1'),
       createMockEvent('2', 2000, 'Original message 2'),
       createMockEvent('3', 3000, 'Original message 3'), // This should be covered
-      createCompactedEvent('c1', 3500, 1000, 3000, 'Summary of messages 1-3'),
+      createMockCompactedEvent(
+        'c1',
+        3500,
+        1000,
+        3000,
+        'Summary of messages 1-3',
+      ),
       createMockEvent('4', 4000, 'New message 4'),
     ];
 
@@ -121,7 +125,13 @@ describe('ContentRequestProcessor', () => {
       createMockEvent('3', 3000, 'Original message 3'), // This should be covered
       createMockEvent('4', 4000, 'New message 4'),
       createMockEvent('5', 5000, 'New message 5'),
-      createCompactedEvent('c1', 6000, 1000, 3000, 'Summary of messages 1-3'),
+      createMockCompactedEvent(
+        'c1',
+        6000,
+        1000,
+        3000,
+        'Summary of messages 1-3',
+      ),
     ];
 
     const invocationContext = createMockInvocationContext(rawEvents);
@@ -156,9 +166,9 @@ describe('ContentRequestProcessor', () => {
     const rawEvents: Event[] = [
       createMockEvent('1', 1000, 'Original message 1'),
       createMockEvent('2', 2000, 'Original message 2'),
-      createCompactedEvent('c1', 3000, 1000, 2000, 'Summary 1-2'),
+      createMockCompactedEvent('c1', 3000, 1000, 2000, 'Summary 1-2'),
       createMockEvent('3', 4000, 'Original message 3'),
-      createCompactedEvent('c2', 5000, 1000, 4000, 'Summary 1-3'),
+      createMockCompactedEvent('c2', 5000, 1000, 4000, 'Summary 1-3'),
       createMockEvent('4', 6000, 'New message 4'),
     ];
 
