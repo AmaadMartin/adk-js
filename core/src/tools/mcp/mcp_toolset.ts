@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Writable} from 'node:stream';
+
+import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {
   BlobResourceContents,
   ListResourcesResult,
@@ -14,12 +17,46 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {ReadonlyContext} from '../../agents/readonly_context.js';
+import {formatError, isAbortError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
-import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
+import {
+  McpConnectionError,
+  MCPConnectionParams,
+  MCPSessionManager,
+} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
+
+/** Optional configuration for an {@link MCPToolset}. */
+export interface McpToolsetOptions {
+  /**
+   * Stream that receives the MCP server's stderr and its transport errors, for
+   * every session the toolset opens — tool discovery, resource reads, and the
+   * sessions its {@link MCPTool}s open to run a tool. When omitted, transport
+   * errors go to the ADK logger and a stdio server's stderr is inherited by
+   * the parent process.
+   */
+  errlog?: Writable;
+}
+
+/**
+ * Names the MCP operation that produced `err`, so a bare transport string
+ * reaches the caller as `<operation>: <root cause>`.
+ *
+ * A cancellation passes through untouched: the caller has to keep seeing an
+ * `AbortError` rather than a connection failure. Everything else is wrapped,
+ * as `mcp_toolset.py` wraps it.
+ */
+function nameFailedOperation(operation: string, err: unknown): unknown {
+  if (isAbortError(err)) {
+    return err;
+  }
+  return new McpConnectionError(`${operation}: ${formatError(err)}`, {
+    cause: err,
+  });
+}
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -49,6 +86,17 @@ import {MCPTool} from './mcp_tool.js';
  *   const mcpToolset = new MCPToolset(connectionParams);
  *   const tools = await mcpToolset.getTools();
  *
+ * Every method rejects with {@link McpConnectionError}, whose message names
+ * the MCP operation that failed and whose `cause` is the original error. The
+ * prefixes match adk-python's, so a log search works against either SDK:
+ *
+ * - `getTools`: `Failed to get tools from MCP server`
+ * - `listResources`, `getResourceInfo`: `Failed to list resources from MCP server`
+ * - `readResource`: `Failed to get resource <name> from MCP server`
+ *
+ * A cancelled call is the exception: an `AbortError` reaches the caller
+ * unchanged, so "the caller gave up" stays distinguishable from "the server
+ * broke".
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
@@ -57,20 +105,51 @@ export class MCPToolset extends BaseToolset {
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    options: McpToolsetOptions = {},
   ) {
     super(toolFilter, prefix);
-    this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    this.mcpSessionManager = new MCPSessionManager(connectionParams, {
+      errlog: options.errlog,
+    });
+  }
+
+  /**
+   * Opens a session, runs `operation` on it, and closes it again.
+   *
+   * This is the single place a failed MCP call is turned into an
+   * {@link McpConnectionError}: `operation` names what was being attempted, so
+   * the caller learns which MCP call failed instead of reading a bare
+   * transport string. The session is closed on every exit path.
+   *
+   * @param operation Short description of the attempt, used as the message
+   *   prefix on failure.
+   * @param run Receives the open session.
+   * @return Whatever `run` resolves to.
+   * @throws {McpConnectionError} when opening the session or running `run`
+   *   fails for any reason other than cancellation.
+   */
+  private async executeWithSession<T>(
+    operation: string,
+    run: (session: Client) => Promise<T>,
+  ): Promise<T> {
+    let session: Client | undefined;
+    try {
+      session = await this.mcpSessionManager.createSession();
+      return await run(session);
+    } catch (err: unknown) {
+      throw nameFailedOperation(operation, err);
+    } finally {
+      if (session) {
+        await this.mcpSessionManager.closeSession(session);
+      }
+    }
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const session = await this.mcpSessionManager.createSession();
-
-    let listResult: ListToolsResult;
-    try {
-      listResult = (await session.listTools()) as ListToolsResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const listResult = await this.executeWithSession(
+      'Failed to get tools from MCP server',
+      async (session) => (await session.listTools()) as ListToolsResult,
+    );
     logger.debug(`number of tools: ${listResult.tools.length}`);
     for (const tool of listResult.tools) {
       logger.debug(`tool: ${tool.name}`);
@@ -117,13 +196,16 @@ export class MCPToolset extends BaseToolset {
    * @return The resource names available on the server.
    */
   async listResources(): Promise<string[]> {
-    const session = await this.mcpSessionManager.createSession();
-    try {
-      const result = (await session.listResources()) as ListResourcesResult;
-      return result.resources.map((resource) => resource.name);
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = await this.listResourcesResult();
+    return result.resources.map((resource) => resource.name);
+  }
+
+  /** Fetches the server's resource listing, naming the operation on failure. */
+  private listResourcesResult(): Promise<ListResourcesResult> {
+    return this.executeWithSession(
+      'Failed to list resources from MCP server',
+      async (session) => (await session.listResources()) as ListResourcesResult,
+    );
   }
 
   /**
@@ -134,13 +216,7 @@ export class MCPToolset extends BaseToolset {
    * @throws If no resource with the given name is advertised by the server.
    */
   async getResourceInfo(name: string): Promise<Resource> {
-    const session = await this.mcpSessionManager.createSession();
-    let result: ListResourcesResult;
-    try {
-      result = (await session.listResources()) as ListResourcesResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = await this.listResourcesResult();
 
     const resource = result.resources.find(
       (candidate) => candidate.name === name,
@@ -170,15 +246,14 @@ export class MCPToolset extends BaseToolset {
       throw new Error(`Resource '${name}' has no URI.`);
     }
 
-    const session = await this.mcpSessionManager.createSession();
-    try {
-      const result = (await session.readResource({
-        uri: resourceInfo.uri,
-      })) as ReadResourceResult;
-      return result.contents;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = await this.executeWithSession(
+      `Failed to get resource ${name} from MCP server`,
+      async (session) =>
+        (await session.readResource({
+          uri: resourceInfo.uri,
+        })) as ReadResourceResult,
+    );
+    return result.contents;
   }
 
   async close(): Promise<void> {
