@@ -16,6 +16,9 @@
     // through node_modules.
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
+      // `nodenext` does not resolve a directory to its index, so a subpath
+      // barrel needs its own entry ahead of the wildcard.
+      "@google/adk/tools/pubsub": ["./core/src/tools/pubsub/index.ts"],
       "@google/adk/*": ["./core/src/*"],
       "@google/adk-integrations": ["./integrations/src/index.ts"],
       "@google/adk-integrations/*": ["./integrations/src/*"]
