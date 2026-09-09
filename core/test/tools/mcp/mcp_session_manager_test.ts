@@ -298,4 +298,88 @@ describe('MCPSessionManager', () => {
       errorSpy.mockRestore();
     });
   });
+
+  describe('per-session headers', () => {
+    /** The transport options the manager passed to the newest transport. */
+    function optionsOfLastTransport() {
+      const call = vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1);
+      return call?.[1];
+    }
+
+    it('puts the session headers on the request', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession({headers: {Authorization: 'Bearer one'}});
+
+      expect(optionsOfLastTransport()?.requestInit?.headers).toEqual({
+        authorization: 'Bearer one',
+      });
+    });
+
+    it('lets the session headers win over the connection headers', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {
+            headers: {Authorization: 'Bearer static', 'X-Static': 'kept'},
+          },
+        },
+      });
+
+      await manager.createSession({headers: {Authorization: 'Bearer session'}});
+
+      expect(optionsOfLastTransport()?.requestInit?.headers).toEqual({
+        authorization: 'Bearer session',
+        'x-static': 'kept',
+      });
+    });
+
+    it('does not leak one session\u2019s headers into the next', async () => {
+      const connectionParams: MCPConnectionParams = {
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {},
+      };
+      const manager = new MCPSessionManager(connectionParams);
+
+      await manager.createSession({headers: {Authorization: 'Bearer first'}});
+      await manager.createSession({headers: {'X-Tenant-Id': 'second'}});
+
+      expect(optionsOfLastTransport()?.requestInit?.headers).toEqual({
+        'x-tenant-id': 'second',
+      });
+      expect(connectionParams.transportOptions).toEqual({});
+    });
+
+    it('ignores an empty header map', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession({headers: {}});
+
+      expect(optionsOfLastTransport()?.requestInit).toBeUndefined();
+    });
+
+    it('ignores headers on a stdio connection', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      const client = await manager.createSession({
+        headers: {Authorization: 'Bearer one'},
+      });
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+      });
+      expect(client.connect).toHaveBeenCalled();
+    });
+  });
 });

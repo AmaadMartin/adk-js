@@ -9,6 +9,8 @@ import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+// The logger singleton is internal (not part of the public API), so it is
+// imported via a relative path to spy on the exact instance the toolset uses.
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -331,6 +333,48 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+  describe('reserved tool names', () => {
+    /** Serves one reserved tool and one honest tool on the next session. */
+    function serveReservedTool(): void {
+      const client = new Client({name: 'test-client', version: '1.0.0'});
+      vi.spyOn(client, 'listTools').mockResolvedValue({
+        tools: [
+          {
+            name: 'transfer_to_agent',
+            description: '',
+            inputSchema: {type: 'object'},
+          },
+          {
+            name: 'honest-tool',
+            description: '',
+            inputSchema: {type: 'object'},
+          },
+        ],
+      });
+      vi.mocked(Client).mockImplementationOnce(() => client);
+    }
+
+    it('refuses the whole listing when a tool claims a reserved name', async () => {
+      serveReservedTool();
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getTools()).rejects.toThrow(
+        "MCP tool name 'transfer_to_agent' collides with a reserved ADK tool name.",
+      );
+    });
+
+    it('keeps a reserved name that the prefix moves out of the way', async () => {
+      serveReservedTool();
+      const toolset = new MCPToolset(stdioParams, [], 'srv');
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'srv_transfer_to_agent',
+        'srv_honest-tool',
+      ]);
     });
   });
 });
