@@ -4,33 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CompactedEvent,
-  Event,
-  InMemoryRunner,
-  isScratchpadEvent,
-} from '@google/adk';
+import {CompactedEvent, InMemoryRunner, isScratchpadEvent} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {getActiveEventsSince} from '../../../../core/src/context/compaction_utils.js';
 import {GeminiWithMockResponses} from '../../test_case_utils.js';
 import {rootAgent} from './agent.js';
-
-function getActiveEvents(events: Event[]): Event[] {
-  let scratchpad: CompactedEvent | undefined = undefined;
-  for (let i = events.length - 1; i >= 0; i--) {
-    if (isScratchpadEvent(events[i])) {
-      scratchpad = events[i] as CompactedEvent;
-      break;
-    }
-  }
-  if (!scratchpad) return events;
-  return [
-    scratchpad,
-    ...events.filter(
-      (e) => !isScratchpadEvent(e) && e.timestamp > scratchpad!.endTime,
-    ),
-  ];
-}
 
 describe('Anchored Context Compaction', () => {
   let mockTime = 1000;
@@ -155,7 +134,10 @@ describe('Anchored Context Compaction', () => {
       userId: 'test_user',
       appName: 'anchored_compaction_agent',
     });
-    let activeEvents = getActiveEvents(updatedSession!.events);
+    let activeEvents = getActiveEventsSince(
+      updatedSession!.events,
+      isScratchpadEvent,
+    );
 
     expect(activeEvents.length).toBe(4); // Scratchpad + Retained Model 2 + Turn 3 User + Turn 3 Model
     expect(isScratchpadEvent(activeEvents[0])).toBe(true);
@@ -188,7 +170,10 @@ describe('Anchored Context Compaction', () => {
       userId: 'test_user',
       appName: 'anchored_compaction_agent',
     });
-    activeEvents = getActiveEvents(updatedSession!.events);
+    activeEvents = getActiveEventsSince(
+      updatedSession!.events,
+      isScratchpadEvent,
+    );
 
     expect(activeEvents.length).toBe(4); // Scratchpad 2 + Retained Model 3 + Turn 4 User + Turn 4 Model
     expect(isScratchpadEvent(activeEvents[0])).toBe(true);

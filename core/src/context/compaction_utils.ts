@@ -4,12 +4,54 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isCompactedEvent} from '../events/compacted_event.js';
+import {CompactedEvent, isCompactedEvent} from '../events/compacted_event.js';
 import {
   Event,
   getFunctionCalls,
   getFunctionResponses,
 } from '../events/event.js';
+
+/**
+ * Filters the events to return only the active events since the latest event
+ * matching `isAnchor`. If no such event exists, returns all events.
+ *
+ * The boundary is {@link CompactedEvent.retainFromEventId}.
+ *
+ * @param events The full history of events.
+ * @param isAnchor Identifies the compacted events this boundary applies to.
+ * @returns The active events, starting with the latest anchor if present.
+ */
+export function getActiveEventsSince(
+  events: Event[],
+  isAnchor: (event: Event) => event is CompactedEvent,
+): Event[] {
+  let anchor: CompactedEvent | undefined = undefined;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (isAnchor(event)) {
+      anchor = event;
+      break;
+    }
+  }
+
+  if (!anchor) {
+    return events;
+  }
+
+  const startIndex = anchor.retainFromEventId
+    ? events.findIndex((e) => e.id === anchor.retainFromEventId)
+    : -1;
+
+  // An anchor written before `retainFromEventId` existed, or read back from a
+  // store that rewrites event ids, has no resolvable boundary. Those keep the
+  // timestamp rule, which retains too little rather than nothing.
+  const activeRawEvents =
+    startIndex >= 0
+      ? events.slice(startIndex).filter((e) => !isAnchor(e))
+      : events.filter((e) => !isAnchor(e) && e.timestamp > anchor.endTime);
+
+  return [anchor, ...activeRawEvents];
+}
 
 /**
  * Filters the events to return only the active events since the latest compaction.
@@ -19,15 +61,7 @@ import {
  * @returns The active events, starting with the latest CompactedEvent if present.
  */
 export function getActiveEvents(events: Event[]): Event[] {
-  const latest = events.filter(isCompactedEvent).pop();
-  return latest
-    ? [
-        latest,
-        ...events.filter(
-          (e) => !isCompactedEvent(e) && e.timestamp > latest.endTime,
-        ),
-      ]
-    : events;
+  return getActiveEventsSince(events, isCompactedEvent);
 }
 
 /**

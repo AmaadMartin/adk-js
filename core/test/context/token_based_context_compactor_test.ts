@@ -13,8 +13,11 @@ import {
   PluginManager,
   Session,
   TokenBasedContextCompactor,
+  createEvent,
+  isCompactedEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {getActiveEvents} from '../../src/context/compaction_utils.js';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
@@ -69,6 +72,25 @@ function createMockEvent(
     event.content!.parts!.push({text});
   }
   return event;
+}
+
+/**
+ * Builds an event with an explicit timestamp, so a test can place two events
+ * in the same millisecond. `createMockEvent` stamps `Date.now()`.
+ */
+function createTimestampedEvent(
+  id: string,
+  timestamp: number,
+  tokenCount?: number,
+): Event {
+  return createEvent({
+    id,
+    author: 'user',
+    timestamp,
+    usageMetadata:
+      tokenCount === undefined ? undefined : {promptTokenCount: tokenCount},
+    content: {role: 'user', parts: [{text: id}]},
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
@@ -254,5 +276,46 @@ describe('TokenBasedContextCompactor', () => {
     ]);
 
     expect(await compactor.shouldCompact(context)).toBe(false);
+  });
+
+  it('records the first retained event as the retain boundary', async () => {
+    const compactor = new TokenBasedContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer: new MockSummarizer(),
+    });
+
+    // '2' and '3' share a millisecond across the compaction boundary.
+    const context = createMockInvocationContext([
+      createTimestampedEvent('1', 1000, 15),
+      createTimestampedEvent('2', 2000),
+      createTimestampedEvent('3', 2000),
+      createTimestampedEvent('4', 3000),
+    ]);
+
+    await compactor.compact(context);
+
+    const compacted = context.session.events.filter(isCompactedEvent).pop();
+    expect(compacted?.retainFromEventId).toBe('3');
+  });
+
+  it('keeps a retained event that shares a millisecond with the last summarized event', async () => {
+    const compactor = new TokenBasedContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer: new MockSummarizer(),
+    });
+
+    const context = createMockInvocationContext([
+      createTimestampedEvent('1', 1000, 15),
+      createTimestampedEvent('2', 2000),
+      createTimestampedEvent('3', 2000),
+      createTimestampedEvent('4', 3000),
+    ]);
+
+    await compactor.compact(context);
+
+    const activeIds = getActiveEvents(context.session.events).map((e) => e.id);
+    expect(activeIds).toEqual(['mock-id', '3', '4']);
   });
 });

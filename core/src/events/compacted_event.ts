@@ -35,6 +35,20 @@ export interface CompactedEvent extends Event {
    * Identifies this compacted event as the persistent context scratchpad.
    */
   isScratchpad?: boolean;
+
+  /**
+   * The id of the first event this compaction retained. That event, and every
+   * raw event positioned after it, stays active.
+   *
+   * Timestamps cannot express this boundary: `endTime` is the timestamp of the
+   * last compacted event, so a retained event created in the same millisecond
+   * is indistinguishable from it.
+   *
+   * The marker is the first retained event rather than the last compacted one
+   * because a compactor may drop the compacted events from the list it
+   * rebuilds, while the retained events survive in every layout.
+   */
+  retainFromEventId?: string;
 }
 
 /**
@@ -65,5 +79,6 @@ export function createCompactedEvent(
     endTime: params.endTime!,
     compactedContent: params.compactedContent!,
     isScratchpad: params.isScratchpad,
+    retainFromEventId: params.retainFromEventId,
   };
 }
