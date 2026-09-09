@@ -6,6 +6,7 @@
 
 import {
   AuthCredentialTypes,
+  BaseTool,
   Context,
   createSession,
   InvocationContext,
@@ -197,5 +198,118 @@ describe('OpenAPIToolset Integration', () => {
     expect(requestUrl.host).toBe('api.example.com');
     expect(requestUrl.pathname).toBe('/v1/users/..%2F..%2Fadmin%2Fexport');
     expect(requestUrl.searchParams.get('key')).toBe('test-api-key');
+  });
+});
+
+describe('OpenAPIToolset with a multi-schema spec', () => {
+  let petstoreSpec: string;
+
+  beforeEach(() => {
+    petstoreSpec = fs.readFileSync(
+      path.resolve(__dirname, 'fixtures/petstore.yaml'),
+      'utf8',
+    );
+    globalThis.fetch = vi.fn();
+  });
+
+  async function getPetstoreTool(name: string) {
+    const toolset = new OpenAPIToolset({
+      specStr: petstoreSpec,
+      specType: 'yaml',
+      authCredential: {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'test-api-key',
+      },
+    });
+    const tool = (await toolset.getTools()).find((t) => t.name === name);
+    if (!tool) expect.fail(`${name} tool was not created`);
+    return tool;
+  }
+
+  function declaredParameters(tool: BaseTool) {
+    const parameters = tool._getDeclaration()?.parameters;
+    if (!parameters?.properties) {
+      expect.fail(`${tool.name} has no declared parameters`);
+    }
+    return {...parameters, properties: parameters.properties};
+  }
+
+  it('creates one tool per operation across every path', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: petstoreSpec,
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.map((t) => t.name)).toEqual([
+      'add_pet',
+      'update_pet',
+      'find_pets_by_status',
+      'find_pets_by_tags',
+      'get_pet_by_id',
+      'update_pet_with_form',
+      'delete_pet',
+      'upload_file',
+      'get_inventory',
+      'place_order',
+      'get_order_by_id',
+      'delete_order',
+      'create_user',
+      'create_users_with_list_input',
+      'login_user',
+      'logout_user',
+      'get_user_by_name',
+      'update_user',
+      'delete_user',
+    ]);
+  });
+
+  it('flattens a $ref request body into snake_cased parameters', async () => {
+    const parameters = declaredParameters(await getPetstoreTool('add_pet'));
+
+    expect(Object.keys(parameters.properties)).toEqual([
+      'id',
+      'name',
+      'category',
+      'photo_urls',
+      'tags',
+      'status',
+    ]);
+    expect(parameters.required).toEqual(['name', 'photo_urls']);
+  });
+
+  it('resolves $refs nested inside a referenced schema', async () => {
+    const parameters = declaredParameters(await getPetstoreTool('add_pet'));
+
+    expect(parameters.properties['category']).toMatchObject({
+      type: 'object',
+      properties: {id: {type: 'integer'}, name: {type: 'string'}},
+    });
+    expect(JSON.stringify(parameters)).not.toContain('$ref');
+  });
+
+  it('applies the api-key scheme declared on the operation', async () => {
+    const getPetById = await getPetstoreTool('get_pet_by_id');
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response('{}', {headers: {'content-type': 'application/json'}}),
+    );
+
+    await getPetById.runAsync({
+      args: {pet_id: 10},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-petstore',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-petstore', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    const [calledUrl, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(String(calledUrl)).toBe(
+      'https://petstore3.swagger.io/api/v3/pet/10',
+    );
+    expect(new Headers(init?.headers).get('api_key')).toBe('test-api-key');
   });
 });
