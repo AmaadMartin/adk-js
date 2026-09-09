@@ -197,6 +197,14 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+// Named explicitly (not `export *`) so that adding an export to the registry
+// module is not the same act as publishing it.
+export {
+  FeatureName,
+  isFeatureEnabled,
+  overrideFeatureEnabled,
+  withTemporaryFeatureOverride,
+} from './features/feature_registry.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
@@ -371,7 +379,6 @@ export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './artifacts/base_artifact_service.js';
-export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
@@ -464,7 +471,6 @@ export type {
 
 export * from './apps/app.js';
 export * from './artifacts/base_artifact_service.js';
-export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
