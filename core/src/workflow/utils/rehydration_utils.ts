@@ -15,6 +15,7 @@
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
 import {Event} from '../../events/event.js';
+import {isRecord} from '../../utils/type_utils.js';
 import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
 import {
@@ -480,11 +481,6 @@ function directChildName(path: string, parentPath: string): string | undefined {
     return undefined; // a deeper descendant, not a direct child
   }
   return rest.split('@')[0];
-}
-
-/** Narrows an unknown value to a plain (non-array) record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

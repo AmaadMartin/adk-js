@@ -12,6 +12,8 @@ import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
+import {createRecordingFetch, getHttpDebugSink} from './http_debug_recorder.js';
+
 /**
  * The optional peer backing every MCP connection.
  *
@@ -27,6 +29,21 @@ const MCP_SDK: OptionalPeer = {
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
+}
+
+/**
+ * Returns `options` with a recording `fetch` installed, but only while a debug
+ * sink is active. With no sink the caller's options are handed back untouched,
+ * so an ordinary run sends exactly the bytes it sends today.
+ */
+function withHttpDebugRecording(
+  options: StreamableHTTPClientTransportOptions,
+): StreamableHTTPClientTransportOptions {
+  const sink = getHttpDebugSink();
+  if (!sink) {
+    return options;
+  }
+  return {...options, fetch: createRecordingFetch(sink, options.fetch)};
 }
 
 /**
@@ -132,7 +149,7 @@ export class MCPSessionManager {
           );
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
-            options,
+            withHttpDebugRecording(options),
           );
           transport.onerror = logTransportError;
           await client.connect(transport);

@@ -7,8 +7,13 @@
 import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {describe, expect, it, vi} from 'vitest';
+import {
+  HttpDebugExchange,
+  runWithHttpDebugSink,
+} from '../../../src/tools/mcp/http_debug_recorder.js';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -296,6 +301,83 @@ describe('MCPSessionManager', () => {
       );
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('HTTP debug capture', () => {
+    function transportOptions(): StreamableHTTPClientTransportOptions {
+      const call = vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1);
+      if (!call) {
+        expect.fail('the transport was never constructed');
+      }
+      return call[1] ?? {};
+    }
+
+    it('installs no fetch wrapper when no sink is active', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession();
+
+      expect(transportOptions().fetch).toBeUndefined();
+    });
+
+    it('installs a recording fetch over the global one', async () => {
+      const sink: HttpDebugExchange[] = [];
+      const globalFetch = vi.fn().mockResolvedValue(new Response('{"ok":1}'));
+      vi.stubGlobal('fetch', globalFetch);
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await runWithHttpDebugSink(sink, () => manager.createSession());
+      const recording = transportOptions().fetch;
+      if (!recording) {
+        expect.fail('expected a recording fetch to be installed');
+      }
+      await recording('http://test-url', {method: 'POST', body: '{}'});
+      vi.unstubAllGlobals();
+
+      expect(globalFetch).toHaveBeenCalledOnce();
+      expect(sink).toEqual([
+        expect.objectContaining({
+          url: 'http://test-url',
+          method: 'POST',
+          request_body: '{}',
+        }),
+      ]);
+    });
+
+    it('records through the caller-supplied fetch', async () => {
+      const sink: HttpDebugExchange[] = [];
+      const userFetch = vi.fn().mockResolvedValue(new Response('{"ok":1}'));
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {fetch: userFetch},
+      });
+
+      await runWithHttpDebugSink(sink, () => manager.createSession());
+      await transportOptions().fetch?.('http://test-url');
+
+      expect(userFetch).toHaveBeenCalledOnce();
+      expect(sink).toHaveLength(1);
+    });
+
+    it('leaves the caller transport options unmodified', async () => {
+      const callerOptions = {requestInit: {headers: {'x-test': '1'}}};
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: callerOptions,
+      });
+
+      await runWithHttpDebugSink([], () => manager.createSession());
+
+      expect(callerOptions).toEqual({requestInit: {headers: {'x-test': '1'}}});
     });
   });
 });

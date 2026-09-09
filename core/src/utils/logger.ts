@@ -28,6 +28,16 @@ export interface Logger {
   error(...args: unknown[]): void;
 
   setLogLevel(level: LogLevel): void;
+
+  /**
+   * Whether {@link Logger.debug} messages are emitted at the current level.
+   *
+   * A caller uses it to skip work that only feeds a debug message, such as
+   * capturing HTTP exchanges. It is optional so an existing implementation of
+   * this interface keeps compiling; {@link isDebugEnabled} then reports
+   * `false`, which leaves such capture off.
+   */
+  isDebugEnabled?(): boolean;
 }
 
 class SimpleLogger implements Logger {
@@ -61,6 +71,10 @@ class SimpleLogger implements Logger {
 
   setLogLevel(level: LogLevel): void {
     this.logLevel = level;
+  }
+
+  isDebugEnabled(): boolean {
+    return this.logLevel <= LogLevel.DEBUG;
   }
 
   log(level: LogLevel, ...messages: unknown[]): void {
@@ -109,6 +123,9 @@ class SimpleLogger implements Logger {
  */
 class NoOpLogger implements Logger {
   setLogLevel(_level: LogLevel): void {}
+  isDebugEnabled(): boolean {
+    return false;
+  }
   log(_level: LogLevel, ..._args: unknown[]): void {}
   debug(..._args: unknown[]): void {}
   info(..._args: unknown[]): void {}
@@ -144,6 +161,16 @@ export function resetLogger(): void {
  */
 export function setLogLevel(level: LogLevel) {
   logger.setLogLevel(level);
+}
+
+/**
+ * Whether the current logger emits debug messages.
+ *
+ * A logger that does not implement {@link Logger.isDebugEnabled} reports
+ * `false`, so a caller gated on this does no extra work by default.
+ */
+export function isDebugEnabled(): boolean {
+  return currentLogger.isDebugEnabled?.() ?? false;
 }
 
 /**

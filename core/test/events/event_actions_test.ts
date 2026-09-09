@@ -12,6 +12,7 @@ import {
   isDefaultEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
+import {UiWidget} from '../../src/events/ui_widget.js';
 import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
 
 function createTestAuthConfig(credentialKey: string): AuthConfig {
@@ -251,5 +252,55 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+
+  it('leaves renderUiWidgets unset when no source sets it', () => {
+    const result = mergeEventActions([
+      createEventActions({stateDelta: {x: 1}}),
+      createEventActions(),
+    ]);
+    expect(result.renderUiWidgets).toBeUndefined();
+  });
+
+  it('concatenates renderUiWidgets across sources in order', () => {
+    const first: UiWidget = {id: 'a', provider: 'mcp', payload: {n: 1}};
+    const second: UiWidget = {id: 'b', provider: 'mcp', payload: {n: 2}};
+
+    const result = mergeEventActions([
+      createEventActions({renderUiWidgets: [first]}),
+      createEventActions(),
+      createEventActions({renderUiWidgets: [second]}),
+    ]);
+
+    expect(result.renderUiWidgets).toEqual([first, second]);
+  });
+
+  it('does not mutate a source list while concatenating', () => {
+    const source = createEventActions({
+      renderUiWidgets: [{id: 'a', provider: 'mcp', payload: {}}],
+    });
+
+    mergeEventActions([
+      source,
+      createEventActions({
+        renderUiWidgets: [{id: 'b', provider: 'mcp', payload: {}}],
+      }),
+    ]);
+
+    expect(source.renderUiWidgets).toHaveLength(1);
+  });
+});
+
+describe('isDefaultEventActions with UI widgets', () => {
+  it('reports non-default when a widget is the only signal', () => {
+    const actions = createEventActions({
+      renderUiWidgets: [{id: 'a', provider: 'mcp', payload: {}}],
+    });
+    expect(isDefaultEventActions(actions)).toBe(false);
+  });
+
+  it('reports default when the widget list is empty', () => {
+    const actions = createEventActions({renderUiWidgets: []});
+    expect(isDefaultEventActions(actions)).toBe(true);
   });
 });
