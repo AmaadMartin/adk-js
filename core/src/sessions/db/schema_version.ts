@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  MikroORM as MikroORMClass,
-  Options as MikroORMOptions,
-} from '@mikro-orm/core';
+import type {MikroORM as MikroORMClass} from '@mikro-orm/core';
 import {logger} from '../../utils/logger.js';
+import type {MikroORMOptions} from './operations.js';
 
 // MikroORM and the entity modules load on first use, not on import. The barrel
 // re-exports `upgradeSessionDatabaseSchema`, so a static import here would put

@@ -36,11 +36,13 @@ describe('storage schema DDL', () => {
   });
 
   it('emits MySQL datetime(6) for every temporal column', async () => {
-    orm = await MikroORM.init({
+    // The constructor is MikroORM v7's non-connecting init, which `connect:
+    // false` used to request. The schema SQL comes from metadata alone, so no
+    // MySQL server has to be reachable.
+    orm = new MikroORM({
       driver: MySqlDriver,
       entities: ENTITIES,
       dbName: 'adk',
-      connect: false,
       allowGlobalContext: true,
     });
 

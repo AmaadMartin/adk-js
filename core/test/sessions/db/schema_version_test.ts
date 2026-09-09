@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {upgradeSessionDatabaseSchema} from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {upgradeSessionDatabaseSchema} from '../../../src/index.js';
 import {
   ENTITIES,
   StorageMetadata,
@@ -50,7 +50,7 @@ describe('schema_version', () => {
         entities: [StorageMetadata],
       });
       // Ensure schema is updated so StorageMetadata table exists
-      await orm.schema.updateSchema();
+      await orm.schema.update();
     });
 
     afterEach(async () => {
@@ -186,7 +186,7 @@ describe('schema_version', () => {
     async function seedVersion(version: string): Promise<void> {
       const orm = await openDatabase();
       try {
-        await orm.schema.updateSchema();
+        await orm.schema.update();
         const em = orm.em.fork();
         await em
           .persist(

@@ -4,10 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
+import type {MikroORM, Options} from '@mikro-orm/core';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {ENTITIES} from './schema.js';
+
+/**
+ * The user-facing MikroORM config shape. Since v7 `Options` marks every key
+ * that has a default as required, so a partial config has to be described as
+ * `Partial<Options>`.
+ */
+export type MikroORMOptions = Partial<Options>;
 
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
@@ -92,5 +99,5 @@ export async function ensureDatabaseCreated(orm: MikroORM): Promise<void> {
   await orm.schema.ensureDatabase();
 
   // creates tables if they don't exist. Safe mode prevents dropping columns or tables.
-  await orm.schema.updateSchema({safe: true});
+  await orm.schema.update({safe: true});
 }

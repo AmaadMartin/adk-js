@@ -830,4 +830,5 @@ export type {
   WorkflowNodeConfig,
 } from './workflow/index.js';
 
-export * from './apps/app.js';
+export {App, isApp, validateAppName} from './apps/app.js';
+export type {AppOptions} from './apps/app.js';

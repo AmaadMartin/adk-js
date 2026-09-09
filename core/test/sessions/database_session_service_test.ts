@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Options as MikroDBOptions} from '@mikro-orm/core';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {
@@ -27,7 +26,12 @@ import {
 } from '../../src/index.js';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {ensureDatabaseCreated} from '../../src/sessions/db/operations.js';
-import {ENTITIES, StorageMetadata} from '../../src/sessions/db/schema.js';
+import {
+  ENTITIES,
+  StorageEvent,
+  StorageMetadata,
+  StorageSession,
+} from '../../src/sessions/db/schema.js';
 import {
   SCHEMA_VERSION_KEY,
   validateDatabaseSchemaVersion,
@@ -252,14 +256,14 @@ describe('DatabaseSessionService', () => {
 
     const em = orm.em.fork();
     expect(
-      await em.count('StorageSession', {
+      await em.count(StorageSession, {
         appName: 'test-app',
         userId: 'test-user',
         id: 's-atomic-fail',
       }),
     ).toBe(1);
     expect(
-      await em.count('StorageEvent', {
+      await em.count(StorageEvent, {
         appName: 'test-app',
         userId: 'test-user',
         sessionId: 's-atomic-fail',
@@ -1207,7 +1211,7 @@ describe('DatabaseSessionService additional options', () => {
   /** Reads the options a service hands to MikroORM, without opening a database. */
   async function captureInitOptions(
     service: DatabaseSessionService,
-  ): Promise<MikroDBOptions> {
+  ): Promise<Parameters<typeof MikroORM.init>[0]> {
     const initSpy = vi
       .spyOn(MikroORM, 'init')
       .mockRejectedValue(new Error('halt'));

@@ -53,7 +53,7 @@ describe('operations', () => {
         entities: ENTITIES,
       });
 
-      const eventProperties = orm.getMetadata().get(StorageEvent.name)
+      const eventProperties = orm.getMetadata().get(StorageEvent)
         .properties as Record<string, {length?: number}>;
       const keyProperties = ['id', 'appName', 'userId', 'sessionId'];
 

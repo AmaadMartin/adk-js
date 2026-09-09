@@ -1450,6 +1450,18 @@ describe('RestApiTool Utilities', () => {
       expect(result).toBeInstanceOf(FormData);
       expect(headers).toEqual({});
     });
+
+    it('should return undefined when content declares no mime types', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {content: {}};
+      const body = {foo: 'bar'};
+      const bodyData = {};
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, body, bodyData, headers);
+
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
+    });
   });
 });
 

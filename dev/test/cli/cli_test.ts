@@ -126,6 +126,21 @@ function unwrap(help: string): string {
   return help.replace(/\s+/g, ' ');
 }
 
+/**
+ * Under `exitOverride()` commander reports every termination by throwing a
+ * `CommanderError`, the only error out of `parseAsync` that carries an
+ * `exitCode`: 0 for a clean exit such as `--help`, non-zero for a usage error.
+ * There is no `commander.exit` code to compare against.
+ */
+function isCleanCommanderExit(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'exitCode' in error &&
+    error.exitCode === 0
+  );
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
   let originalExitCode: typeof process.exitCode;
@@ -147,7 +162,7 @@ describe('CLI Entrypoint', () => {
     try {
       await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
     } catch (e: unknown) {
-      if ((e as {code: string}).code !== 'commander.exit') {
+      if (!isCleanCommanderExit(e)) {
         throw e;
       }
     }
@@ -186,6 +201,30 @@ describe('CLI Entrypoint', () => {
         expect(entry).toMatch(/nearest package\.json for \.js and \.ts files/);
       },
     );
+  });
+
+  describe('parse helper: commander exits', () => {
+    beforeEach(() => {
+      // Commander writes help to stdout and usage errors to stderr; keep the
+      // suite silent.
+      program.configureOutput({
+        writeOut: () => {},
+        writeErr: () => {},
+      });
+    });
+
+    it('treats a clean commander exit as success', async () => {
+      await expect(parse(['--help'])).resolves.toBeUndefined();
+    });
+
+    it('surfaces a non-zero commander exit for an unknown option', async () => {
+      await expect(parse(['--definitely-not-an-option'])).rejects.toMatchObject(
+        {
+          code: 'commander.unknownOption',
+          exitCode: 1,
+        },
+      );
+    });
   });
 
   describe('command: web', () => {
