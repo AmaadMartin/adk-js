@@ -28,14 +28,20 @@ import {
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
 
-vi.mock('../../src/utils/file_utils.js', () => ({
-  createTempDir: vi.fn(),
-  isFile: vi.fn(),
-  isFileExists: vi.fn(),
-  isFolderExists: vi.fn(),
-  removeFolder: vi.fn(),
-  tryToFindFileRecursively: vi.fn(),
-}));
+vi.mock('../../src/utils/file_utils.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/utils/file_utils.js')>();
+  return {
+    createTempDir: vi.fn(),
+    isFile: vi.fn(),
+    isFileExists: vi.fn(),
+    isFolderExists: vi.fn(),
+    // A pure predicate over an error object. Stubbing it would only restate it.
+    isFileNotFoundError: actual.isFileNotFoundError,
+    removeFolder: vi.fn(),
+    tryToFindFileRecursively: vi.fn(),
+  };
+});
 
 vi.mock('esbuild', async (importOriginal) => {
   const actual = await importOriginal<typeof import('esbuild')>();

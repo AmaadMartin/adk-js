@@ -44,7 +44,10 @@ export interface TestSpec {
 
 export interface LlmRecording {
   llmRequest?: LlmRequest;
-  llmResponse?: LlmResponse;
+  // Every response of one model call, in order. A recording made with
+  // StreamingMode.SSE holds the partial chunks followed by the complete
+  // response; a non-streaming one holds a single response.
+  llmResponses?: LlmResponse[];
 }
 
 export interface ToolRecording {
