@@ -9,5 +9,4 @@ tests/**/package-lock.json
 coverage/
 api-reference/
 .env
-go.sum
 dev/.cache/

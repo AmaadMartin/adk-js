@@ -27,9 +27,12 @@ jobs:
 
       - name: Install Go dependencies
         shell: bash
+        # `go mod download` verifies each module against the committed go.sum
+        # and never writes it. `go mod tidy` rewrites go.sum, which would hide
+        # dependency drift from the `go run` in the test step.
         run: |
-          (cd tests/cross_language/a2a/go_ts/go_client && go mod tidy)
-          (cd tests/cross_language/a2a/ts_go/go_backend && go mod tidy)
+          (cd tests/cross_language/a2a/go_ts/go_client && go mod download)
+          (cd tests/cross_language/a2a/ts_go/go_backend && go mod download)
 
       - name: Build packages
         run: npm run build
