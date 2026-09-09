@@ -21,6 +21,7 @@ import {isLlmAgent} from '../agents/llm_agent.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import type {RunConfig} from '../agents/run_config.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
+import {isSessionArtifactService} from '../artifacts/session_artifact_service.js';
 import type {Event} from '../events/event.js';
 import {getFunctionCalls} from '../events/event.js';
 import type {LlmRequest} from '../models/llm_request.js';
@@ -562,11 +563,13 @@ export class EvalLiveSession {
       memoryService: this.runner.memoryService,
       credentialService: this.runner.credentialService,
       artifactService: this.runner.artifactService
-        ? new ScopedArtifactService(this.runner.artifactService, {
-            appName: this.runner.appName,
-            userId: this.userId,
-            sessionId: this.sessionId,
-          })
+        ? isSessionArtifactService(this.runner.artifactService)
+          ? this.runner.artifactService
+          : new ScopedArtifactService(this.runner.artifactService, {
+              appName: this.runner.appName,
+              userId: this.userId,
+              sessionId: this.sessionId,
+            })
         : undefined,
       pluginManager: this.runner.pluginManager,
       runConfig: LIVE_RUN_CONFIG,

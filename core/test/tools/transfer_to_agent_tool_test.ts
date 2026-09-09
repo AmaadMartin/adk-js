@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {LlmRequest} from '@google/adk';
+import {Type} from '@google/genai';
+import {describe, expect, it} from 'vitest';
+import type {LlmRequest} from '../../src/index.js';
 import {
   BaseAgent,
   Context,
@@ -15,9 +17,7 @@ import {
   TRANSFER_TO_AGENT_TOOL_NAME,
   transferToAgent,
   TransferToAgentTool,
-} from '@google/adk';
-import {Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 class MockAgent extends BaseAgent {
   constructor(name: string) {
@@ -48,7 +48,7 @@ function createLlmRequest(): LlmRequest {
 }
 
 describe('TransferToAgentTool', () => {
-  it('constrains agentName to the given agent names', () => {
+  it('constrains agent_name to the given agent names', () => {
     const tool = new TransferToAgentTool({
       agentNames: ['agent_a', 'agent_b', 'agent_c'],
     });
@@ -57,19 +57,19 @@ describe('TransferToAgentTool', () => {
 
     expect(declaration.name).toBe(TRANSFER_TO_AGENT_TOOL_NAME);
     expect(declaration.parameters?.type).toBe(Type.OBJECT);
-    expect(declaration.parameters?.required).toEqual(['agentName']);
-    expect(declaration.parameters?.properties?.['agentName']?.enum).toEqual([
+    expect(declaration.parameters?.required).toEqual(['agent_name']);
+    expect(declaration.parameters?.properties?.['agent_name']?.enum).toEqual([
       'agent_a',
       'agent_b',
       'agent_c',
     ]);
   });
 
-  it('constrains agentName to a single agent name', () => {
+  it('constrains agent_name to a single agent name', () => {
     const tool = new TransferToAgentTool({agentNames: ['single_agent']});
 
     expect(
-      tool._getDeclaration().parameters?.properties?.['agentName']?.enum,
+      tool._getDeclaration().parameters?.properties?.['agent_name']?.enum,
     ).toEqual(['single_agent']);
   });
 
@@ -78,7 +78,7 @@ describe('TransferToAgentTool', () => {
     const tool = new TransferToAgentTool({agentNames});
 
     const declaredEnum =
-      tool._getDeclaration().parameters?.properties?.['agentName']?.enum;
+      tool._getDeclaration().parameters?.properties?.['agent_name']?.enum;
 
     expect(declaredEnum).toEqual(agentNames);
     expect(declaredEnum).toHaveLength(5);
@@ -88,7 +88,7 @@ describe('TransferToAgentTool', () => {
     const tool = new TransferToAgentTool({agentNames: []});
 
     const agentNameSchema =
-      tool._getDeclaration().parameters?.properties?.['agentName'];
+      tool._getDeclaration().parameters?.properties?.['agent_name'];
 
     expect(agentNameSchema).toBeDefined();
     expect(agentNameSchema?.enum).toEqual([]);
@@ -98,18 +98,18 @@ describe('TransferToAgentTool', () => {
     const tool = new TransferToAgentTool({agentNames: ['agent_a']});
 
     const agentNameSchema =
-      tool._getDeclaration().parameters?.properties?.['agentName'];
+      tool._getDeclaration().parameters?.properties?.['agent_name'];
 
     expect(agentNameSchema?.type).toBe(Type.STRING);
     expect(agentNameSchema?.description).toBe('the agent name to transfer to.');
   });
 
-  it('declares agentName as its only parameter', () => {
+  it('declares agent_name as its only parameter', () => {
     const tool = new TransferToAgentTool({agentNames: ['agent_a']});
 
     expect(
       Object.keys(tool._getDeclaration().parameters?.properties ?? {}),
-    ).toEqual(['agentName']);
+    ).toEqual(['agent_name']);
   });
 
   it('describes the hand-off to the model', () => {
@@ -139,7 +139,7 @@ describe('TransferToAgentTool', () => {
     agentNames.push('agent_b');
 
     expect(
-      tool._getDeclaration().parameters?.properties?.['agentName']?.enum,
+      tool._getDeclaration().parameters?.properties?.['agent_name']?.enum,
     ).toEqual(['agent_a']);
   });
 
@@ -148,7 +148,7 @@ describe('TransferToAgentTool', () => {
     const toolContext = createToolContext();
 
     const result = await tool.runAsync({
-      args: {agentName: 'sub_agent'},
+      args: {agent_name: 'sub_agent'},
       toolContext,
     });
 
@@ -172,13 +172,13 @@ describe('TransferToAgentTool', () => {
     }
     const declaration = registeredTool.functionDeclarations?.[0];
     expect(declaration?.name).toBe(TRANSFER_TO_AGENT_TOOL_NAME);
-    expect(declaration?.parameters?.properties?.['agentName']?.enum).toEqual([
+    expect(declaration?.parameters?.properties?.['agent_name']?.enum).toEqual([
       'agent_a',
       'agent_b',
     ]);
   });
 
-  it('rejects a call whose agentName is missing', async () => {
+  it('rejects a call whose agent_name is missing', async () => {
     const tool = new TransferToAgentTool({agentNames: ['agent_a']});
 
     await expect(
@@ -186,11 +186,11 @@ describe('TransferToAgentTool', () => {
     ).rejects.toThrow(/^Error in tool 'transfer_to_agent': /);
   });
 
-  it('rejects a call whose agentName is not a string', async () => {
+  it('rejects a call whose agent_name is not a string', async () => {
     const tool = new TransferToAgentTool({agentNames: ['agent_a']});
 
     await expect(
-      tool.runAsync({args: {agentName: 42}, toolContext: createToolContext()}),
+      tool.runAsync({args: {agent_name: 42}, toolContext: createToolContext()}),
     ).rejects.toThrow(/^Error in tool 'transfer_to_agent': /);
   });
 });
@@ -199,14 +199,14 @@ describe('transferToAgent', () => {
   it('records the target agent on the tool context', () => {
     const toolContext = createToolContext();
 
-    const result = transferToAgent({agentName: 'sub_agent'}, toolContext);
+    const result = transferToAgent({agent_name: 'sub_agent'}, toolContext);
 
     expect(result).toBe('Transfer queued');
     expect(toolContext.actions.transferToAgent).toBe('sub_agent');
   });
 
   it('throws when there is no tool context', () => {
-    expect(() => transferToAgent({agentName: 'sub_agent'})).toThrow(
+    expect(() => transferToAgent({agent_name: 'sub_agent'})).toThrow(
       'toolContext is required.',
     );
   });

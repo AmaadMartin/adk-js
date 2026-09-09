@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseTool, Context, Event} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_confirmation_llm_request_processor.js';
+import type {BaseTool, Context, Event} from '../../../src/index.js';
 import {
   BasePlugin,
   InvocationContext,
@@ -16,9 +18,7 @@ import {
   createEventActions,
   createSession,
   getFunctionResponses,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
-import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_confirmation_llm_request_processor.js';
+} from '../../../src/index.js';
 
 const REJECTION_ERROR = 'Tool call rejected from confirmation flow.';
 
@@ -50,7 +50,7 @@ class RejectUnconfirmedPlugin extends BasePlugin {
 const TRANSFER_FUNCTION_CALL = {
   id: 'fc-transfer',
   name: 'transfer_to_agent',
-  args: {agentName: 'sub_agent'},
+  args: {agent_name: 'sub_agent'},
 };
 
 /**

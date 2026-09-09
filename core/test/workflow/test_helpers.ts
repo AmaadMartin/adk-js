@@ -126,7 +126,7 @@ export function transferringAgent(
         functionCall: {
           id: `fc-${name}`,
           name: 'transfer_to_agent',
-          args: {agentName: target},
+          args: {agent_name: target},
         },
       },
       reply,

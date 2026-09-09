@@ -161,7 +161,7 @@ export function formatLogArgs(args: unknown[]): string {
 }
 
 /** The `console` method each level is written with. */
-const CONSOLE_METHOD = {
+export const CONSOLE_METHOD = {
   [LogLevel.DEBUG]: 'debug',
   [LogLevel.INFO]: 'info',
   [LogLevel.WARN]: 'warn',

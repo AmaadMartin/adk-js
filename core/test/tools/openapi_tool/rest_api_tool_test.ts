@@ -582,6 +582,51 @@ describe('RestApiTool', () => {
     );
   });
 
+  it('should send no request for a basic auth credential', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'GET',
+    };
+    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const authScheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'http',
+      scheme: 'basic',
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.HTTP,
+      http: {
+        scheme: 'basic',
+        credentials: {username: 'user', password: 'password'},
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      authScheme,
+      authCredential,
+    );
+
+    globalThis.fetch = vi.fn();
+
+    await expect(
+      tool.runAsync({
+        args: {},
+        toolContext: new Context({
+          invocationContext: new InvocationContext({
+            invocationId: 'invocation-1',
+            agent: new LlmAgent({name: 'test_agent'}),
+            session: createSession({id: 'session-1', appName: 'test_app'}),
+            pluginManager: new PluginManager(),
+          }),
+        }),
+      }),
+    ).rejects.toThrow('Basic Authentication is not supported.');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it('should fallback to JSON if no requestBody in spec', async () => {
     const endpoint = {
       baseUrl: 'http://api.example.com',

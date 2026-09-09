@@ -7,6 +7,8 @@
 import type {Event} from '@google/adk';
 import {
   AgentTool,
+  FunctionTool,
+  InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
   LlmAgent,
@@ -14,6 +16,7 @@ import {
 } from '@google/adk';
 import {FinishReason, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import type {RawGenerateContentResponse} from '../test_case_utils.js';
 import {GeminiWithMockResponses} from '../test_case_utils.js';
 
@@ -223,5 +226,154 @@ describe('AgentTool', () => {
     expect(toolResponse?.functionResponse?.response).toEqual({
       answer: 'Tuesday',
     });
+  });
+
+  it('forwards saved artifacts from sub-agent to parent session artifact service without appName or sessionId parameters', async () => {
+    const saveArtifactTool = new FunctionTool({
+      name: 'saveArtifactTool',
+      description: 'Saves text to an artifact.',
+      parameters: z.object({
+        filename: z.string(),
+        text: z.string(),
+      }),
+      execute: async ({filename, text}, toolContext) => {
+        // `FunctionTool` types the tool context as optional, but the runner
+        // always supplies it. Narrow explicitly so a missing context fails the
+        // test loudly rather than being papered over by a bare `!`.
+        expect(
+          toolContext,
+          'saveArtifactTool did not receive a tool context',
+        ).toBeDefined();
+        await toolContext!.saveArtifact(filename, {text});
+        return `Saved ${filename}`;
+      },
+    });
+
+    const mockSubAgentResponses: RawGenerateContentResponse[] = [
+      {
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  functionCall: {
+                    name: 'saveArtifactTool',
+                    args: {filename: 'test.txt', text: 'Hello Artifact'},
+                    id: 'sub-call-1',
+                  },
+                },
+              ],
+              role: 'model',
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+      {
+        candidates: [
+          {
+            content: {
+              parts: [{text: 'Artifact has been saved.'}],
+              role: 'model',
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+    ];
+
+    const mockParentAgentResponses: RawGenerateContentResponse[] = [
+      {
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  functionCall: {
+                    name: 'subAgent',
+                    args: {request: 'save an artifact'},
+                    id: 'parent-call-1',
+                  },
+                },
+              ],
+              role: 'model',
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+      {
+        candidates: [
+          {
+            content: {
+              parts: [{text: 'Sub-agent completed saving.'}],
+              role: 'model',
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+    ];
+
+    const subAgentModel = new GeminiWithMockResponses(mockSubAgentResponses);
+    const subAgent = new LlmAgent({
+      model: subAgentModel,
+      name: 'subAgent',
+      description: 'subAgent that saves artifacts',
+      instruction: 'save an artifact when requested',
+      tools: [saveArtifactTool],
+    });
+
+    const mainAgentModel = new GeminiWithMockResponses(
+      mockParentAgentResponses,
+    );
+    const mainAgent = new LlmAgent({
+      model: mainAgentModel,
+      name: 'mainAgent',
+      description: 'MainAgent',
+      instruction: 'call subagent to save artifact',
+      tools: [new AgentTool({agent: subAgent})],
+    });
+
+    const sessionService = new InMemorySessionService();
+    const memoryService = new InMemoryMemoryService();
+    const artifactService = new InMemoryArtifactService();
+
+    await sessionService.createSession({
+      appName: 'ADKTest',
+      userId: 'TestUser',
+      sessionId: '1',
+    });
+
+    const runner = new Runner({
+      appName: 'ADKTest',
+      agent: mainAgent,
+      sessionService,
+      memoryService,
+      artifactService,
+    });
+
+    const runOptions = {
+      userId: 'TestUser',
+      sessionId: '1',
+      newMessage: {
+        role: 'user',
+        parts: [{text: 'Please save an artifact'}],
+      },
+    };
+
+    for await (const _event of runner.runAsync(runOptions)) {
+      // Consume events
+    }
+
+    const loadedPart = await artifactService.loadArtifact({
+      appName: 'ADKTest',
+      userId: 'TestUser',
+      sessionId: '1',
+      filename: 'test.txt',
+    });
+
+    expect(loadedPart).toBeDefined();
+    expect(loadedPart!.text).toBe('Hello Artifact');
   });
 });

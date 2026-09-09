@@ -26,6 +26,8 @@ import type {EventsCompactionConfig} from '../apps/events_compaction_config.js';
 import type {ResumabilityConfig} from '../apps/resumability_config.js';
 import type {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
+import type {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import {isSessionArtifactService} from '../artifacts/session_artifact_service.js';
 
 import type {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {
@@ -87,7 +89,7 @@ export interface RunnerConfig {
   /**
    * An optional service for storing and retrieving artifacts.
    */
-  artifactService?: BaseArtifactService;
+  artifactService?: BaseArtifactService | SessionArtifactService;
 
   /**
    * The service for managing sessions.
@@ -198,7 +200,7 @@ export class Runner {
    */
   readonly agent: RunnableRoot;
   readonly pluginManager: PluginManager;
-  readonly artifactService?: BaseArtifactService;
+  readonly artifactService?: BaseArtifactService | SessionArtifactService;
   readonly sessionService: BaseSessionService;
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
@@ -356,11 +358,13 @@ export class Runner {
 
           const invocationContext = new InvocationContext({
             artifactService: this.artifactService
-              ? new ScopedArtifactService(this.artifactService, {
-                  appName: this.appName,
-                  userId,
-                  sessionId,
-                })
+              ? isSessionArtifactService(this.artifactService)
+                ? this.artifactService
+                : new ScopedArtifactService(this.artifactService, {
+                    appName: this.appName,
+                    userId,
+                    sessionId,
+                  })
               : undefined,
             sessionService: this.sessionService,
             memoryService: this.memoryService,
@@ -866,11 +870,13 @@ export class Runner {
 
         const invocationContext = new InvocationContext({
           artifactService: this.artifactService
-            ? new ScopedArtifactService(this.artifactService, {
-                appName: this.appName,
-                userId: params.userId,
-                sessionId: params.sessionId,
-              })
+            ? isSessionArtifactService(this.artifactService)
+              ? this.artifactService
+              : new ScopedArtifactService(this.artifactService, {
+                  appName: this.appName,
+                  userId: params.userId,
+                  sessionId: params.sessionId,
+                })
             : undefined,
           sessionService: this.sessionService,
           memoryService: this.memoryService,

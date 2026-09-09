@@ -1864,7 +1864,7 @@ describe('LlmAgent transfer to a peer', () => {
                   functionCall: {
                     id: `call-${this.target}`,
                     name: 'transfer_to_agent',
-                    args: {agentName: this.target},
+                    args: {agent_name: this.target},
                   },
                 },
               ],
@@ -1878,9 +1878,9 @@ describe('LlmAgent transfer to a peer', () => {
   }
 
   // The unit tests pin `resolveTransferTarget` itself. This one proves the
-  // async transfer path calls it: the model names a peer the prompt never
-  // offered, and the invocation must fail instead of running that peer.
-  it('fails the invocation instead of running the peer', async () => {
+  // async transfer path refuses the peer: the model names a peer the prompt
+  // never offered, and that peer must not run.
+  it('refuses the transfer instead of running the peer', async () => {
     const child1 = new LlmAgent({
       name: 'child1',
       model: new TransferringLlm('child2'),
@@ -1916,13 +1916,18 @@ describe('LlmAgent transfer to a peer', () => {
       events.push(event);
     }
 
-    // `runAndHandleError` turns the thrown rejection into an error event, the
-    // same route the "not found in the agent tree" error already takes.
-    const errorEvents = events.filter((e) => e.errorMessage);
-    expect(errorEvents).toHaveLength(1);
-    expect(errorEvents[0].author).toBe('child1');
-    expect(errorEvents[0].errorMessage).toMatch(
-      /Transfer to sibling agent child2 is disallowed/,
+    // The transfer tool declares `agent_name` as an enum of the agents the
+    // caller may reach, and child1 disallows its peers, so child2 is not in
+    // child1's enum. The call fails argument validation and the model gets a
+    // tool error; the peer never runs.
+    const transferResponse = events
+      .filter((e) => e.author === 'child1')
+      .flatMap((e) => e.content?.parts ?? [])
+      .find((part) => part.functionResponse?.name === 'transfer_to_agent')
+      ?.functionResponse?.response as {error?: string} | undefined;
+    expect(transferResponse?.error).toMatch(/agent_name/);
+    expect(events.some((e) => e.actions?.transferToAgent === 'child2')).toBe(
+      false,
     );
     expect(events.some((e) => e.author === 'child2')).toBe(false);
   });

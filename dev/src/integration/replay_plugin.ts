@@ -147,9 +147,12 @@ export class ReplayPlugin extends BasePlugin {
 
     // Handle side effects for built-in tools that modify EventActions
     if (toolName === 'transfer_to_agent') {
-      params.toolContext.actions.transferToAgent = transferTargetAgentName(
-        params.toolArgs,
-      );
+      // `agent_name` is the wire spelling, matching adk-python. Recordings
+      // captured before the rename still carry `agentName`, so both are read
+      // here rather than invalidating every recording on disk.
+      params.toolContext.actions.transferToAgent =
+        transferTargetAgentName(params.toolArgs) ??
+        (params.toolArgs['agentName'] as string | undefined);
     }
 
     // The response from a tool call is a plain object.

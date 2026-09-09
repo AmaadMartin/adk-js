@@ -256,7 +256,7 @@ describe('AgentTransferLlmRequestProcessor', () => {
 
     const toolContext = new Context({invocationContext});
     const result = await tool.runAsync({
-      args: {agentName: 'sub_agent'},
+      args: {agent_name: 'sub_agent'},
       toolContext,
     });
 
@@ -521,7 +521,7 @@ describe('AgentTransferLlmRequestProcessor', () => {
     expect(llmRequest.toolsDict['transfer_to_agent']).toBeDefined();
   });
 
-  it('should constrain the transfer tool to the sub-agent names', async () => {
+  it('declares agent_name as an enum of the reachable agents', async () => {
     const agent = new LlmAgent({
       name: 'root_agent',
       model: 'gemini-2.5-flash',
@@ -531,23 +531,33 @@ describe('AgentTransferLlmRequestProcessor', () => {
       ],
     });
 
-    const invocationContext = createMockInvocationContext(agent);
     const llmRequest: LlmRequest = {
       contents: [],
       toolsDict: {},
       liveConnectConfig: {},
     };
-
     for await (const _ of AGENT_TRANSFER_LLM_REQUEST_PROCESSOR.runAsync(
-      invocationContext,
+      createMockInvocationContext(agent),
       llmRequest,
     )) {
       // Do nothing
     }
 
-    const declaration =
-      llmRequest.toolsDict['transfer_to_agent']._getDeclaration();
-    expect(declaration?.parameters?.properties?.['agentName']?.enum).toEqual([
+    const declaration = (
+      llmRequest.config?.tools as Array<{
+        functionDeclarations?: Array<{
+          name?: string;
+          parameters?: {properties?: Record<string, {enum?: string[]}>};
+        }>;
+      }>
+    )?.[0];
+    const transfer = declaration?.functionDeclarations?.find(
+      (d) => d.name === 'transfer_to_agent',
+    );
+
+    // `agent_name`, not `agentName`: this is the wire format adk-python uses,
+    // and it is what ends up in persisted events.
+    expect(transfer?.parameters?.properties?.['agent_name']?.enum).toEqual([
       'sub_a',
       'sub_b',
     ]);
@@ -580,9 +590,42 @@ describe('AgentTransferLlmRequestProcessor', () => {
 
     const declaration =
       llmRequest.toolsDict['transfer_to_agent']._getDeclaration();
-    expect(declaration?.parameters?.properties?.['agentName']?.enum).toEqual([
+    expect(declaration?.parameters?.properties?.['agent_name']?.enum).toEqual([
       'parent_agent',
       'peer_agent',
     ]);
+  });
+
+  it('rejects a transfer to an agent that is not reachable', async () => {
+    const agent = new LlmAgent({
+      name: 'root_agent',
+      model: 'gemini-2.5-flash',
+      subAgents: [new LlmAgent({name: 'sub_agent', model: 'gemini-2.5-flash'})],
+    });
+
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+    for await (const _ of AGENT_TRANSFER_LLM_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // Do nothing
+    }
+
+    const toolContext = new Context({invocationContext});
+    // A hallucinated target must not reach `transferToAgent`. The throw is
+    // caught by the function-call runner and handed back to the model as a
+    // tool error, so the run continues and the model can pick a real agent.
+    await expect(
+      llmRequest.toolsDict['transfer_to_agent'].runAsync({
+        args: {agent_name: 'no_such_agent'},
+        toolContext,
+      }),
+    ).rejects.toThrow();
+    expect(toolContext.actions.transferToAgent).toBeUndefined();
   });
 });

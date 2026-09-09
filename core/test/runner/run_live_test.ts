@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Blob, Content, FunctionDeclaration} from '@google/genai';
+import {Modality} from '@google/genai';
+import {beforeEach, describe, expect, it} from 'vitest';
 import type {
   BaseLlmConnection,
   Event,
@@ -11,7 +14,7 @@ import type {
   LlmResponse,
   RunAsyncToolRequest,
   RunConfig,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   AsyncQueue,
   BaseLlm,
@@ -21,10 +24,7 @@ import {
   LiveRequestQueue,
   LlmAgent,
   Runner,
-} from '@google/adk';
-import type {Blob, Content, FunctionDeclaration} from '@google/genai';
-import {Modality} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -902,7 +902,12 @@ describe('Runner.runLive', () => {
     const transferCall: Content = {
       role: 'model',
       parts: [
-        {functionCall: {name: 'transfer_to_agent', args: {agentName: 'child'}}},
+        {
+          functionCall: {
+            name: 'transfer_to_agent',
+            args: {agent_name: 'child'},
+          },
+        },
       ],
     };
     const childText: Content = {
@@ -1343,7 +1348,7 @@ describe('Runner.runLive', () => {
               {
                 functionCall: {
                   name: 'transfer_to_agent',
-                  args: {agentName: 'child'},
+                  args: {agent_name: 'child'},
                 },
               },
             ],
@@ -1483,7 +1488,7 @@ describe('Runner.runLive', () => {
         {
           functionCall: {
             name: 'transfer_to_agent',
-            args: {agentName: 'child2'},
+            args: {agent_name: 'child2'},
           },
         },
       ],
@@ -1510,16 +1515,25 @@ describe('Runner.runLive', () => {
     const queue = new LiveRequestQueue();
     queue.close();
 
-    await expect(async () => {
-      for await (const _ of runner.runLive({
-        userId: TEST_USER_ID,
-        sessionId: TEST_SESSION_ID,
-        liveRequestQueue: queue,
-      })) {
-        // drain
-      }
-    }).rejects.toThrow('Transfer to sibling agent child2 is disallowed.');
+    // `transfer_to_agent` declares `agent_name` as an enum of the agents the
+    // caller may reach, and a peer it disallows is not in that enum. The call
+    // fails argument validation, so the model gets a tool error it can retry
+    // and the run continues instead of ending.
+    const events: Event[] = [];
+    for await (const event of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      events.push(event);
+    }
 
+    const response = events
+      .flatMap((event) => event.content?.parts ?? [])
+      .find((part) => part.functionResponse?.name === 'transfer_to_agent')
+      ?.functionResponse?.response as {error?: string} | undefined;
+    expect(response?.error).toContain('agent_name');
+    expect(events.some((event) => event.actions?.transferToAgent)).toBe(false);
     expect(child1Llm.connection!.closed).toBe(true);
     expect(child2Llm.connection).toBeUndefined();
   });
@@ -1528,7 +1542,12 @@ describe('Runner.runLive', () => {
     const transferCall: Content = {
       role: 'model',
       parts: [
-        {functionCall: {name: 'transfer_to_agent', args: {agentName: 'ghost'}}},
+        {
+          functionCall: {
+            name: 'transfer_to_agent',
+            args: {agent_name: 'ghost'},
+          },
+        },
       ],
     };
     const childLlm = new FakeLiveLlm([{turnComplete: true}]);
@@ -1552,16 +1571,24 @@ describe('Runner.runLive', () => {
     const queue = new LiveRequestQueue();
     queue.close();
 
-    await expect(async () => {
-      for await (const _ of runner.runLive({
-        userId: TEST_USER_ID,
-        sessionId: TEST_SESSION_ID,
-        liveRequestQueue: queue,
-      })) {
-        // drain
-      }
-    }).rejects.toThrow('Agent ghost not found in the agent tree.');
+    // An agent that is not in the tree is not in the tool's `agent_name` enum,
+    // so the call fails argument validation before any hand-off is queued.
+    const events: Event[] = [];
+    for await (const event of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      events.push(event);
+    }
 
+    const response = events
+      .flatMap((event) => event.content?.parts ?? [])
+      .find((part) => part.functionResponse?.name === 'transfer_to_agent')
+      ?.functionResponse?.response as {error?: string} | undefined;
+    expect(response?.error).toContain('agent_name');
+    expect(events.some((event) => event.actions?.transferToAgent)).toBe(false);
+    expect(childLlm.connection).toBeUndefined();
     expect(parentLlm.connection!.closed).toBe(true);
   });
 });
