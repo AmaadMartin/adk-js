@@ -14,10 +14,12 @@ import {
   hasTrailingCodeExecutionResult,
   isFinalResponse,
   pruneThoughts,
+  resetTimeProvider,
+  setTimeProvider,
   stringifyContent,
 } from '@google/adk';
 import {Outcome} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 import {
   createNewEventId,
   generateClientFunctionCallId,
@@ -26,7 +28,14 @@ import {
   transformToSnakeCaseEvent,
 } from '../../src/events/event.js';
 
+/** A fixed instant used by the time-provider cases. */
+const FROZEN_TIME_MS = 1_700_000_000_000;
+
 describe('Event Utils', () => {
+  afterEach(() => {
+    resetTimeProvider();
+  });
+
   describe('createEvent', () => {
     it('creates an event with default values', () => {
       const event = createEvent();
@@ -55,6 +64,18 @@ describe('Event Utils', () => {
       expect(event.author).toBe('user');
       expect(event.branch).toBe('branch');
       expect(event.timestamp).toBe(timestamp);
+    });
+
+    it('stamps the default timestamp from the installed time provider', () => {
+      setTimeProvider(() => FROZEN_TIME_MS);
+
+      expect(createEvent().timestamp).toBe(FROZEN_TIME_MS);
+    });
+
+    it('prefers an explicit timestamp over the time provider', () => {
+      setTimeProvider(() => FROZEN_TIME_MS);
+
+      expect(createEvent({timestamp: 42}).timestamp).toBe(42);
     });
   });
 

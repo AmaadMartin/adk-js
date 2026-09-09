@@ -8,6 +8,7 @@ import {cloneDeep} from 'lodash-es';
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {getTime} from '../utils/time.js';
 
 import {
   AppendEventRequest,
@@ -75,7 +76,7 @@ export class InMemorySessionService extends BaseSessionService {
       userId,
       state: filteredState,
       events: [],
-      lastUpdateTime: Date.now(),
+      lastUpdateTime: getTime(),
     });
 
     if (!this.sessions[appName]) {

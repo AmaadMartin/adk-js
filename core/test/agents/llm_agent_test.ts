@@ -26,9 +26,11 @@ import {
   LlmResponse,
   LongRunningFunctionTool,
   PluginManager,
+  resetTimeProvider,
   RunAsyncToolRequest,
   Runner,
   Session,
+  setTimeProvider,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
@@ -44,6 +46,9 @@ import {
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {logger} from '../../src/utils/logger.js';
+
+/** A fixed instant used by the time-provider case. */
+const FROZEN_TIME_MS = 1_700_000_000_000;
 
 class MockLlmConnection implements BaseLlmConnection {
   sendHistory(_history: Content[]): Promise<void> {
@@ -594,6 +599,43 @@ describe('LlmAgent Output Processing', () => {
 
     const lastEvent = events[events.length - 1];
     expect(lastEvent.actions?.stateDelta?.['result']).toEqual({answer: 42});
+  });
+});
+
+describe('LlmAgent model response timestamps', () => {
+  afterEach(() => {
+    resetTimeProvider();
+  });
+
+  it('re-stamps each streamed response from the installed time provider', async () => {
+    setTimeProvider(() => FROZEN_TIME_MS);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: new StreamingMockLlm([
+        {content: {parts: [{text: 'chunk 1'}]}},
+        {content: {parts: [{text: 'chunk 2'}]}},
+      ]),
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: createSession({
+        id: 'sess_123',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const timestamps: number[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      timestamps.push(event.timestamp);
+    }
+
+    // Two chunks yield two events. The re-stamp runs before each yield, so the
+    // second event carries the value the first pass wrote.
+    expect(timestamps).toEqual([FROZEN_TIME_MS, FROZEN_TIME_MS]);
   });
 });
 

@@ -10,9 +10,14 @@ import {
   State,
   createEvent,
   createEventActions,
+  resetTimeProvider,
+  setTimeProvider,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
+
+/** A fixed instant used by the time-provider case. */
+const FROZEN_TIME_MS = 1_700_000_000_000;
 
 describe('isInMemoryConnectionString', () => {
   it('returns true for memory://', () => {
@@ -35,6 +40,10 @@ describe('InMemorySessionService', () => {
   });
 
   describe('createSession', () => {
+    afterEach(() => {
+      resetTimeProvider();
+    });
+
     it('creates a new session with correct properties', async () => {
       const appName = 'test-app';
       const userId = 'test-user';
@@ -60,6 +69,17 @@ describe('InMemorySessionService', () => {
       });
 
       expect(session.id).toBe(sessionId);
+    });
+
+    it('stamps lastUpdateTime from the installed time provider', async () => {
+      setTimeProvider(() => FROZEN_TIME_MS);
+
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+
+      expect(session.lastUpdateTime).toBe(FROZEN_TIME_MS);
     });
 
     it('merges existing app and user state into new session', async () => {
