@@ -6,7 +6,6 @@
 
 import {RequestContext} from '@a2a-js/sdk/server';
 import {Content} from '@google/genai';
-import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 
 /**
@@ -17,7 +16,6 @@ export interface ExecutorContext {
   sessionId: string;
   appName: string;
   readonlyState: Record<string, unknown>;
-  events: Event[];
   userContent: Content;
   requestContext: RequestContext;
   /**
@@ -50,7 +48,6 @@ export function createExecutorContext({
     sessionId: session.id,
     appName: session.appName,
     readonlyState: session.state,
-    events: session.events,
     userContent,
     requestContext,
     a2aMetadata,

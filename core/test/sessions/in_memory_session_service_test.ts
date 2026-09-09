@@ -151,6 +151,29 @@ describe('InMemorySessionService', () => {
       expect(retrievedSession?.events[1].timestamp).toBe(4);
     });
 
+    it('returns no events when numRecentEvents is 0', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+      for (let i = 0; i < 3; i++) {
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: i}),
+        });
+      }
+
+      const retrievedSession = await service.getSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: session.id,
+        config: {numRecentEvents: 0},
+      });
+
+      expect(retrievedSession?.id).toBe(session.id);
+      expect(retrievedSession?.events).toEqual([]);
+    });
+
     it('respects afterTimestamp config', async () => {
       const session = await service.createSession({
         appName: 'app',

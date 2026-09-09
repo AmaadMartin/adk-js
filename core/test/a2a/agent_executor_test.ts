@@ -4,19 +4,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
+import {
+  TaskArtifactUpdateEvent,
+  TaskStatusUpdateEvent,
+  TextPart,
+} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
+  AgentExecutorConfig,
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
+  ExecutorContext,
+  InMemorySessionService,
   Runner,
   RunnerConfig,
   Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import {A2AMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
 
 // Mock the Runner to control its async generator
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -314,5 +323,176 @@ describe('A2AAgentExecutor', () => {
     await expect(executor.cancelTask('any-task-id')).rejects.toThrow(
       'Task cancellation is not supported yet.',
     );
+  });
+
+  describe('session resolution', () => {
+    const modelEvent = () =>
+      createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'response'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+
+    const stubRunAsync = (adkEvents: AdkEvent[]) => {
+      const runAsync = vi.fn<Runner['runAsync']>(async function* () {
+        for (const adkEvent of adkEvents) {
+          yield adkEvent;
+        }
+      });
+      vi.mocked(Runner).mockImplementation(
+        (config: RunnerConfig) =>
+          ({
+            appName: config?.appName,
+            sessionService: config?.sessionService,
+            runAsync,
+          }) as unknown as Runner,
+      );
+
+      return runAsync;
+    };
+
+    const createExecutor = (config: Partial<AgentExecutorConfig> = {}) =>
+      new A2AAgentExecutor({
+        runner: {appName: 'test-app', sessionService: mockSessionService},
+        ...config,
+      });
+
+    const existingSession = () =>
+      createSession({
+        id: 'existing-session-id',
+        appName: 'test-app',
+        userId: 'A2A_USER_test-context',
+        state: {topic: 'billing'},
+      });
+
+    it('probes for an existing session with a zero-event config', async () => {
+      mockSessionService.getSession.mockResolvedValue(existingSession());
+      stubRunAsync([]);
+
+      await createExecutor().execute(createRequestContext(), mockEventBus);
+
+      expect(mockSessionService.getSession).toHaveBeenCalledTimes(1);
+      expect(mockSessionService.getSession).toHaveBeenCalledWith({
+        appName: 'test-app',
+        userId: 'A2A_USER_test-context',
+        sessionId: 'test-context',
+        config: {numRecentEvents: 0},
+      });
+    });
+
+    it('returns the probed session instead of recreating it', async () => {
+      mockSessionService.getSession.mockResolvedValue(existingSession());
+      stubRunAsync([modelEvent()]);
+
+      await createExecutor().execute(createRequestContext(), mockEventBus);
+
+      expect(mockSessionService.createSession).not.toHaveBeenCalled();
+      // Task + working + artifact update + final status.
+      expect(mockEventBus.publish).toHaveBeenCalledTimes(4);
+      const artifactEvent = mockEventBus.publish.mock
+        .calls[2][0] as TaskArtifactUpdateEvent;
+      expect(artifactEvent.metadata?.[A2AMetadataKeys.SESSION_ID]).toBe(
+        'existing-session-id',
+      );
+    });
+
+    it('creates a session when the probe misses, without the probe config', async () => {
+      mockSessionService.getSession.mockResolvedValue(undefined);
+      mockSessionService.createSession.mockResolvedValue(
+        createSession({
+          id: 'test-context',
+          appName: 'test-app',
+          userId: 'A2A_USER_test-context',
+        }),
+      );
+      const runAsync = stubRunAsync([modelEvent()]);
+
+      await createExecutor().execute(createRequestContext(), mockEventBus);
+
+      expect(mockSessionService.createSession).toHaveBeenCalledWith({
+        appName: 'test-app',
+        userId: 'A2A_USER_test-context',
+        sessionId: 'test-context',
+      });
+      expect(
+        mockSessionService.createSession.mock.calls[0][0],
+      ).not.toHaveProperty('config');
+      expect(runAsync).toHaveBeenCalledTimes(1);
+      // Task + working + artifact update + final status.
+      expect(mockEventBus.publish).toHaveBeenCalledTimes(4);
+      const finalEvent = mockEventBus.publish.mock
+        .calls[3][0] as TaskStatusUpdateEvent;
+      expect(finalEvent.status.state).toBe('completed');
+    });
+
+    it('resolves a real InMemorySessionService session with no event history', async () => {
+      const sessionService = new InMemorySessionService();
+      const session = await sessionService.createSession({
+        appName: 'test-app',
+        userId: 'A2A_USER_test-context',
+        sessionId: 'test-context',
+      });
+      await sessionService.appendEvent({session, event: modelEvent()});
+      const getSession = vi.spyOn(sessionService, 'getSession');
+      stubRunAsync([modelEvent()]);
+      const executor = new A2AAgentExecutor({
+        runner: {appName: 'test-app', sessionService},
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      const resolvedSession = await getSession.mock.results[0].value;
+      expect(resolvedSession?.id).toBe('test-context');
+      expect(resolvedSession?.events).toEqual([]);
+    });
+
+    it('keeps the executor context and event metadata intact without event history', async () => {
+      mockSessionService.getSession.mockResolvedValue(existingSession());
+      stubRunAsync([modelEvent()]);
+
+      let eventContext: ExecutorContext | undefined;
+      let executeContext: ExecutorContext | undefined;
+      let finalEvent: TaskStatusUpdateEvent | undefined;
+      const executor = createExecutor({
+        afterEventCallback: async (ctx) => {
+          eventContext = ctx;
+        },
+        afterExecuteCallback: async (ctx, a2aEvent) => {
+          executeContext = ctx;
+          finalEvent = a2aEvent;
+        },
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(eventContext).toMatchObject({
+        appName: 'test-app',
+        userId: 'A2A_USER_test-context',
+        sessionId: 'existing-session-id',
+        readonlyState: {topic: 'billing'},
+        userContent: {role: 'user', parts: [{text: 'hello'}]},
+      });
+      expect(executeContext).toBe(eventContext);
+      expect(finalEvent?.metadata).toMatchObject({
+        [A2AMetadataKeys.APP_NAME]: 'test-app',
+        [A2AMetadataKeys.USER_ID]: 'A2A_USER_test-context',
+        [A2AMetadataKeys.SESSION_ID]: 'existing-session-id',
+      });
+    });
+
+    it('leaves the agent run unbounded', async () => {
+      mockSessionService.getSession.mockResolvedValue(existingSession());
+      const runAsync = stubRunAsync([modelEvent()]);
+
+      await createExecutor().execute(createRequestContext(), mockEventBus);
+
+      expect(runAsync).toHaveBeenCalledWith({
+        userId: 'A2A_USER_test-context',
+        sessionId: 'test-context',
+        newMessage: {role: 'user', parts: [{text: 'hello', thought: false}]},
+        runConfig: undefined,
+      });
+    });
   });
 });

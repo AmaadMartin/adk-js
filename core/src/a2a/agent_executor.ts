@@ -286,6 +286,8 @@ async function getAdkSession(
     appName,
     userId,
     sessionId,
+    // Checking existence doesn't require event history.
+    config: {numRecentEvents: 0},
   });
   if (session) {
     return session;
