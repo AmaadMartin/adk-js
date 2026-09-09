@@ -19,6 +19,7 @@ import {
   ListVersionsRequest,
   LoadArtifactRequest,
   SaveArtifactRequest,
+  hasArtifactContent,
 } from './base_artifact_service.js';
 
 const USER_NAMESPACE_PREFIX = 'user:';
@@ -77,7 +78,7 @@ export class FileArtifactService implements BaseArtifactService {
     artifact,
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
-    if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
+    if (!hasArtifactContent(artifact)) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
@@ -107,7 +108,7 @@ export class FileArtifactService implements BaseArtifactService {
       // GenAI SDK Part data is in Base64 format. See https://googleapis.github.io/js-genai/release_docs/interfaces/types.Part.html
       await fs.writeFile(contentPath, Buffer.from(data, 'base64'));
       mimeType = artifact.inlineData.mimeType || 'application/octet-stream';
-    } else if (artifact.text !== undefined) {
+    } else if (artifact.text != null) {
       await fs.writeFile(contentPath, artifact.text, 'utf-8');
     } else {
       fileUri = artifact.fileData!.fileUri;

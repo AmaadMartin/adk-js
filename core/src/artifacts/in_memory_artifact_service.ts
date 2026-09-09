@@ -16,6 +16,7 @@ import {
   ListVersionsRequest,
   LoadArtifactRequest,
   SaveArtifactRequest,
+  hasArtifactContent,
 } from './base_artifact_service.js';
 
 export function isInMemoryConnectionString(uri: string): boolean {
@@ -39,7 +40,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     artifact,
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
-    if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
+    if (!hasArtifactContent(artifact)) {
       return Promise.reject(
         new Error('Artifact must have either inlineData or text content.'),
       );
@@ -57,7 +58,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       customMetadata,
     };
 
-    if (!artifact.inlineData && artifact.text === undefined) {
+    if (artifact.inlineData == null && artifact.text == null) {
       const fileData = artifact.fileData!;
 
       metadata.mimeType = fileData.mimeType;
