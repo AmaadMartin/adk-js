@@ -10,6 +10,7 @@ import {
   createEvent,
   createEventActions,
   createSession,
+  Event,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -17,6 +18,7 @@ import {
   Runner,
   State,
 } from '@google/adk';
+import {GroundingMetadata} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -31,6 +33,51 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     })),
   };
 });
+
+/**
+ * The state key `AgentTool` publishes grounding metadata under. Spelled out
+ * because adk-python uses the same literal and both SDKs must agree on it.
+ */
+const GROUNDING_METADATA_KEY = 'temp:_adk_grounding_metadata';
+
+/** Makes the mocked sub-agent run yield `events`, in order. */
+function mockRunEvents(events: Event[]) {
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: async function* () {
+          yield* events;
+        },
+      }) as unknown as Runner,
+  );
+}
+
+/** A tool context whose parent invocation runs `agent`. */
+function createParentToolContext(agent: LlmAgent): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session: createSession({
+        id: 'parent-session',
+        appName: agent.name,
+        userId: 'parent-user',
+      }),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
+
+/** A reply from the sub-agent, optionally carrying grounding metadata. */
+function createReply(text: string, grounding?: GroundingMetadata): Event {
+  return createEvent({
+    author: 'sub-agent',
+    content: {role: 'model', parts: [{text}]},
+    groundingMetadata: grounding,
+  });
+}
 
 describe('AgentTool', () => {
   it('propagates session context and state delta', async () => {
@@ -510,5 +557,90 @@ describe('AgentTool', () => {
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
     );
+  });
+
+  it('does not write grounding metadata to state when the option is off', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const toolContext = createParentToolContext(agent);
+    const grounding: GroundingMetadata = {
+      webSearchQueries: ['adk agent tool'],
+    };
+    mockRunEvents([createReply('grounded answer', grounding)]);
+
+    const result = await new AgentTool({agent}).runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('grounded answer');
+    expect(toolContext.state.has(GROUNDING_METADATA_KEY)).toBe(false);
+    expect(toolContext.actions.stateDelta?.[GROUNDING_METADATA_KEY]).toBe(
+      undefined,
+    );
+  });
+
+  it('writes the last grounding metadata to state when the option is on', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const toolContext = createParentToolContext(agent);
+    const firstGrounding: GroundingMetadata = {
+      webSearchQueries: ['adk agent tool'],
+    };
+    const lastGrounding: GroundingMetadata = {
+      webSearchQueries: ['adk grounding metadata'],
+      groundingChunks: [
+        {web: {uri: 'https://example.com/a', title: 'Example A'}},
+      ],
+    };
+    mockRunEvents([
+      createReply('first answer', firstGrounding),
+      createReply('final answer', lastGrounding),
+    ]);
+
+    const result = await new AgentTool({
+      agent,
+      propagateGroundingMetadata: true,
+    }).runAsync({args: {request: 'hello'}, toolContext});
+
+    expect(result).toBe('final answer');
+    expect(toolContext.state.get(GROUNDING_METADATA_KEY)).toEqual(
+      lastGrounding,
+    );
+    expect(toolContext.actions.stateDelta?.[GROUNDING_METADATA_KEY]).toEqual(
+      lastGrounding,
+    );
+  });
+
+  it('writes nothing when the sub-agent produced no grounding metadata', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const toolContext = createParentToolContext(agent);
+    mockRunEvents([createReply('ungrounded answer')]);
+
+    const result = await new AgentTool({
+      agent,
+      propagateGroundingMetadata: true,
+    }).runAsync({args: {request: 'hello'}, toolContext});
+
+    expect(result).toBe('ungrounded answer');
+    expect(toolContext.state.has(GROUNDING_METADATA_KEY)).toBe(false);
+  });
+
+  it('drops earlier grounding metadata when the final content event has none', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const toolContext = createParentToolContext(agent);
+    // adk-python resets the tracked value on every content event, so a final
+    // content event without grounding metadata clears it. See
+    // `src/google/adk/tools/agent_tool.py`.
+    mockRunEvents([
+      createReply('grounded draft', {webSearchQueries: ['adk agent tool']}),
+      createReply('final answer'),
+    ]);
+
+    const result = await new AgentTool({
+      agent,
+      propagateGroundingMetadata: true,
+    }).runAsync({args: {request: 'hello'}, toolContext});
+
+    expect(result).toBe('final answer');
+    expect(toolContext.state.has(GROUNDING_METADATA_KEY)).toBe(false);
   });
 });
