@@ -18,6 +18,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 declare global {
@@ -372,6 +373,25 @@ describe('deployToAgentEngine', () => {
         },
       },
     });
+  });
+
+  it('should forward memoryServiceUri into the generated Dockerfile', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      memoryServiceUri: 'agentengine://1234567890',
+    });
+
+    // createPackageJson writes through the same mock, so the Dockerfile call
+    // is selected by path rather than by index.
+    const call = vi
+      .mocked(saveToFile)
+      .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+    if (!call) {
+      expect.fail('no Dockerfile path was passed to saveToFile');
+    }
+    expect(call[1]).toContain(
+      "--memory_service_uri='agentengine://1234567890'",
+    );
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {

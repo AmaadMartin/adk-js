@@ -15,6 +15,13 @@ import {
 import {MemoryEntry} from './memory_entry.js';
 
 /**
+ * Checks if the given URI is an in-memory memory service URI.
+ */
+export function isInMemoryConnectionString(uri: string): boolean {
+  return uri === 'memory://';
+}
+
+/**
  * An in-memory memory service for prototyping purpose only.
  *
  * Uses keyword matching instead of semantic search.

