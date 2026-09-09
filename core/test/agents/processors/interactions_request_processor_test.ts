@@ -9,6 +9,7 @@
 import {
   BaseAgent,
   BaseLlm,
+  createSession,
   Event,
   EventActions,
   Gemini,
@@ -17,7 +18,6 @@ import {
   LlmAgent,
   LlmRequest,
   PluginManager,
-  Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -58,12 +58,12 @@ function createMockInvocationContext(
   model: any,
   agentName = 'test_agent',
 ): InvocationContext {
-  const session = {
+  const session = createSession({
     id: 'test-session',
     events,
     appName: 'test-app',
     userId: 'test-user',
-  } as unknown as Session;
+  });
 
   const agent = new LlmAgent({
     name: agentName,
