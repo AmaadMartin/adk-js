@@ -1112,4 +1112,93 @@ describe('Runner.runLive', () => {
 
     expect(llm.connection!.closed).toBe(true);
   });
+
+  it('rejects a transfer to a peer when the caller disallows it', async () => {
+    const transferCall: Content = {
+      role: 'model',
+      parts: [
+        {
+          functionCall: {
+            name: 'transfer_to_agent',
+            args: {agentName: 'child2'},
+          },
+        },
+      ],
+    };
+    const child1Llm = new FakeLiveLlm([
+      {content: transferCall},
+      {turnComplete: true},
+    ]);
+    const child1 = new LlmAgent({
+      name: 'child1',
+      model: child1Llm,
+      disallowTransferToPeers: true,
+    });
+    const child2Llm = new FakeLiveLlm([{turnComplete: true}]);
+    const child2 = new LlmAgent({name: 'child2', model: child2Llm});
+    new LlmAgent({name: 'root', subAgents: [child1, child2]});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: child1,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+
+    await expect(async () => {
+      for await (const _ of runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue: queue,
+      })) {
+        // drain
+      }
+    }).rejects.toThrow('Transfer to sibling agent child2 is disallowed.');
+
+    expect(child1Llm.connection!.closed).toBe(true);
+    expect(child2Llm.connection).toBeUndefined();
+  });
+
+  it('rejects a transfer to a name that is not in the agent tree', async () => {
+    const transferCall: Content = {
+      role: 'model',
+      parts: [
+        {functionCall: {name: 'transfer_to_agent', args: {agentName: 'ghost'}}},
+      ],
+    };
+    const childLlm = new FakeLiveLlm([{turnComplete: true}]);
+    const child = new LlmAgent({name: 'child', model: childLlm});
+    const parentLlm = new FakeLiveLlm([
+      {content: transferCall},
+      {turnComplete: true},
+    ]);
+    const parent = new LlmAgent({
+      name: 'parent',
+      model: parentLlm,
+      subAgents: [child],
+    });
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: parent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+
+    await expect(async () => {
+      for await (const _ of runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue: queue,
+      })) {
+        // drain
+      }
+    }).rejects.toThrow('Agent ghost not found in the agent tree.');
+
+    expect(parentLlm.connection!.closed).toBe(true);
+  });
 });
