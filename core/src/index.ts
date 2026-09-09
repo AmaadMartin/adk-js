@@ -43,6 +43,9 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+export * from './integrations/vmaas/sandbox_client.js';
+export * from './integrations/vmaas/sandbox_computer.js';
+export * from './integrations/vmaas/sandbox_errors.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
