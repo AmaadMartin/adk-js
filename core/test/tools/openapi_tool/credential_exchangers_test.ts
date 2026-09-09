@@ -10,6 +10,7 @@ import {
   AuthCredential,
   AuthCredentialTypes,
 } from '../../../src/auth/auth_credential.js';
+import {CredentialExchangeError} from '../../../src/auth/exchanger/base_credential_exchanger.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
 
@@ -52,6 +53,20 @@ describe('AutoAuthCredentialExchanger', () => {
 
     expect(result.wasExchanged).toBe(true);
     expect(result.credential.http?.credentials.token).toBe('mock-adc-token');
+  });
+
+  it('propagates a service account exchange failure', async () => {
+    const exchanger = new AutoAuthCredentialExchanger();
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {},
+    };
+
+    // The exchanger stays loud. ToolAuthHandler owns the policy of degrading
+    // to an unauthenticated call, so direct callers keep the failure.
+    await expect(
+      exchanger.exchange({authCredential: credential}),
+    ).rejects.toThrow(CredentialExchangeError);
   });
 });
 

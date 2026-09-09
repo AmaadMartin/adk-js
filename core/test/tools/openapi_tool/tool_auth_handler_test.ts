@@ -8,11 +8,13 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  CredentialExchangeError,
   ToolAuthHandler,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
+import {logger} from '../../../src/utils/logger.js';
 
 // Mock AutoAuthCredentialExchanger
 vi.mock(
@@ -262,5 +264,129 @@ describe('ToolAuthHandler', () => {
       'oauth2_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+});
+
+/**
+ * Builds the Context surface ToolAuthHandler reads. The single cast is the
+ * pattern the tests above use; Context has no partial constructor.
+ */
+function createContext(state: State, authResponse?: AuthCredential): Context {
+  return {
+    state,
+    getAuthResponse: vi.fn().mockReturnValue(authResponse),
+    requestCredential: vi.fn(),
+  } as unknown as Context;
+}
+
+describe('ToolAuthHandler when the credential exchange fails', () => {
+  const SERVICE_ACCOUNT_CREDENTIAL: AuthCredential = {
+    authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+    serviceAccount: {useDefaultCredential: true},
+  };
+  const BEARER_SCHEME = {type: 'http', scheme: 'bearer'} as const;
+
+  function rejectExchangeOnceWith(error: unknown) {
+    vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
+      () =>
+        ({
+          exchange: vi.fn().mockRejectedValue(error),
+        }) as unknown as AutoAuthCredentialExchanger,
+    );
+  }
+
+  it('resolves as done without a credential instead of rejecting', async () => {
+    rejectExchangeOnceWith(
+      new CredentialExchangeError(
+        'Failed to exchange default service account token: metadata server unreachable',
+      ),
+    );
+
+    const result = await new ToolAuthHandler(
+      createContext(new State()),
+      BEARER_SCHEME,
+      SERVICE_ACCOUNT_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    // The tool still runs; the API's own 401 is what the model reads.
+    expect(result.state).toBe('done');
+    expect(result.authCredential).toBeUndefined();
+  });
+
+  it('caches nothing when the exchange fails', async () => {
+    rejectExchangeOnceWith(
+      new CredentialExchangeError('metadata server unreachable'),
+    );
+    const state = new State();
+    // An auth response would have been cached on success, so this is the
+    // branch that must not write a half-finished exchange to the session.
+    const context = createContext(state, SERVICE_ACCOUNT_CREDENTIAL);
+
+    const result = await new ToolAuthHandler(
+      context,
+      BEARER_SCHEME,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(state.get('http_existing_exchanged_credential')).toBeUndefined();
+    expect(state.hasDelta()).toBe(false);
+  });
+
+  it('logs the reason the exchange failed', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    rejectExchangeOnceWith(
+      new CredentialExchangeError(
+        'Failed to exchange default service account token: metadata server unreachable',
+      ),
+    );
+
+    await new ToolAuthHandler(
+      createContext(new State()),
+      BEARER_SCHEME,
+      SERVICE_ACCOUNT_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(
+      'Failed to exchange credential: Failed to exchange default service account token: metadata server unreachable',
+    );
+    error.mockRestore();
+  });
+
+  it('degrades on a rejection that is not a CredentialExchangeError', async () => {
+    rejectExchangeOnceWith(new Error('boom'));
+
+    const result = await new ToolAuthHandler(
+      createContext(new State()),
+      BEARER_SCHEME,
+      SERVICE_ACCOUNT_CREDENTIAL,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authCredential).toBeUndefined();
+  });
+
+  it('retries the exchange on the next tool call', async () => {
+    rejectExchangeOnceWith(new CredentialExchangeError('transient failure'));
+    const firstState = new State();
+    await new ToolAuthHandler(
+      createContext(firstState, SERVICE_ACCOUNT_CREDENTIAL),
+      BEARER_SCHEME,
+    ).prepareAuthCredentials();
+
+    // The next tool call rebuilds State from what the session persisted.
+    const secondContext = createContext(
+      new State(firstState.toRecord()),
+      SERVICE_ACCOUNT_CREDENTIAL,
+    );
+    const result = await new ToolAuthHandler(
+      secondContext,
+      BEARER_SCHEME,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
   });
 });

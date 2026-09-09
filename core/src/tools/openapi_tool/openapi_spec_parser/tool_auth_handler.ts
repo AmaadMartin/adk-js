@@ -8,7 +8,10 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {ExchangeResult} from '../../../auth/exchanger/base_credential_exchanger.js';
+import {formatError} from '../../../utils/error_utils.js';
 import {experimental} from '../../../utils/experimental.js';
+import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 export interface AuthPreparationResult {
@@ -101,11 +104,21 @@ export class ToolAuthHandler {
       return {state: 'pending'};
     }
 
-    const exchanger = new AutoAuthCredentialExchanger();
-    const result = await exchanger.exchange({
-      authScheme: this.authScheme,
-      authCredential: credential,
-    });
+    let result: ExchangeResult;
+    try {
+      result = await new AutoAuthCredentialExchanger().exchange({
+        authScheme: this.authScheme,
+        authCredential: credential,
+      });
+    } catch (error: unknown) {
+      // A failed exchange is almost always environmental — expired application
+      // default credentials, an unreachable metadata server, a token endpoint
+      // that refused the request. The tool can still call the API
+      // unauthenticated and report what the API says; rejecting would abort the
+      // whole invocation. Mirrors `_exchange_credential()` in adk-python.
+      logger.error(`Failed to exchange credential: ${formatError(error)}`);
+      return {state: 'done'};
+    }
 
     // Only cache what cannot cheaply be obtained again: an auth response is
     // readable once, and an exchange costs a round trip. A statically
