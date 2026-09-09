@@ -61,6 +61,20 @@ class FilteringToolset extends BaseToolset {
   async close(): Promise<void> {}
 }
 
+/** Applies the filter whether or not a context is available. */
+class ContextFreeFilteringToolset extends BaseToolset {
+  constructor(toolFilter: ToolPredicate | string[]) {
+    super(toolFilter);
+  }
+
+  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
+    const rawTools = [new DummyTool('tool1'), new DummyTool('tool2')];
+    return rawTools.filter((tool) => this.isToolSelected(tool, context));
+  }
+
+  async close(): Promise<void> {}
+}
+
 describe('BaseToolset.isToolSelected', () => {
   const context = {} as unknown as ReadonlyContext;
 
@@ -79,6 +93,15 @@ describe('BaseToolset.isToolSelected', () => {
   it('applies a ToolPredicate filter', async () => {
     const toolset = new FilteringToolset((tool) => tool.name === 'tool1');
     const tools = await toolset.getTools(context);
+    expect(tools.map((tool) => tool.name)).toEqual(['tool1']);
+  });
+
+  it('applies a ToolPredicate filter with no context', async () => {
+    const toolset = new ContextFreeFilteringToolset(
+      (tool, readonlyContext) =>
+        readonlyContext === undefined && tool.name === 'tool1',
+    );
+    const tools = await toolset.getTools();
     expect(tools.map((tool) => tool.name)).toEqual(['tool1']);
   });
 });
