@@ -37,7 +37,13 @@ export interface LoadArtifactRequest extends CompositeSessionKey {
 /**
  * The parameters for `listArtifactKeys`.
  */
-export type ListArtifactKeysRequest = CompositeSessionKey;
+export interface ListArtifactKeysRequest extends Omit<
+  CompositeSessionKey,
+  'sessionId'
+> {
+  /** Omit to list only the artifacts in the user namespace. */
+  sessionId?: string;
+}
 
 /**
  * The parameters for `deleteArtifact`.
@@ -100,6 +106,9 @@ export interface BaseArtifactService {
 
   /**
    * Lists all the artifact filenames within a session.
+   *
+   * The listing always covers the user namespace. It covers the session as
+   * well when the request names one.
    *
    * @param request The request to list artifact keys.
    * @return A promise that resolves to a list of all artifact filenames within
