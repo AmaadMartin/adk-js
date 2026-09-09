@@ -58,7 +58,14 @@ export interface ListSessionsRequest {
   offset?: number;
   /** 1-based page number. Requires `limit`. Takes precedence over `offset`. */
   page?: number;
-  /** Sort direction by last update time. No ordering is applied if omitted. */
+  /**
+   * Sort direction by last update time. No ordering is applied if omitted.
+   * When set, sessions with an equal `lastUpdateTime` are tie-broken by
+   * ascending session id in both directions, compared by UTF-16 code unit
+   * (`'Z'` before `'a'`), so paging through the result is stable. A SQL-backed
+   * service delegates that tie-break to the database, which matches this under
+   * a binary collation and may differ under a case-insensitive one.
+   */
   order?: 'asc' | 'desc';
 }
 

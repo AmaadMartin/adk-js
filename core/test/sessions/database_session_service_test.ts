@@ -646,6 +646,26 @@ describe('DatabaseSessionService', () => {
       expect(response.sessions.map((s) => s.id)).toEqual(['s3', 's4']);
       expect(response.page).toBe(2);
     });
+
+    it('tie-breaks mixed-case ids by code unit, matching the database service', async () => {
+      for (const sessionId of ['B', 'a', 'A', 'b']) {
+        const session = await service.createSession({
+          appName,
+          userId,
+          sessionId,
+        });
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: 1000}),
+        });
+      }
+
+      const asc = await service.listSessions({appName, userId, order: 'asc'});
+      expect(asc.sessions.map((s) => s.id)).toEqual(['A', 'B', 'a', 'b']);
+
+      const desc = await service.listSessions({appName, userId, order: 'desc'});
+      expect(desc.sessions.map((s) => s.id)).toEqual(['A', 'B', 'a', 'b']);
+    });
   });
 
   describe('Alignment Verification', () => {

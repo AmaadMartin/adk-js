@@ -1045,6 +1045,30 @@ describe('VertexAiSessionService', () => {
 
       expect(result.sessions.map((s) => s.id)).toEqual(['s2', 's3']);
     });
+
+    it('tie-breaks mixed-case ids by code unit, matching the database service', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: ['B', 'a', 'A', 'b'].map((id) => ({
+          name: `projects/p/locations/l/sessions/${id}`,
+          userId: 'testUser',
+          updateTime: '2026-01-01T00:00:00Z',
+        })),
+      });
+
+      const asc = await service.listSessions({
+        appName: '12345',
+        userId: 'testUser',
+        order: 'asc',
+      });
+      expect(asc.sessions.map((s) => s.id)).toEqual(['A', 'B', 'a', 'b']);
+
+      const desc = await service.listSessions({
+        appName: '12345',
+        userId: 'testUser',
+        order: 'desc',
+      });
+      expect(desc.sessions.map((s) => s.id)).toEqual(['A', 'B', 'a', 'b']);
+    });
   });
 
   describe('deleteSession', () => {
