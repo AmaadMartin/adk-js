@@ -9,9 +9,11 @@ import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
+import {AgentType} from '../../src/cli/create_options.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {applyExitOverride, runExpectingError} from './command_utils.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -54,8 +56,7 @@ describe('CLI Entrypoint', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    program = createProgram();
-    program.exitOverride();
+    program = applyExitOverride(createProgram());
   });
 
   afterEach(() => {
@@ -109,9 +110,18 @@ describe('CLI Entrypoint', () => {
       expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
     });
 
-    it('falls back to INFO for an unrecognised --log_level', async () => {
-      await parse(['web', '--log_level', 'not-a-level']);
-      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.INFO);
+    it('refuses an unrecognised --log_level', async () => {
+      // This replaces an assertion that an unrecognised value silently fell
+      // back to INFO. --log_level is now a closed choice, as click's
+      // `LOG_LEVELS` is, so a typo is reported instead of ignored.
+      const error = await runExpectingError(program, [
+        'web',
+        '--log_level',
+        'nope',
+      ]);
+
+      expect(error?.code).toBe('commander.invalidArgument');
+      expect(setLogLevel).not.toHaveBeenCalled();
     });
 
     it('should pass options to AdkApiServer', async () => {
@@ -232,6 +242,7 @@ describe('CLI Entrypoint', () => {
         project: 'proj',
         region: 'us-central1',
         language: 'ts',
+        agentType: AgentType.CODE,
       });
     });
   });
@@ -281,8 +292,6 @@ describe('CLI Entrypoint', () => {
         '--save_session',
         '--session_id',
         'sess-123',
-        '--replay',
-        'replay.json',
         '--resume',
         'resume.json',
         '--otel_to_cloud',
@@ -293,9 +302,61 @@ describe('CLI Entrypoint', () => {
           agentPath: 'agent.ts',
           saveSession: true,
           sessionId: 'sess-123',
-          inputFile: 'replay.json',
           savedSessionFile: 'resume.json',
           otelToCloud: true,
+        }),
+      );
+    });
+
+    it('refuses --replay together with --resume, and never starts an agent', async () => {
+      const error = await runExpectingError(program, [
+        'run',
+        'agent.ts',
+        '--replay',
+        'replay.json',
+        '--resume',
+        'resume.json',
+      ]);
+
+      expect(error?.exitCode).toBe(2);
+      expect(error?.message).toBe(
+        "error: Options 'resume' and 'replay' cannot be set together.",
+      );
+      expect(runAgent).not.toHaveBeenCalled();
+    });
+
+    it('passes --replay on its own through to the agent run', async () => {
+      const error = await runExpectingError(program, [
+        'run',
+        'agent.ts',
+        '--replay',
+        'replay.json',
+      ]);
+
+      expect(error).toBeUndefined();
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          inputFile: 'replay.json',
+          savedSessionFile: undefined,
+        }),
+      );
+    });
+
+    it('passes --resume on its own through to the agent run', async () => {
+      const error = await runExpectingError(program, [
+        'run',
+        'agent.ts',
+        '--resume',
+        'resume.json',
+      ]);
+
+      expect(error).toBeUndefined();
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          inputFile: undefined,
+          savedSessionFile: 'resume.json',
         }),
       );
     });
