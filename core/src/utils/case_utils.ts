@@ -5,6 +5,26 @@
  */
 
 /**
+ * Recursively converts the snake_case keys of a plain object to camelCase.
+ *
+ * Use this rather than {@link camelCaseKeys} when the input is already known to
+ * be an object, so the result does not have to be narrowed again.
+ *
+ * @param value The object to convert.
+ * @returns An object with camelCase keys.
+ */
+export function camelCaseRecordKeys(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const converted: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, g) => g.toUpperCase());
+    converted[camelKey] = camelCaseKeys(value[key]);
+  }
+  return converted;
+}
+
+/**
  * Recursively converts snake_case keys of an object to camelCase.
  *
  * @param val The value to convert.
@@ -15,13 +35,7 @@ export function camelCaseKeys(val: unknown): unknown {
     return val.map(camelCaseKeys);
   }
   if (val !== null && typeof val === 'object' && val.constructor === Object) {
-    const obj = val as Record<string, unknown>;
-    const newObj: Record<string, unknown> = {};
-    for (const key of Object.keys(obj)) {
-      const camelKey = key.replace(/_([a-z])/g, (_, g) => g.toUpperCase());
-      newObj[camelKey] = camelCaseKeys(obj[key]);
-    }
-    return newObj;
+    return camelCaseRecordKeys(val as Record<string, unknown>);
   }
   return val;
 }
