@@ -21,10 +21,16 @@ import {describe, expect, it} from 'vitest';
 import {
   createNewEventId,
   generateClientFunctionCallId,
+  isEvent,
+  mergeEventOverride,
   populateClientFunctionCallId,
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
 } from '../../src/events/event.js';
+import {
+  recordStateWrite,
+  shouldApplyDeltaWrite,
+} from '../../src/sessions/state_write_order.js';
 
 describe('Event Utils', () => {
   describe('createEvent', () => {
@@ -463,5 +469,174 @@ describe('Event Utils', () => {
       populateClientFunctionCallId(event);
       expect(event.content!.parts![0].text).toBe('hello');
     });
+  });
+});
+
+describe('mergeEventOverride', () => {
+  function originalEvent() {
+    return createEvent({
+      id: 'original-id',
+      invocationId: 'original-invocation',
+      timestamp: 1000,
+      author: 'test_agent',
+      branch: 'root.child',
+      content: {role: 'model', parts: [{text: 'original'}]},
+      usageMetadata: {totalTokenCount: 42},
+      partial: true,
+      longRunningToolIds: ['call-1'],
+      actions: {
+        stateDelta: {counter: 1, other: 'keep'},
+        artifactDelta: {'report.txt': 3},
+        transferToAgent: 'other_agent',
+      },
+    });
+  }
+
+  /** The shape a plugin produces when it only rewrites `content`. */
+  function contentOnlyOverride() {
+    return createEvent({
+      invocationId: '',
+      author: '',
+      content: {role: 'model', parts: [{text: 'redacted'}]},
+    });
+  }
+
+  it('keeps the identity fields of the original event', () => {
+    const original = originalEvent();
+    const merged = mergeEventOverride(
+      original,
+      createEvent({
+        id: 'override-id',
+        invocationId: 'override-invocation',
+        timestamp: 2000,
+      }),
+    );
+
+    expect(merged.id).toBe('original-id');
+    expect(merged.invocationId).toBe('original-invocation');
+    expect(merged.timestamp).toBe(1000);
+  });
+
+  it('applies a field the override defines', () => {
+    const merged = mergeEventOverride(originalEvent(), contentOnlyOverride());
+
+    expect(merged.content!.parts![0].text).toBe('redacted');
+  });
+
+  it('keeps fields the override leaves undefined', () => {
+    const merged = mergeEventOverride(originalEvent(), contentOnlyOverride());
+
+    expect(merged.usageMetadata).toEqual({totalTokenCount: 42});
+    expect(merged.partial).toBe(true);
+    expect(merged.branch).toBe('root.child');
+  });
+
+  it('merges the action dictionaries key-wise, with the override winning', () => {
+    const merged = mergeEventOverride(
+      originalEvent(),
+      createEvent({actions: {stateDelta: {counter: 2}}}),
+    );
+
+    expect(merged.actions.stateDelta).toEqual({counter: 2, other: 'keep'});
+    expect(merged.actions.artifactDelta).toEqual({'report.txt': 3});
+    expect(merged.actions.transferToAgent).toBe('other_agent');
+  });
+
+  it('keeps action fields mergeEventActions does not enumerate', () => {
+    const original = createEvent({
+      actions: {agentState: {step: 'two'}, endOfAgent: true},
+    });
+    const merged = mergeEventOverride(original, contentOnlyOverride());
+
+    expect(merged.actions.agentState).toEqual({step: 'two'});
+    expect(merged.actions.endOfAgent).toBe(true);
+  });
+
+  it('lets the override replace an action field it defines', () => {
+    const original = createEvent({actions: {endOfAgent: true}});
+    const merged = mergeEventOverride(
+      original,
+      createEvent({actions: {endOfAgent: false, escalate: true}}),
+    );
+
+    expect(merged.actions.endOfAgent).toBe(false);
+    expect(merged.actions.escalate).toBe(true);
+  });
+
+  it('falls back to the original author for an empty override author', () => {
+    const merged = mergeEventOverride(originalEvent(), contentOnlyOverride());
+
+    expect(merged.author).toBe('test_agent');
+  });
+
+  it('falls back to the original author for an undefined override author', () => {
+    const merged = mergeEventOverride(originalEvent(), createEvent({}));
+
+    expect(merged.author).toBe('test_agent');
+  });
+
+  it('takes the branch the override sets', () => {
+    const merged = mergeEventOverride(
+      originalEvent(),
+      createEvent({branch: 'root.other'}),
+    );
+
+    expect(merged.branch).toBe('root.other');
+  });
+
+  it('takes the author the override sets', () => {
+    const merged = mergeEventOverride(
+      originalEvent(),
+      createEvent({author: 'redactor'}),
+    );
+
+    expect(merged.author).toBe('redactor');
+  });
+
+  it('keeps the original longRunningToolIds when the override has none', () => {
+    const merged = mergeEventOverride(originalEvent(), contentOnlyOverride());
+
+    expect(merged.longRunningToolIds).toEqual(['call-1']);
+  });
+
+  it('takes a non-empty longRunningToolIds from the override', () => {
+    const merged = mergeEventOverride(
+      originalEvent(),
+      createEvent({longRunningToolIds: ['call-2']}),
+    );
+
+    expect(merged.longRunningToolIds).toEqual(['call-2']);
+  });
+
+  it('keeps the event signature brand', () => {
+    const merged = mergeEventOverride(originalEvent(), contentOnlyOverride());
+
+    expect(isEvent(merged)).toBe(true);
+  });
+
+  it('mutates neither input', () => {
+    const original = originalEvent();
+    const override = createEvent({actions: {stateDelta: {counter: 2}}});
+    const merged = mergeEventOverride(original, override);
+
+    expect(original.actions.stateDelta).toEqual({counter: 1, other: 'keep'});
+    expect(original.content!.parts![0].text).toBe('original');
+    expect(override.actions.stateDelta).toEqual({counter: 2});
+    expect(merged.actions.stateDelta).not.toBe(original.actions.stateDelta);
+    expect(merged.actions.stateDelta).not.toBe(override.actions.stateDelta);
+  });
+
+  it('carries the state write-order stamps onto the merged delta', () => {
+    const original = createEvent({actions: {stateDelta: {counter: 1}}});
+    const state: Record<string, unknown> = {};
+    recordStateWrite(state, original.actions.stateDelta, 'counter');
+
+    const merged = mergeEventOverride(original, contentOnlyOverride());
+
+    // A newer direct write to the same key must win over the stamped delta.
+    recordStateWrite(state, undefined, 'counter');
+    expect(
+      shouldApplyDeltaWrite(state, merged.actions.stateDelta, 'counter'),
+    ).toBe(false);
   });
 });

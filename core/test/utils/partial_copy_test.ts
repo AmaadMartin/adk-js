@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {partialCopy} from '../../src/utils/partial_copy.js';
+import {definedFields, partialCopy} from '../../src/utils/partial_copy.js';
 
 interface SampleDest {
   a: string;
@@ -69,5 +69,45 @@ describe('partialCopy', () => {
     const result = partialCopy<SampleDest>(source, ['a', 'b']);
 
     expect(result).not.toBe(source);
+  });
+});
+
+describe('definedFields', () => {
+  it('should drop entries whose value is undefined', () => {
+    const result = definedFields({a: 'hello', b: undefined, c: 1});
+
+    expect(result).toEqual({a: 'hello', c: 1});
+    expect('b' in result).toBe(false);
+  });
+
+  it('should keep null and other falsy values', () => {
+    const result = definedFields({a: null, b: 0, c: '', d: false});
+
+    expect(result).toEqual({a: null, b: 0, c: '', d: false});
+  });
+
+  it('should return an empty object for an empty source', () => {
+    expect(definedFields({})).toEqual({});
+  });
+
+  it('should ignore symbol keys', () => {
+    const brand = Symbol.for('google.adk.event');
+    const result = definedFields({[brand]: true, a: 'hello'});
+
+    expect(result[brand]).toBeUndefined();
+    expect(result.a).toBe('hello');
+  });
+
+  it('should not mutate the source object', () => {
+    const source = {a: 'hello', b: undefined};
+    definedFields(source);
+
+    expect(source).toEqual({a: 'hello', b: undefined});
+  });
+
+  it('should return a new object, not the same reference', () => {
+    const source = {a: 'hello'};
+
+    expect(definedFields(source)).not.toBe(source);
   });
 });
