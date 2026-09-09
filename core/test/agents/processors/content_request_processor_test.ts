@@ -8,8 +8,8 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createEventActions,
   Event,
-  EventActions,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -23,7 +23,7 @@ function createMockEvent(id: string, timestamp: number, text: string): Event {
     id,
     invocationId: 'test-invoc',
     author: 'user',
-    actions: {} as EventActions,
+    actions: createEventActions(),
     timestamp,
     content: {
       role: 'user',
@@ -43,7 +43,7 @@ function createCompactedEvent(
     id,
     invocationId: 'test-invoc',
     author: 'system',
-    actions: {} as EventActions,
+    actions: createEventActions(),
     timestamp,
     isCompacted: true,
     startTime,
@@ -182,5 +182,136 @@ describe('ContentRequestProcessor', () => {
     expect(llmRequest.contents[0].parts?.[0]?.text).toContain('Summary 1-3');
     // Followed by message 4
     expect(llmRequest.contents[1].parts?.[0]?.text).toContain('New message 4');
+  });
+});
+
+function createModelEvent(id: string, timestamp: number, text: string): Event {
+  return {
+    id,
+    invocationId: 'test-invoc',
+    author: 'test_agent',
+    actions: createEventActions(),
+    timestamp,
+    content: {role: 'model', parts: [{text}]},
+  };
+}
+
+function createFunctionCallEvent(id: string, timestamp: number): Event {
+  return {
+    id,
+    invocationId: 'test-invoc',
+    author: 'test_agent',
+    actions: createEventActions(),
+    timestamp,
+    content: {
+      role: 'model',
+      parts: [{functionCall: {id: 'call-1', name: 'lookup', args: {}}}],
+    },
+  };
+}
+
+function createFunctionResponseEvent(id: string, timestamp: number): Event {
+  return {
+    id,
+    invocationId: 'test-invoc',
+    author: 'user',
+    actions: createEventActions(),
+    timestamp,
+    content: {
+      role: 'user',
+      parts: [
+        {functionResponse: {id: 'call-1', name: 'lookup', response: {out: 1}}},
+      ],
+    },
+  };
+}
+
+describe('ContentRequestProcessor instruction contents', () => {
+  it('keeps non-text static-instruction content at the front of the history', async () => {
+    const invocationContext = createMockInvocationContext([
+      createMockEvent('1', 1000, 'Earlier question'),
+      createMockEvent('2', 2000, 'Latest question'),
+    ]);
+    const llmRequest: LlmRequest = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {text: 'Referenced file data: file_data_0'},
+            {fileData: {fileUri: 'files/handbook'}},
+          ],
+        },
+      ],
+      toolsDict: {},
+      liveConnectConfig: {},
+      hasStaticInstruction: true,
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.contents).toHaveLength(3);
+    expect(llmRequest.contents[0].parts?.[0]?.text).toBe(
+      'Referenced file data: file_data_0',
+    );
+    expect(llmRequest.contents[1].parts?.[0]?.text).toBe('Earlier question');
+  });
+
+  it('places a labelled dynamic instruction before the trailing user run', async () => {
+    const invocationContext = createMockInvocationContext([
+      createMockEvent('1', 1000, 'Earlier question'),
+      createModelEvent('2', 2000, 'Earlier answer'),
+      createMockEvent('3', 3000, 'Latest question'),
+    ]);
+    const llmRequest: LlmRequest = {
+      contents: [{role: 'user', parts: [{text: 'Labelled instruction'}]}],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.contents.map((c) => c.parts?.[0]?.text)).toEqual([
+      'Earlier question',
+      'Earlier answer',
+      'Labelled instruction',
+      'Latest question',
+    ]);
+  });
+
+  it('places the instruction after a trailing function response', async () => {
+    const invocationContext = createMockInvocationContext([
+      createMockEvent('1', 1000, 'Question'),
+      createFunctionCallEvent('2', 2000),
+      createFunctionResponseEvent('3', 3000),
+    ]);
+    const llmRequest: LlmRequest = {
+      contents: [{role: 'user', parts: [{text: 'Labelled instruction'}]}],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    const last = llmRequest.contents[llmRequest.contents.length - 1];
+    expect(last.parts?.[0]?.text).toBe('Labelled instruction');
+    expect(
+      llmRequest.contents[llmRequest.contents.length - 2].parts?.[0]
+        ?.functionResponse?.name,
+    ).toBe('lookup');
   });
 });

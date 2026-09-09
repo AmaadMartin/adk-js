@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {ContentUnion, GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -298,6 +298,21 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   instruction?: string | InstructionProvider;
 
   /**
+   * Instructions sent to the model literally, ahead of {@link instruction}.
+   *
+   * The content is used as it stands: placeholders are not substituted and
+   * session state is not injected. It exists for provider-side context
+   * caching, which needs a byte-stable request prefix across turns.
+   *
+   * Setting it moves {@link instruction} out of the system instruction and
+   * into the request contents, since state interpolation would change the
+   * prefix on every turn. A non-text part cannot live in a system instruction,
+   * so it becomes a textual reference there plus a user content carrying the
+   * data.
+   */
+  staticInstruction?: ContentUnion;
+
+  /**
    * Instructions for all the agents in the entire agent tree.
    *
    * ONLY the globalInstruction in root agent will take effect.
@@ -458,6 +473,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
+  /** See {@link LlmAgentConfig.staticInstruction}. */
+  staticInstruction?: ContentUnion;
   /** @deprecated Use GlobalInstructionPlugin instead. */
   globalInstruction: string | InstructionProvider;
   tools: ToolUnion[];
@@ -514,6 +531,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     });
     this.model = config.model;
     this.instruction = config.instruction ?? '';
+    this.staticInstruction = config.staticInstruction;
     this.globalInstruction = config.globalInstruction ?? '';
     this.tools = config.tools ?? [];
     this.generateContentConfig = config.generateContentConfig;
