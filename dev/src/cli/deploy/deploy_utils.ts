@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
 import {
+  isFileExists,
   loadFileData,
   saveToFile,
   tryToFindFileRecursively,
@@ -35,6 +36,16 @@ export const spawnAsync = (
 
 export const REQUIRED_NPM_PACKAGES = ['@google/adk'];
 
+/** The npm package providing the `adk` command inside the deployed image. */
+const DEVTOOLS_NPM_PACKAGE = '@google/adk-devtools';
+
+/** The fields this module reads out of the agent project's package.json. */
+interface ProjectPackageJson {
+  dependencies?: Record<string, string>;
+  /** Presence marks a workspace root; the value itself is never read. */
+  workspaces?: unknown;
+}
+
 export interface CreateDockerFileContentOptions {
   appName?: string;
   project: string;
@@ -47,9 +58,18 @@ export interface CreateDockerFileContentOptions {
   artifactServiceUri?: string;
   otelToCloud?: boolean;
   a2a?: boolean;
+  /** Version range the devtools package is installed at. */
+  adkVersion: string;
+  /** Whether a package-lock.json was staged next to the package.json. */
+  hasLockfile: boolean;
 }
 
-export interface BaseDeployOptions extends CreateDockerFileContentOptions {
+// hasLockfile is omitted: the deploy commands stage the lock file themselves
+// and pass the result on to createDockerFile, so a caller cannot supply it.
+export interface BaseDeployOptions extends Omit<
+  CreateDockerFileContentOptions,
+  'hasLockfile'
+> {
   agentPath: string;
   /**
    * Directory the generated deployment sources are staged in. When omitted, the
@@ -57,7 +77,6 @@ export interface BaseDeployOptions extends CreateDockerFileContentOptions {
    * removes it when the deployment finishes.
    */
   tempFolder?: string;
-  adkVersion: string;
   agentFileLoadOptions?: AgentFileOptions;
 }
 
@@ -145,12 +164,27 @@ export function createDockerFileContent(
     adkServerOptions.push('--a2a');
   }
 
+  assertNoDockerfileNewline(options.adkVersion, 'adkVersion');
+  const devtoolsSpec = shellQuote(
+    `${DEVTOOLS_NPM_PACKAGE}@${options.adkVersion}`,
+  );
+
+  const lockfileCopy = options.hasLockfile
+    ? '\nCOPY --chown=myuser:myuser "package-lock.json" "/app/package-lock.json"'
+    : '';
+  const dependencyInstall = options.hasLockfile
+    ? 'RUN npm ci --omit=dev'
+    : `# The agent project has no usable package-lock.json, so npm resolves every
+# semver range against the registry at build time.
+RUN npm install --omit=dev`;
+
   return `
 FROM node:lts-alpine
 WORKDIR /app
 
-# Create a non-root user
-RUN adduser --disabled-password --gecos "" myuser
+# Create a non-root user. WORKDIR made /app root-owned, and the installs below
+# create /app/node_modules as myuser.
+RUN adduser --disabled-password --gecos "" myuser && chown myuser:myuser /app
 
 # Switch to the non-root user
 USER myuser
@@ -166,14 +200,13 @@ ENV GOOGLE_CLOUD_LOCATION=${options.region}
 COPY --chown=myuser:myuser "agents/${options.appName}/" "/app/agents/${
     options.appName
   }/"
-COPY --chown=myuser:myuser "package.json" "/app/package.json"
-COPY --chown=myuser:myuser "package-lock.json" "/app/package-lock.json"
-COPY --chown=myuser:myuser "node_modules" "/app/node_modules"
+COPY --chown=myuser:myuser "package.json" "/app/package.json"${lockfileCopy}
 # Copy application files
 
 # Install Agent Deps - Start
-RUN npm install @google/adk-devtools@latest
-RUN npm install --production
+${dependencyInstall}
+# Installed last: the dependency install above clears node_modules.
+RUN npm install ${devtoolsSpec}
 # Install Agent Deps - End
 
 EXPOSE ${options.port}
@@ -207,18 +240,26 @@ export async function copyAgentFiles(
   }
 }
 
-export async function createPackageJson(
+/**
+ * Stages the agent's dependency declaration into the deployment folder.
+ *
+ * The staged package.json carries only `dependencies`. The project's own
+ * lifecycle scripts are dropped on purpose: `npm ci` runs the root package's
+ * `prepare` script, and a `prepare` that needs the developer's checkout fails
+ * the image build.
+ *
+ * @returns whether the project's package-lock.json was staged with it.
+ */
+export async function stageDependencyFiles(
   sourceFolder: string,
   targetFolder: string,
-) {
+): Promise<boolean> {
   const packageJsonPath = await tryToFindFileRecursively(
     sourceFolder,
     'package.json',
     3,
   );
-  const packageJson = await loadFileData<{
-    dependencies: Record<string, string>;
-  }>(packageJsonPath);
+  const packageJson = await loadFileData<ProjectPackageJson>(packageJsonPath);
   if (!packageJson || !packageJson.dependencies) {
     throw new Error(
       `No dependencies found in package.json: ${packageJsonPath}`,
@@ -236,13 +277,43 @@ export async function createPackageJson(
 
   const targetPackageJsonPath = path.join(targetFolder, 'package.json');
 
-  await Promise.all([
-    fs.mkdir(path.join(targetFolder, 'node_modules')),
-    saveToFile(path.join(targetFolder, 'package-lock.json'), ''),
-    saveToFile(targetPackageJsonPath, {
-      dependencies: packageJson.dependencies,
-    }),
-  ]);
+  await saveToFile(targetPackageJsonPath, {
+    dependencies: packageJson.dependencies,
+  });
+
+  const unpinnedConsequence =
+    'Dependencies will be resolved from the registry when the image is built, so the deployed tree is not reproducible.';
+  const lockfilePath = path.join(
+    path.dirname(packageJsonPath),
+    'package-lock.json',
+  );
+
+  if (!(await isFileExists(lockfilePath))) {
+    console.warn(
+      `No package-lock.json beside ${packageJsonPath}.`,
+      unpinnedConsequence,
+    );
+    return false;
+  }
+
+  // A workspace root's lock describes member packages by directory link. Those
+  // directories never reach the image, and `npm ci` then reports success while
+  // installing nothing.
+  if (packageJson.workspaces) {
+    console.warn(
+      `${packageJsonPath} is a workspace root, and its package-lock.json describes packages that will not exist in the image.`,
+      unpinnedConsequence,
+    );
+    return false;
+  }
+
+  await fs.cp(lockfilePath, path.join(targetFolder, 'package-lock.json'));
+  console.info(
+    'Pinning dependencies from',
+    lockfilePath,
+    '- the image build fails if this lock file is out of sync with package.json. Run `npm install` to refresh it.',
+  );
+  return true;
 }
 
 export async function resolveDefaultFromGcloudConfig(

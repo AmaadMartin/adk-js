@@ -16,8 +16,10 @@ import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
   createTempDir,
   isFile,
+  isFileExists,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 declare global {
@@ -133,6 +135,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
   isFile: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
@@ -179,6 +182,7 @@ describe('deployToAgentEngine', () => {
     mockReaddir.mockResolvedValue(['file1.js']);
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     // Default mock behavior
     (isFile as Mock).mockResolvedValue(false);
@@ -748,5 +752,65 @@ describe('deployToAgentEngine', () => {
     await expect(deployToAgentEngine(options)).rejects.toThrow(
       'Reasoning Engine update failed: [Code 404] Resource not found',
     );
+  });
+
+  it('should stage the project lock file and install from it', async () => {
+    (isFileExists as Mock).mockResolvedValue(true);
+
+    await deployToAgentEngine(defaultOptions);
+
+    expect(fs.cp).toHaveBeenCalledWith(
+      path.join('path/to', 'package-lock.json'),
+      path.join(tempFolder, 'package-lock.json'),
+    );
+    expect(saveToFile).toHaveBeenCalledWith(
+      path.join(tempFolder, 'Dockerfile'),
+      expect.stringContaining('RUN npm ci --omit=dev'),
+    );
+  });
+
+  it('should refuse the lock file of a workspace root', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => {});
+    (isFileExists as Mock).mockResolvedValue(true);
+    (loadFileData as Mock).mockResolvedValue({
+      dependencies: {'@google/adk': '^1.0.0'},
+      workspaces: ['packages/*'],
+    });
+
+    await deployToAgentEngine(defaultOptions);
+
+    expect(fs.cp).not.toHaveBeenCalledWith(
+      path.join('path/to', 'package-lock.json'),
+      path.join(tempFolder, 'package-lock.json'),
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('is a workspace root'),
+      expect.stringContaining('not reproducible'),
+    );
+    expect(saveToFile).toHaveBeenCalledWith(
+      path.join(tempFolder, 'Dockerfile'),
+      expect.stringContaining('RUN npm install --omit=dev'),
+    );
+  });
+
+  it('should warn and deploy unpinned when the project has no lock file', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => {});
+    (isFileExists as Mock).mockResolvedValue(false);
+
+    await deployToAgentEngine(defaultOptions);
+
+    expect(fs.cp).not.toHaveBeenCalledWith(
+      path.join('path/to', 'package-lock.json'),
+      path.join(tempFolder, 'package-lock.json'),
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('No package-lock.json beside'),
+      expect.stringContaining('not reproducible'),
+    );
+    expect(mockCreateInternal).toHaveBeenCalled();
   });
 });
