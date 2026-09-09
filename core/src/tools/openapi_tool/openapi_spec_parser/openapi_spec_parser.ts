@@ -5,6 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {ApiParameter, OperationParser} from './operation_parser.js';
 
@@ -32,6 +33,11 @@ export interface ParsedOperation {
   parameters: ApiParameter[];
   returnValue?: ApiParameter;
   authScheme?: OpenAPIV3.SecuritySchemeObject;
+  /**
+   * Context a caller attaches to the operation before it builds a tool. The
+   * parser initialises it empty.
+   */
+  additionalContext?: Record<string, unknown>;
 }
 
 @experimental
@@ -60,6 +66,9 @@ export class OpenApiSpecParser {
 
 /**
  * Resolves all internal $ref references in the OpenAPI spec document.
+ *
+ * The cache holds one resolved subtree per reference and hands out a copy of
+ * it, so two uses of one reference never share an object.
  */
 function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
   const resolvedCache = new Map<string, unknown>();
@@ -92,7 +101,8 @@ function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
       seenRefs.add(refString);
 
       if (resolvedCache.has(refString)) {
-        return resolvedCache.get(refString);
+        // Deep copy, so this use cannot edit another's subtree.
+        return JSON.parse(JSON.stringify(resolvedCache.get(refString)));
       }
 
       let resolvedValue = resolveRef(refString, currentDoc);
@@ -140,12 +150,13 @@ function resolveRef(
 
 /**
  * Sanitizes schema types in the spec to ensure compatibility with Gemini function calling.
+ *
+ * Edits the document in place. Its one caller owns a document that
+ * `resolveReferences` built, so no caller of `parse` shares it.
  */
 function sanitizeSchemaTypes(
   openapiSpec: OpenAPIV3.Document,
 ): OpenAPIV3.Document {
-  const specCopy = JSON.parse(JSON.stringify(openapiSpec));
-
   const sanitizeTypeField = (schemaDict: Record<string, unknown>) => {
     if (!('type' in schemaDict)) return;
 
@@ -201,7 +212,7 @@ function sanitizeSchemaTypes(
     return objRecord;
   };
 
-  return sanitizeRecursive(specCopy, false) as OpenAPIV3.Document;
+  return sanitizeRecursive(openapiSpec, false) as OpenAPIV3.Document;
 }
 
 /**
@@ -275,8 +286,7 @@ function collectOperations(
       operation.parameters = [...opParams, ...pathParams];
 
       if (!operation.operationId) {
-        // Generate operation ID if missing
-        operation.operationId = `${method}_${path.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        operation.operationId = snakeCase(`${path}_${method}`);
       }
 
       const parser = new OperationParser(operation, {
@@ -299,7 +309,9 @@ function collectOperations(
         endpoint: {baseUrl, path, method},
         operation: operation,
         parameters: parser.getParameters(),
+        returnValue: parser.getReturnValue(),
         authScheme: authScheme,
+        additionalContext: {},
       });
     }
   }

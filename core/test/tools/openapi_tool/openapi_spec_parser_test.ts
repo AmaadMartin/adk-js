@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenApiSpecParser} from '@google/adk';
+import {OpenApiSpecParser, ParsedOperation} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
@@ -193,7 +193,7 @@ describe('OpenApiSpecParser', () => {
             },
           ],
           get: {
-            // operationId is missing, should be auto-generated as "get__users__id_"
+            // operationId is missing, so it is synthesized from path + method.
             responses: {},
           },
         },
@@ -205,7 +205,7 @@ describe('OpenApiSpecParser', () => {
 
     expect(parsed.length).toBe(1);
     const op = parsed[0];
-    expect(op.name).toBe('get__users__id_');
+    expect(op.name).toBe('users_id_get');
     expect(op.parameters.length).toBe(1);
     expect(op.parameters[0].name).toBe('id');
   });
@@ -343,4 +343,208 @@ describe('OpenApiSpecParser', () => {
       );
     });
   });
+
+  describe('parsed operation output', () => {
+    it('should take the return value from the 2xx response', () => {
+      const parsed = new OpenApiSpecParser().parse(minimalSpec());
+
+      expect(parsed.length).toBe(1);
+      expect(parsed[0].returnValue).toEqual({
+        originalName: '',
+        paramLocation: '',
+        paramSchema: {type: 'string'},
+        required: true,
+        name: 'return',
+      });
+    });
+
+    it('should take the return value from the lowest 2xx response', () => {
+      const spec = minimalSpec();
+      responseContent(spec, '202', {type: 'boolean'});
+
+      const parsed = new OpenApiSpecParser().parse(spec);
+
+      expect(parsed[0].returnValue?.paramSchema.type).toBe('string');
+    });
+
+    it('should return an empty schema when no response is 2xx', () => {
+      const spec = minimalSpec();
+      spec.paths['/test']!.get!.responses = {'404': {description: 'Missing'}};
+
+      const parsed = new OpenApiSpecParser().parse(spec);
+
+      expect(parsed[0].returnValue?.paramSchema).toEqual({});
+    });
+
+    it('should resolve a referenced response schema into the return value', () => {
+      const spec = minimalSpec();
+      responseContent(spec, '200', {$ref: '#/components/schemas/User'});
+      spec.components = {
+        schemas: {User: {type: 'object', properties: {name: {type: 'string'}}}},
+      };
+
+      const parsed = new OpenApiSpecParser().parse(spec);
+
+      expect(parsed[0].returnValue?.paramSchema.properties?.name).toEqual({
+        type: 'string',
+      });
+    });
+
+    it('should seed additionalContext empty', () => {
+      const parsed = new OpenApiSpecParser().parse(minimalSpec());
+
+      expect(parsed[0].additionalContext).toEqual({});
+    });
+
+    it('should give each operation its own additionalContext', () => {
+      const spec = minimalSpec();
+      spec.paths['/other'] = {get: {responses: {}}};
+
+      const parsed = new OpenApiSpecParser().parse(spec);
+
+      expect(parsed.length).toBe(2);
+      expect(parsed[0].additionalContext).not.toBe(parsed[1].additionalContext);
+    });
+
+    it.each([
+      ['/pets/{petId}', 'get', 'pets_pet_id_get'],
+      [
+        '/Orders/{orderId}/lineItems',
+        'patch',
+        'orders_order_id_line_items_patch',
+      ],
+      ['/v1/REST API/items', 'post', 'v1_rest_api_items_post'],
+    ])('should name %s %s as adk-python does', (path, method, expectedName) => {
+      const spec: OpenAPIV3.Document = {
+        openapi: '3.0.0',
+        info: {title: 'Naming API', version: '1.0.0'},
+        paths: {[path]: {[method]: {responses: {}}}},
+      };
+
+      const parsed = new OpenApiSpecParser().parse(spec);
+
+      expect(parsed[0].operation.operationId).toBe(expectedName);
+      expect(parsed[0].name).toBe(expectedName);
+    });
+  });
+
+  describe('shared references', () => {
+    it('should give each use of a reference its own subtree', () => {
+      const parsed = new OpenApiSpecParser().parse(sharedRefSpec());
+
+      const schemas = SHARED_REF_PATHS.map((path) =>
+        requestSchema(parsed, path),
+      );
+
+      expect(new Set(schemas).size).toBe(SHARED_REF_PATHS.length);
+      expect(schemas[1]).toEqual(schemas[0]);
+      expect(schemas[2]).toEqual(schemas[0]);
+    });
+
+    it('should keep an edit to one use out of the others', () => {
+      const parsed = new OpenApiSpecParser().parse(sharedRefSpec());
+
+      requestSchema(parsed, '/a').properties!.name = {type: 'integer'};
+
+      expect(requestSchema(parsed, '/b').properties?.name).toEqual({
+        type: 'string',
+      });
+      expect(requestSchema(parsed, '/c').properties?.name).toEqual({
+        type: 'string',
+      });
+    });
+
+    it('should leave the caller’s document unchanged', () => {
+      const spec = sharedRefSpec();
+
+      new OpenApiSpecParser().parse(spec);
+
+      expect(spec).toEqual(sharedRefSpec());
+    });
+  });
 });
+
+/**
+ * Mirrors the minimal fixture of adk-python's spec parser tests: one `get` on
+ * `/test` that returns a string.
+ */
+function minimalSpec(): OpenAPIV3.Document {
+  return {
+    openapi: '3.0.0',
+    info: {title: 'Minimal API', version: '1.0.0'},
+    paths: {
+      '/test': {
+        get: {
+          summary: 'Test GET endpoint',
+          operationId: 'testGet',
+          responses: {
+            '200': {
+              description: 'Successful response',
+              content: {'application/json': {schema: {type: 'string'}}},
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+/** Sets the JSON response schema of `minimalSpec`'s operation. */
+function responseContent(
+  spec: OpenAPIV3.Document,
+  code: string,
+  schema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
+) {
+  spec.paths['/test']!.get!.responses[code] = {
+    description: 'Response',
+    content: {'application/json': {schema}},
+  };
+}
+
+const SHARED_REF_PATHS = ['/a', '/b', '/c'];
+
+/**
+ * A spec whose paths all reference one schema. Three uses, not two: with two,
+ * dropping the copy still leaves the first use holding the cache entry and the
+ * second holding the copy, so the two stay distinct.
+ */
+function sharedRefSpec(): OpenAPIV3.Document {
+  const operation: OpenAPIV3.OperationObject = {
+    requestBody: {
+      content: {
+        'application/json': {schema: {$ref: '#/components/schemas/Shared'}},
+      },
+    },
+    responses: {},
+  };
+  return {
+    openapi: '3.0.0',
+    info: {title: 'Shared Ref API', version: '1.0.0'},
+    paths: Object.fromEntries(
+      SHARED_REF_PATHS.map((path) => [
+        path,
+        {post: structuredClone(operation)},
+      ]),
+    ),
+    components: {
+      schemas: {Shared: {type: 'object', properties: {name: {type: 'string'}}}},
+    },
+  };
+}
+
+/** Reads a resolved request body schema, failing the test if it is missing. */
+function requestSchema(
+  parsed: ParsedOperation[],
+  path: string,
+): OpenAPIV3.SchemaObject {
+  const operation = parsed.find((op) => op.endpoint.path === path)?.operation;
+  const requestBody = operation?.requestBody;
+  if (!requestBody || '$ref' in requestBody) {
+    expect.fail(`no resolved request body on ${path}`);
+  }
+  const schema = requestBody.content['application/json'].schema;
+  if (!schema || '$ref' in schema) {
+    expect.fail(`no resolved request body schema on ${path}`);
+  }
+  return schema;
+}
