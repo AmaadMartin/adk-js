@@ -9,6 +9,7 @@ import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {formatError} from '../../utils/error_utils.js';
+import {instrumentFetch} from '../../utils/http_debug_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
@@ -132,7 +133,10 @@ export class MCPSessionManager {
           );
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
-            options,
+            // The instrumented fetch records the session's HTTP exchanges
+            // while a debug capture is active, and delegates untouched
+            // otherwise.
+            {...options, fetch: instrumentFetch(options.fetch)},
           );
           transport.onerror = logTransportError;
           await client.connect(transport);

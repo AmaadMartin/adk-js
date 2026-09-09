@@ -64,6 +64,11 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  /**
+   * Free-form metadata accumulated during the invocation. Defaults to an empty
+   * bag.
+   */
+  customMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -268,6 +273,13 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Free-form metadata accumulated during this invocation, mirroring Python
+   * `InvocationContext._custom_metadata`. Tools write diagnostic payloads
+   * here; nothing in the framework interprets the contents.
+   */
+  customMetadata: Record<string, unknown>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -289,6 +301,7 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
+    this.customMetadata = params.customMetadata ?? {};
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop
