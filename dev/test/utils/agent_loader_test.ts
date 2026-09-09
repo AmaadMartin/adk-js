@@ -17,6 +17,7 @@ import {
   expect,
   it,
   Mock,
+  MockInstance,
   vi,
 } from 'vitest';
 
@@ -27,6 +28,7 @@ import {
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
@@ -134,6 +136,16 @@ class FakeAgentForApp extends BaseAgent {
 const agent = new FakeAgentForApp('agent_for_app');
 exports.app = new App({ name: 'test_app', rootAgent: agent });
 `;
+
+const namedAgentJsContent = (agentName: string) => `
+const {BaseAgent} = require('@google/adk');
+
+class FakeNamedAgent extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.rootAgent = new FakeNamedAgent('${agentName}');`;
 
 const appDefaultExportContent = `
 import {App, BaseAgent} from '@google/adk';
@@ -951,6 +963,208 @@ describe('AgentLoader', () => {
       expect(agents).not.toContain('.hidden');
 
       await loader.disposeAll();
+    });
+
+    describe('entry point precedence', () => {
+      const spyOnWarnings = () =>
+        vi.spyOn(AdkLogger.prototype, 'warn').mockImplementation(() => {});
+
+      const shadowedDefinitions = (warnings: MockInstance) =>
+        warnings.mock.calls
+          .map((call) => call.join(' '))
+          .filter((message) => message.includes('more than one definition'));
+
+      /**
+       * Ported from adk-python
+       * `tests/unittests/cli/utils/test_agent_loader.py` at commit `7b51ae97`.
+       */
+      it('test_loading_order_preference', async () => {
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'order_test_agent.js'),
+          namedAgentJsContent('order_test_agent_module_version'),
+        );
+        await fs.mkdir(path.join(tempAgentsDir, 'order_test_agent'));
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'order_test_agent', 'agent.js'),
+          namedAgentJsContent('order_test_agent_submodule_version'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const agentFile = await loader.getAgentFile('order_test_agent');
+
+        expect((await agentFile.load()).name).toBe(
+          'order_test_agent_module_version',
+        );
+        await loader.disposeAll();
+      });
+
+      it('does not build the shadowed directory', async () => {
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'shadowed.js'),
+          namedAgentJsContent('shadowed_module_version'),
+        );
+        await fs.mkdir(path.join(tempAgentsDir, 'shadowed'));
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'shadowed', 'agent.js'),
+          namedAgentJsContent('shadowed_submodule_version'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        await loader.listAgents();
+
+        const buildCalls = (esbuild.build as Mock).mock.calls as Array<
+          [{entryPoints: string[]}]
+        >;
+        const builtFiles = buildCalls.map(
+          ([options]) => options.entryPoints[0],
+        );
+        expect(builtFiles).toContain(path.join(tempAgentsDir, 'shadowed.js'));
+        expect(builtFiles).not.toContain(
+          path.join(tempAgentsDir, 'shadowed', 'agent.js'),
+        );
+        await loader.disposeAll();
+      });
+
+      it('warns about the definition it ignored', async () => {
+        const warnings = spyOnWarnings();
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'shadowed.js'),
+          namedAgentJsContent('shadowed_module_version'),
+        );
+        await fs.mkdir(path.join(tempAgentsDir, 'shadowed'));
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'shadowed', 'agent.js'),
+          namedAgentJsContent('shadowed_submodule_version'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        await loader.listAgents();
+
+        expect(warnings).toHaveBeenCalledWith(
+          `Agent 'shadowed' has more than one definition. ` +
+            `Using ${path.join(tempAgentsDir, 'shadowed.js')}; ` +
+            `ignoring ${path.join(tempAgentsDir, 'shadowed')}.`,
+        );
+        warnings.mockRestore();
+        await loader.disposeAll();
+      });
+
+      it('prefers the TypeScript source over a compiled sibling', async () => {
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'dup_agent.ts'),
+          namedAgentJsContent('dup_agent_from_ts'),
+        );
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'dup_agent.js'),
+          namedAgentJsContent('dup_agent_from_js'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const agentFile = await loader.getAgentFile('dup_agent');
+
+        expect((await agentFile.load()).name).toBe('dup_agent_from_ts');
+        await loader.disposeAll();
+      });
+
+      it('prefers the TypeScript entry point inside a directory', async () => {
+        const dir = path.join(tempAgentsDir, 'dir_dup');
+        await fs.mkdir(dir);
+        await fs.writeFile(
+          path.join(dir, 'agent.ts'),
+          namedAgentJsContent('dir_dup_from_ts'),
+        );
+        await fs.writeFile(
+          path.join(dir, 'agent.js'),
+          namedAgentJsContent('dir_dup_from_js'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const agentFile = await loader.getAgentFile('dir_dup');
+
+        expect((await agentFile.load()).name).toBe('dir_dup_from_ts');
+        await loader.disposeAll();
+      });
+
+      it('prefers app over agent inside a directory, without warning', async () => {
+        const warnings = spyOnWarnings();
+        const dir = path.join(tempAgentsDir, 'svc');
+        await fs.mkdir(dir);
+        await fs.writeFile(path.join(dir, 'app.js'), appJsContent);
+        await fs.writeFile(
+          path.join(dir, 'agent.js'),
+          namedAgentJsContent('svc_agent'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const loaded = await (await loader.getAppFile('svc')).load();
+
+        expect(isApp(loaded)).toBe(true);
+        expect((loaded as App).name).toBe('test_app');
+        expect(shadowedDefinitions(warnings)).toEqual([]);
+        warnings.mockRestore();
+        await loader.disposeAll();
+      });
+
+      it('ignores a directory that holds no entry point', async () => {
+        const dir = path.join(tempAgentsDir, 'helpers_only');
+        await fs.mkdir(dir);
+        await fs.writeFile(path.join(dir, 'util.js'), 'exports.foo = "bar";');
+        const loader = new AgentLoader(tempAgentsDir);
+
+        expect(await loader.listAgents()).toEqual([
+          'agent1',
+          'agent2',
+          'agent3',
+        ]);
+        await loader.disposeAll();
+      });
+    });
+
+    /**
+     * Ported from adk-python
+     * `tests/unittests/cli/utils/test_agent_loader.py` at commit `7b51ae97`.
+     */
+    describe('a module that throws while importing', () => {
+      it('test_agent_internal_module_not_found_error', async () => {
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'importer_agent.js'),
+          `require('non_existent_module');`,
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const failures = await loader.listLoadFailures();
+
+        expect(failures).toHaveLength(1);
+        expect(failures[0].name).toBe('importer_agent');
+        expect(failures[0].error.message).toContain('non_existent_module');
+        await expect(loader.getAgentFile('importer_agent')).rejects.toThrow(
+          /importer_agent[\s\S]*non_existent_module/,
+        );
+        await loader.disposeAll();
+      });
+
+      it('test_agent_internal_import_error', async () => {
+        await fs.writeFile(
+          path.join(tempAgentsDir, 'syntax_error_agent.js'),
+          'this is not valid javascript',
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const failures = await loader.listLoadFailures();
+
+        expect(failures).toHaveLength(1);
+        expect(failures[0].name).toBe('syntax_error_agent');
+        expect(failures[0].filePath).toContain('syntax_error_agent.js');
+        await expect(loader.getAgentFile('syntax_error_agent')).rejects.toThrow(
+          /Agent 'syntax_error_agent' failed to load/,
+        );
+        expect(await loader.listAgents()).toEqual([
+          'agent1',
+          'agent2',
+          'agent3',
+        ]);
+        await loader.disposeAll();
+      });
     });
   });
 });
