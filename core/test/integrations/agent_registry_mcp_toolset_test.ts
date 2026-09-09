@@ -64,11 +64,20 @@ describe('AgentRegistrySingleMCPToolset', () => {
         connectionParams: BASE_PARAMS,
         prefix: 'my_server',
       });
-      const tools = await toolset.getTools();
+      const tools = await toolset.getToolsWithPrefix();
       expect(tools.map((t) => t.name)).toEqual([
         'my_server_search',
         'my_server_fetch',
       ]);
+    });
+
+    it('leaves the getTools() names unprefixed when a prefix is set', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+        prefix: 'my_server',
+      });
+      const tools = await toolset.getTools();
+      expect(tools.map((t) => t.name)).toEqual(['search', 'fetch']);
     });
   });
 
@@ -123,13 +132,13 @@ describe('AgentRegistrySingleMCPToolset', () => {
       expect(tools[0].name).toBe('search');
     });
 
-    it('filters by prefixed name when prefix and toolFilter are both set', async () => {
+    it('filters by unprefixed name when prefix and toolFilter are both set', async () => {
       const toolset = new AgentRegistrySingleMCPToolset({
         connectionParams: BASE_PARAMS,
         prefix: 'srv',
-        toolFilter: ['srv_search'],
+        toolFilter: ['search'],
       });
-      const tools = await toolset.getTools();
+      const tools = await toolset.getToolsWithPrefix();
       expect(tools).toHaveLength(1);
       expect(tools[0].name).toBe('srv_search');
     });

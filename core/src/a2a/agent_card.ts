@@ -151,7 +151,7 @@ async function buildLLMAgentSkills(agent: LlmAgent): Promise<AgentSkill[]> {
       if (isBaseTool(toolUnion)) {
         skills.push(toolToSkill(agent.name, toolUnion));
       } else if (isBaseToolset(toolUnion)) {
-        const tools = await toolUnion.getTools();
+        const tools = await toolUnion.getToolsWithPrefix();
 
         for (const tool of tools) {
           skills.push(toolToSkill(agent.name, tool));

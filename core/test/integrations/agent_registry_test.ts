@@ -11,6 +11,7 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistry,
   AgentRegistrySingleMCPToolset,
+  BaseTool,
   cleanName,
   GCP_MCP_SERVER_DESTINATION_ID,
   isGoogleApi,
@@ -19,6 +20,13 @@ import {
   RemoteA2AAgent,
   StreamableHTTPConnectionParams,
 } from '../../src/index.js';
+
+/** Narrows a tool to one carrying the registry's injected telemetry keys. */
+function hasCustomMetadata(
+  tool: BaseTool,
+): tool is BaseTool & {customMetadata: Record<string, string>} {
+  return 'customMetadata' in tool;
+}
 
 // Mock google-auth-library
 let shouldAuthThrow = false;
@@ -313,6 +321,32 @@ describe('AgentRegistry', () => {
       expect(
         (tools[0] as any).customMetadata[GCP_MCP_SERVER_DESTINATION_ID],
       ).toBe('urn:mcp:1234:bigquery');
+    });
+
+    it('should keep the destination ID on the prefixed tool copies', async () => {
+      const serverDetails = {
+        displayName: 'My BigQuery Server',
+        mcpServerId: 'urn:mcp:1234:bigquery',
+        interfaces: [
+          {
+            url: 'https://bigquery-mcp.googleapis.com/v1',
+            protocolBinding: 'JSONRPC',
+          },
+        ],
+      };
+
+      vi.spyOn(registry, 'getMcpServer').mockResolvedValue(serverDetails);
+
+      const toolset = await registry.getMcpToolset('mcpServers/bigquery');
+      const tools = await toolset.getToolsWithPrefix();
+
+      expect(tools[0].name).toBe('My_BigQuery_Server_tool1');
+      if (!hasCustomMetadata(tools[0])) {
+        expect.fail('the prefixed copy lost its custom metadata');
+      }
+      expect(tools[0].customMetadata[GCP_MCP_SERVER_DESTINATION_ID]).toBe(
+        'urn:mcp:1234:bigquery',
+      );
     });
 
     it('should throw if connection URI not found', async () => {

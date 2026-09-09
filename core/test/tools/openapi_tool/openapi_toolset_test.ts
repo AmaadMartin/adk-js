@@ -106,11 +106,24 @@ describe('OpenAPIToolset', () => {
       specDict: mockSpec,
       prefix: 'test',
     });
-    const tools = await toolset.getTools();
+    const tools = await toolset.getToolsWithPrefix();
 
     expect(tools.length).toBe(2);
     expect(tools[0].name).toBe('test_get_users');
     expect(tools[1].name).toBe('test_create_user');
+  });
+
+  it('should leave the getTools() names unprefixed', async () => {
+    const toolset = new OpenAPIToolset({
+      specDict: mockSpec,
+      prefix: 'test',
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'get_users',
+      'create_user',
+    ]);
   });
 
   it('should apply global auth overrides', async () => {
