@@ -65,6 +65,12 @@ export interface ArtifactVersion {
   canonicalUri?: string;
   /** Custom metadata associated with the artifact. */
   customMetadata?: Record<string, unknown>;
+  /**
+   * When this version was created, as a Unix timestamp in seconds (not
+   * milliseconds), for parity with adk-python's
+   * `ArtifactVersion.create_time`.
+   */
+  createTime?: number;
   /** The MIME type of the artifact. */
   mimeType?: string;
 }
