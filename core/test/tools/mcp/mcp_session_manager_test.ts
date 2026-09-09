@@ -287,6 +287,20 @@ describe('MCPSessionManager', () => {
       );
     });
 
+    it('leaves the transport options alone for an empty header map', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession({});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {},
+      );
+    });
+
     it('sends no headers to a stdio transport', async () => {
       const manager = new MCPSessionManager({
         type: 'StdioConnectionParams',

@@ -80,6 +80,9 @@ type TransportRequestInit = NonNullable<
 /**
  * Combines the headers configured on a connection with per-call headers.
  *
+ * Only the StreamableHTTP transport takes headers, so this is not reachable
+ * for a stdio connection.
+ *
  * With nothing to add, the configured headers pass through untouched, so a
  * connection without auth reaches the transport exactly as it does today.
  * Otherwise `Headers` does the merge: it accepts every shape the transport
@@ -90,17 +93,12 @@ type TransportRequestInit = NonNullable<
  * @param params The connection the session is created for.
  * @param additionalHeaders Headers for this one call, such as the ones
  *   carrying a resolved credential.
- * @return The headers to send, or `undefined` when there are none and when the
- *   transport is stdio, which carries no headers at all.
+ * @return The headers to send, or `undefined` when there are none.
  */
 function mergeConnectionHeaders(
-  params: MCPConnectionParams,
+  params: StreamableHTTPConnectionParams,
   additionalHeaders?: Record<string, string>,
 ): TransportRequestInit['headers'] {
-  if (params.type !== 'StreamableHTTPConnectionParams') {
-    return undefined;
-  }
-
   const requestInit = params.transportOptions?.requestInit;
   const configured = requestInit
     ? requestInit.headers
