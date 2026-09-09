@@ -9,6 +9,8 @@ import {
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
+  BaseTool,
+  BaseToolset,
   createEvent,
   createSession,
   Event,
@@ -204,6 +206,44 @@ class TestAgent extends LlmAgent {
   }
 }
 
+/** A toolset that counts how many times the runner closed it. */
+class RecordingToolset extends BaseToolset {
+  closeCount = 0;
+
+  constructor() {
+    super([]);
+  }
+
+  async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  async close(): Promise<void> {
+    this.closeCount++;
+  }
+}
+
+/**
+ * An AgentLoader that serves the app `testApp`, asking `agent` for the agent
+ * to load on every request, as a real loader re-reads the agent file. The cast
+ * stands in for the loader's file-watching and disposal members, which the
+ * server never reaches on these routes.
+ */
+function createAgentLoader(agent: () => LlmAgent): AgentLoader {
+  return {
+    listAgents: () => Promise.resolve(['testApp']),
+    getAgentFile: () =>
+      Promise.resolve({
+        load() {
+          return Promise.resolve(agent());
+        },
+        async [Symbol.asyncDispose](): Promise<void> {
+          return;
+        },
+      }),
+  } as unknown as AgentLoader;
+}
+
 const TEST_AGENT = new TestAgent({
   name: 'testAgent',
   description: 'test agent',
@@ -226,18 +266,7 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
-    agentLoader = {
-      listAgents: () => Promise.resolve(['testApp']),
-      getAgentFile: () =>
-        Promise.resolve({
-          load() {
-            return Promise.resolve(TEST_AGENT);
-          },
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        }),
-    } as unknown as AgentLoader;
+    agentLoader = createAgentLoader(() => TEST_AGENT);
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
     artifactService = new InMemoryArtifactService();
@@ -1779,6 +1808,69 @@ describe('AdkWebServer', () => {
         const response = await fetch(`${server.url}/debug/trace/${eventId}`);
         expect(response.status).toBe(404);
       }
+    });
+  });
+
+  describe('Teardown', () => {
+    let toolset: RecordingToolset;
+    let servedAgent: LlmAgent;
+    let teardownServer: AdkApiServer;
+    let teardownClient: HttpClient;
+
+    beforeEach(async () => {
+      toolset = new RecordingToolset();
+      servedAgent = new TestAgent({name: 'testAgent', tools: [toolset]});
+      teardownServer = new AdkApiServer({
+        agentLoader: createAgentLoader(() => servedAgent),
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await teardownServer.start();
+      teardownClient = new HttpClient(teardownServer.url);
+    });
+
+    afterEach(async () => {
+      // Closing an already-closed HTTP server rejects with
+      // ERR_SERVER_NOT_RUNNING, which is not the behaviour under test.
+      await teardownServer.stop().catch(() => {});
+    });
+
+    async function runOnce(sessionId: string): Promise<string | undefined> {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId,
+      });
+      const response = await teardownClient.post<Event[]>('/run', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId,
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+      });
+      expect(response.status).toBe(200);
+      return response.data?.[0].author;
+    }
+
+    it('should close the cached runners when the server stops', async () => {
+      await runOnce('teardownSession');
+      const afterRun = toolset.closeCount;
+
+      await teardownServer.stop();
+
+      expect(toolset.closeCount).toBeGreaterThan(afterRun);
+    });
+
+    it('should build a fresh runner for the agent served after a restart', async () => {
+      expect(await runOnce('firstSession')).toBe('testAgent');
+      await teardownServer.stop();
+
+      // A runner cached across the stop would keep driving the old agent.
+      servedAgent = new TestAgent({name: 'reloadedAgent'});
+      await teardownServer.start();
+      teardownClient = new HttpClient(teardownServer.url);
+
+      expect(await runOnce('secondSession')).toBe('reloadedAgent');
     });
   });
 });
