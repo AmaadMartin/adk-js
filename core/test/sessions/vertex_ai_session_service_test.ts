@@ -933,6 +933,38 @@ describe('VertexAiSessionService', () => {
       expect(result.sessions.map((s) => s.id)).toEqual(['s3', 's2', 's1']);
     });
 
+    it('tie-breaks by userId before id when updateTime values are equal', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/z-session',
+            userId: 'user-a',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+          {
+            name: 'projects/p/locations/l/sessions/a-session',
+            userId: 'user-b',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+        ],
+      });
+
+      const asc = await service.listSessions({appName: '12345', order: 'asc'});
+      expect(asc.sessions.map((s) => [s.userId, s.id])).toEqual([
+        ['user-a', 'z-session'],
+        ['user-b', 'a-session'],
+      ]);
+
+      const desc = await service.listSessions({
+        appName: '12345',
+        order: 'desc',
+      });
+      expect(desc.sessions.map((s) => [s.userId, s.id])).toEqual([
+        ['user-a', 'z-session'],
+        ['user-b', 'a-session'],
+      ]);
+    });
+
     it('limit returns correct slice and metadata', async () => {
       mockClient.listInternal.mockResolvedValue({
         sessions: [

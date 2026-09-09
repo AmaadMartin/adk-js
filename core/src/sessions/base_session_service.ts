@@ -58,7 +58,11 @@ export interface ListSessionsRequest {
   offset?: number;
   /** 1-based page number. Requires `limit`. Takes precedence over `offset`. */
   page?: number;
-  /** Sort direction by last update time. No ordering is applied if omitted. */
+  /**
+   * Sort direction by last update time. No ordering is applied if omitted.
+   * Ties are broken by ascending `userId` then ascending session id, in both
+   * directions, so a listing that spans users has one stable order.
+   */
   order?: 'asc' | 'desc';
 }
 
@@ -95,6 +99,20 @@ export interface ListSessionsResponse {
   totalItems: number;
   /** Total number of pages. */
   totalPages: number;
+}
+
+/**
+ * Builds the comparator that implements `ListSessionsRequest.order` for
+ * services that sort in process.
+ */
+export function compareSessionsForList(
+  order: 'asc' | 'desc',
+): (a: Session, b: Session) => number {
+  const direction = order === 'asc' ? 1 : -1;
+  return (a, b) =>
+    direction * (a.lastUpdateTime - b.lastUpdateTime) ||
+    a.userId.localeCompare(b.userId) ||
+    a.id.localeCompare(b.id);
 }
 
 /**
