@@ -439,7 +439,8 @@ export abstract class BaseAgent<
   }
 
   /**
-   * Runs the before agent callback if it exists.
+   * Runs the plugin `beforeAgentCallback` hooks, then this agent's own before
+   * callbacks. The first `Content` returned wins and ends the invocation.
    *
    * @param invocationContext The invocation context of the agent.
    * @return The event to return to the user, or undefined if no event is
@@ -448,29 +449,41 @@ export abstract class BaseAgent<
   protected async handleBeforeAgentCallback(
     invocationContext: InvocationContext,
   ): Promise<Event | undefined> {
-    if (this.beforeAgentCallback.length === 0) {
-      return undefined;
+    const callbackContext = new Context({invocationContext});
+
+    // Plugin callbacks before canonical callbacks
+    let content = await invocationContext.pluginManager.runBeforeAgentCallback({
+      agent: this,
+      callbackContext,
+    });
+    if (invocationContext.abortSignal?.aborted) {
+      return;
     }
 
-    const callbackContext = new Context({invocationContext});
-    for (const callback of this.beforeAgentCallback) {
-      const content = await callback(callbackContext);
+    if (!content) {
+      for (const callback of this.beforeAgentCallback) {
+        content = await callback(callbackContext);
 
-      if (invocationContext.abortSignal?.aborted) {
-        return;
+        if (invocationContext.abortSignal?.aborted) {
+          return;
+        }
+
+        if (content) {
+          break;
+        }
       }
+    }
 
-      if (content) {
-        invocationContext.endInvocation = true;
+    if (content) {
+      invocationContext.endInvocation = true;
 
-        return createEvent({
-          invocationId: invocationContext.invocationId,
-          author: this.name,
-          branch: invocationContext.branch,
-          content,
-          actions: callbackContext.eventActions,
-        });
-      }
+      return createEvent({
+        invocationId: invocationContext.invocationId,
+        author: this.name,
+        branch: invocationContext.branch,
+        content,
+        actions: callbackContext.eventActions,
+      });
     }
 
     if (callbackContext.state.hasDelta()) {
@@ -486,7 +499,8 @@ export abstract class BaseAgent<
   }
 
   /**
-   * Runs the after agent callback if it exists.
+   * Runs the plugin `afterAgentCallback` hooks, then this agent's own after
+   * callbacks. The first `Content` returned replaces the agent's result.
    *
    * @param invocationContext The invocation context of the agent.
    * @return The event to return to the user, or undefined if no event is
@@ -495,27 +509,39 @@ export abstract class BaseAgent<
   protected async handleAfterAgentCallback(
     invocationContext: InvocationContext,
   ): Promise<Event | undefined> {
-    if (this.afterAgentCallback.length === 0) {
-      return undefined;
+    const callbackContext = new Context({invocationContext});
+
+    // Plugin callbacks before canonical callbacks
+    let content = await invocationContext.pluginManager.runAfterAgentCallback({
+      agent: this,
+      callbackContext,
+    });
+    if (invocationContext.abortSignal?.aborted) {
+      return;
     }
 
-    const callbackContext = new Context({invocationContext});
-    for (const callback of this.afterAgentCallback) {
-      const content = await callback(callbackContext);
+    if (!content) {
+      for (const callback of this.afterAgentCallback) {
+        content = await callback(callbackContext);
 
-      if (invocationContext.abortSignal?.aborted) {
-        return;
-      }
+        if (invocationContext.abortSignal?.aborted) {
+          return;
+        }
 
-      if (content) {
-        return createEvent({
-          invocationId: invocationContext.invocationId,
-          author: this.name,
-          branch: invocationContext.branch,
-          content,
-          actions: callbackContext.eventActions,
-        });
+        if (content) {
+          break;
+        }
       }
+    }
+
+    if (content) {
+      return createEvent({
+        invocationId: invocationContext.invocationId,
+        author: this.name,
+        branch: invocationContext.branch,
+        content,
+        actions: callbackContext.eventActions,
+      });
     }
 
     if (callbackContext.state.hasDelta()) {
