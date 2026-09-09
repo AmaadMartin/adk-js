@@ -12,12 +12,11 @@ derived from the security scheme. Every later call to that tool reads the same
 cached credential back. Once the token expires the API answers 401, and no
 amount of retrying helps, because the cache still holds the dead token.
 
-The refresher closes that gap. `ToolAuthHandler` looks up a refresher by the
-cached credential's `authType`, asks it whether a refresh is needed, and
-refreshes the credential before the tool sees it. A refreshed credential is
-written back to session state, so the next tool call in the session starts from
-the new token. Credential types with no registered refresher — `apiKey`, `http`,
-`serviceAccount` — pass through untouched.
+The refresher closes that gap. `ToolAuthHandler` passes the cached credential
+through the refresher before the tool sees it, and writes the result back to
+session state when the tokens changed, so the next tool call in the session
+starts from the new token. A credential of any other type — `apiKey`, `http`,
+`serviceAccount` — carries no `oauth2` field and passes through untouched.
 
 You need this class directly only when you build your own credential plumbing.
 For OpenAPI tools it is already wired.
@@ -56,31 +55,19 @@ const credential: AuthCredential = {
   },
 };
 
-const refresher = new OAuth2CredentialRefresher();
-const current = (await refresher.isRefreshNeeded(credential))
-  ? await refresher.refresh(credential, authScheme)
-  : credential;
+const current = await new OAuth2CredentialRefresher().refresh(
+  credential,
+  authScheme,
+);
 
 const response = await fetch('https://provider.example.com/documents', {
   headers: {Authorization: `Bearer ${current.oauth2?.accessToken}`},
 });
 ```
 
-Register it in a `CredentialRefresherRegistry` to look it up by credential type,
-the way `ToolAuthHandler` does:
-
-```ts
-import {
-  AuthCredentialTypes,
-  CredentialRefresherRegistry,
-  OAuth2CredentialRefresher,
-} from '@google/adk';
-
-const registry = new CredentialRefresherRegistry();
-const refresher = new OAuth2CredentialRefresher();
-registry.register(AuthCredentialTypes.OAUTH2, refresher);
-registry.register(AuthCredentialTypes.OPEN_ID_CONNECT, refresher);
-```
+Call `refresh()` unconditionally. It checks expiry itself and returns the
+credential you passed when there is nothing to do, so `isRefreshNeeded()` is
+only worth calling when you need the answer for its own sake.
 
 ## When a refresh happens
 
@@ -92,10 +79,10 @@ without `expiresAt` is never refreshed.
 
 ## Failure modes
 
-`refresh()` never throws. It logs a warning and returns the credential it was
-given when any of these is missing:
+`OAuth2CredentialRefresher.refresh()` never throws. It returns the credential it
+was given, silently, when the `oauth2` field or the auth scheme is missing. It
+logs a warning and returns that credential when any of these is missing:
 
-- the `oauth2` field, or the auth scheme;
 - `oauth2.refreshToken`;
 - `oauth2.clientId` or `oauth2.clientSecret`;
 - a token endpoint on the auth scheme.
@@ -104,6 +91,10 @@ A failing token request behaves the same way: the error is logged and the
 original credential comes back. The stale token then draws a 401 from the API,
 which restarts the interactive authorization flow — the outcome you want when
 the refresh token itself has been revoked.
+
+Your own refresher need not be so quiet. `BaseCredentialRefresher` documents
+`CredentialRefresherError` as the failure signal for an implementation that
+prefers to raise one, and both are exported for that purpose.
 
 The token endpoint must be HTTPS and must not resolve to a loopback, private, or
 cloud-metadata address. `fetchOAuth2Tokens` rejects anything else, and it does
