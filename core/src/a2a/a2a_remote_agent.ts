@@ -20,6 +20,7 @@ import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {MessageRole} from './a2a_event.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
@@ -29,7 +30,12 @@ import {
   toForwardableA2AParts,
   toMissingRemoteSessionParts,
 } from './a2a_remote_agent_utils.js';
-import {resolveAgentCard} from './agent_card.js';
+import {
+  adoptedCardDescription,
+  isRemoteCardSource,
+  resolveAgentCard,
+} from './agent_card.js';
+import {validateAgentCard} from './agent_card_validation.js';
 import {toAdkEvent} from './event_converter_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 
@@ -114,6 +120,23 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
 }
 
 /**
+ * Fills an empty description from a card supplied directly.
+ *
+ * A card object never goes through the resolution path, so it is adopted here
+ * instead. A parent agent reads the description to build its transfer
+ * instruction, and that happens before this agent ever runs.
+ */
+function withAdoptedCardDescription(
+  config: RemoteA2AAgentConfig,
+): RemoteA2AAgentConfig {
+  const card = config.agentCard;
+  if (config.description || typeof card !== 'object' || !card.description) {
+    return config;
+  }
+  return {...config, description: card.description};
+}
+
+/**
  * RemoteA2AAgent delegates execution to a remote agent using the A2A protocol.
  *
  * @remarks
@@ -124,11 +147,19 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   private client?: Client;
   private card?: AgentCard;
   private isInitialized = false;
+  /** The location a string-sourced card is fetched from, once trimmed. */
+  private readonly cardSource?: string;
 
   constructor(private readonly a2aConfig: RemoteA2AAgentConfig) {
-    super(a2aConfig);
+    super(withAdoptedCardDescription(a2aConfig));
     if (!a2aConfig.agentCard && !a2aConfig.client) {
       throw new Error('Either AgentCard or Client must be provided');
+    }
+    if (typeof a2aConfig.agentCard === 'string') {
+      if (!a2aConfig.agentCard.trim()) {
+        throw new Error('agentCard string cannot be empty');
+      }
+      this.cardSource = a2aConfig.agentCard.trim();
     }
   }
 
@@ -142,21 +173,55 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     }
 
     if (this.a2aConfig.agentCard) {
-      this.card = await resolveAgentCard(this.a2aConfig.agentCard);
+      // A card supplied directly is the caller's own object and is taken as
+      // given, as it is in the reference. Only a card this agent went and
+      // fetched is validated.
+      const card = this.cardSource
+        ? await this.resolveAndValidateCard(this.cardSource)
+        : (this.a2aConfig.agentCard as AgentCard);
+      this.card = card;
 
       if (!this.client) {
         const factory = this.a2aConfig.clientFactory || new ClientFactory();
-        this.client = await factory.createFromAgentCard(this.card);
+        this.client = await factory.createFromAgentCard(card);
       }
     }
 
     this.isInitialized = true;
   }
 
+  /**
+   * Fetches the card from `source`, checks where it aims RPC traffic and
+   * adopts its description. Nothing is stored on the instance until the card
+   * has validated: a rejected card left behind reads as already resolved, so
+   * the next call would skip the check and talk to the origin that card named.
+   */
+  private async resolveAndValidateCard(source: string): Promise<AgentCard> {
+    const remoteSource = isRemoteCardSource(source) ? source : undefined;
+    const card = await resolveAgentCard(source);
+    validateAgentCard(card, remoteSource);
+    if (!this.description && card.description) {
+      this.description = adoptedCardDescription(card.description, source);
+    }
+    return card;
+  }
+
   protected async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<AdkEvent, void, void> {
-    await this.init();
+    try {
+      await this.init();
+    } catch (e: unknown) {
+      const errorMessage = `Failed to initialize remote A2A agent: ${formatError(e)}`;
+      logger.error(errorMessage);
+      yield createEvent({
+        author: this.name,
+        invocationId: context.invocationId,
+        errorMessage,
+        turnComplete: true,
+      });
+      return;
+    }
 
     try {
       // 1. Convert current ADK state to A2A Message
