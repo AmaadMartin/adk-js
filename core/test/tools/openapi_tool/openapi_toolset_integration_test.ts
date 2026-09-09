@@ -28,6 +28,56 @@ describe('OpenAPIToolset Integration', () => {
     globalThis.fetch = vi.fn();
   });
 
+  it('should declare a required array on every generated tool', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: truanonSpec,
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+    const getProfile = tools.find((tool) => tool.name === 'get_profile');
+    if (!getProfile) expect.fail('get_profile tool was not created');
+
+    expect(getProfile._getDeclaration()?.parameters).toEqual(
+      expect.objectContaining({required: []}),
+    );
+  });
+
+  it('should list the required arguments a spec declares', async () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'User API', version: '1.0.0'},
+      servers: [{url: 'https://api.example.com/v1'}],
+      paths: {
+        '/users/{userId}': {
+          get: {
+            operationId: 'getUser',
+            parameters: [
+              {
+                name: 'userId',
+                in: 'path',
+                required: true,
+                schema: {type: 'string'},
+              },
+              {name: 'fields', in: 'query', schema: {type: 'string'}},
+            ],
+            responses: {'200': {description: 'ok'}},
+          },
+        },
+      },
+    };
+    const toolset = new OpenAPIToolset({
+      specStr: JSON.stringify(spec),
+      specType: 'json',
+    });
+    const tools = await toolset.getTools();
+    const getUser = tools.find((tool) => tool.name === 'get_user');
+    if (!getUser) expect.fail('get_user tool was not created');
+
+    expect(getUser._getDeclaration()?.parameters).toEqual(
+      expect.objectContaining({required: ['user_id']}),
+    );
+  });
+
   it('should parse truanon spec and create tools', async () => {
     const toolset = new OpenAPIToolset({
       specStr: truanonSpec,
