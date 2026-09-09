@@ -15,6 +15,15 @@ import {
 } from '../../src/utils/schema.js';
 import {zodObjectToSchema} from '../../src/utils/simple_zod_to_json.js';
 
+/**
+ * Types a document written in plain JSON Schema as the genai `Schema` that the
+ * ADK APIs declare. That cast is how such a document reaches them in practice:
+ * it is parsed from JSON or YAML, so no compile-time check applies to it.
+ */
+function asSchema(document: Record<string, unknown>): Schema {
+  return document as Schema;
+}
+
 describe('parseWithSchema', () => {
   it('returns the value unchanged when no schema is given', () => {
     const value = {a: 1};
@@ -115,6 +124,17 @@ describe('parseWithSchema', () => {
     expect(parseWithSchema(schema, value)).toEqual(value);
   });
 
+  it('enforces a schema written in JSON Schema', () => {
+    const schema = asSchema({
+      type: 'object',
+      properties: {count: {type: 'number'}},
+      required: ['count'],
+    });
+    expect(parseWithSchema(schema, {count: 3})).toEqual({count: 3});
+    expect(() => parseWithSchema(schema, {count: 'no'})).toThrow();
+    expect(() => parseWithSchema(schema, {})).toThrow();
+  });
+
   it('validates a round-tripped Zod schema the same way as the original', () => {
     const zod = z4.object({count: z4.number()});
     const roundTripped = zodObjectToSchema(zod);
@@ -157,6 +177,121 @@ describe('toJsonSchema', () => {
       required: ['count'],
     });
   });
+
+  it('passes a schema already written in JSON Schema through unchanged', () => {
+    const document = {
+      title: 'Weather',
+      type: 'object',
+      properties: {city: {type: 'string'}},
+      required: ['city'],
+    };
+    expect(toJsonSchema(asSchema(document))).toEqual(document);
+  });
+
+  it('keeps a construct the genai conversion cannot represent', () => {
+    // Converted, a tuple `items` comes back as `{0: ..., 1: ...}` and a
+    // boolean subschema as `{}`.
+    const document = {
+      type: 'object',
+      properties: {
+        pair: {type: 'array', items: [{type: 'string'}, {type: 'number'}]},
+        flag: true,
+      },
+    };
+    expect(toJsonSchema(asSchema(document))).toEqual(document);
+  });
+
+  it('keeps JSON Schema constructs the genai dialect has no equivalent for', () => {
+    const document = {
+      $defs: {city: {type: 'string', minLength: 1}},
+      type: 'object',
+      properties: {
+        origin: {$ref: '#/$defs/city'},
+        note: {type: ['string', 'null']},
+        kind: {oneOf: [{const: 'road'}, {const: 'rail'}]},
+        stops: {
+          type: 'array',
+          items: {type: 'object', properties: {id: {type: 'integer'}}},
+        },
+      },
+      additionalProperties: false,
+      examples: [{origin: 'LON'}],
+    };
+    expect(toJsonSchema(asSchema(document))).toEqual(document);
+  });
+
+  it('converts a genai Schema whose root declares no type', () => {
+    const schema: Schema = {
+      properties: {city: {type: Type.STRING}},
+      required: ['city'],
+    };
+    expect(toJsonSchema(schema)).toEqual({
+      properties: {city: {type: 'string'}},
+      required: ['city'],
+    });
+  });
+
+  it('converts a genai type nested in items', () => {
+    expect(
+      toJsonSchema(asSchema({type: 'array', items: {type: 'STRING'}})),
+    ).toEqual({type: 'array', items: {type: 'string'}});
+  });
+
+  it('converts a genai type nested in anyOf', () => {
+    expect(
+      toJsonSchema(asSchema({anyOf: [{type: 'STRING'}, {type: 'number'}]})),
+    ).toEqual({anyOf: [{type: 'string'}, {type: 'number'}]});
+  });
+
+  it('widens a lowercase type carrying the OpenAPI nullable keyword', () => {
+    expect(toJsonSchema(asSchema({type: 'string', nullable: true}))).toEqual({
+      type: ['string', 'null'],
+    });
+  });
+
+  it('drops propertyOrdering from a document that is otherwise JSON Schema', () => {
+    expect(
+      toJsonSchema(
+        asSchema({
+          type: 'object',
+          properties: {city: {type: 'string'}},
+          propertyOrdering: ['city'],
+        }),
+      ),
+    ).toEqual({type: 'object', properties: {city: {type: 'string'}}});
+  });
+
+  it('drops example whichever dialect declares the type', () => {
+    // The genai-only keys are dropped for both spellings, so one document does
+    // not convert two ways.
+    expect(toJsonSchema(asSchema({type: 'string', example: 'LON'}))).toEqual({
+      type: 'string',
+    });
+    expect(toJsonSchema(asSchema({type: 'STRING', example: 'LON'}))).toEqual({
+      type: 'string',
+    });
+  });
+
+  it('coerces a bound that is encoded as a string', () => {
+    expect(toJsonSchema(asSchema({type: 'array', maxItems: '2'}))).toEqual({
+      type: 'array',
+      maxItems: 2,
+    });
+  });
+
+  it('drops the genai enum format marker', () => {
+    expect(
+      toJsonSchema(
+        asSchema({type: 'string', format: 'enum', enum: ['EAST', 'WEST']}),
+      ),
+    ).toEqual({type: 'string', enum: ['EAST', 'WEST']});
+  });
+
+  it('drops an unspecified genai type', () => {
+    expect(
+      toJsonSchema({type: Type.TYPE_UNSPECIFIED, title: 'Anything'}),
+    ).toEqual({title: 'Anything'});
+  });
 });
 
 describe('objectSchemaFields', () => {
@@ -182,6 +317,18 @@ describe('objectSchemaFields', () => {
       type: Type.OBJECT,
       properties: {count: {type: Type.NUMBER}, name: {type: Type.STRING}},
     } as Schema);
+    expect([...fields!.keys()]).toEqual(['count', 'name']);
+    expect(fields!.get('count')!.safeParse(1).success).toBe(true);
+    expect(fields!.get('count')!.safeParse('1').success).toBe(false);
+  });
+
+  it('decomposes an object written in JSON Schema into per-field validators', () => {
+    const fields = fieldsOf(
+      asSchema({
+        type: 'object',
+        properties: {count: {type: 'number'}, name: {type: 'string'}},
+      }),
+    );
     expect([...fields!.keys()]).toEqual(['count', 'name']);
     expect(fields!.get('count')!.safeParse(1).success).toBe(true);
     expect(fields!.get('count')!.safeParse('1').success).toBe(false);

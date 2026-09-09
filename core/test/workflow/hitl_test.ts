@@ -132,6 +132,22 @@ describe('createRequestInputEvent', () => {
     });
   });
 
+  it('carries a JSON Schema responseSchema onto the event intact', () => {
+    // The dev UI builds its reply form from this arg, so a schema that is
+    // already JSON Schema has to reach the client whole.
+    const responseSchema = {
+      type: 'object',
+      properties: {answer: {type: 'string'}},
+      required: ['answer'],
+    };
+    const ri = new RequestInput({responseSchema: responseSchema as Schema});
+    const args = firstFunctionCall(createRequestInputEvent(ri))?.args as Record<
+      string,
+      unknown
+    >;
+    expect(args['response_schema']).toEqual(responseSchema);
+  });
+
   it('names the schema arg the way clients read it', () => {
     const args = firstFunctionCall(
       createRequestInputEvent(
