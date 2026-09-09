@@ -7,7 +7,6 @@
 import {
   AnchoredContextCompactor,
   BasePlugin,
-  CompactedEvent,
   ContextCompactionTrigger,
   Gemini,
   InMemoryRunner,
@@ -82,7 +81,7 @@ describe('E2e Anchored Context Compaction', () => {
     !!process.env.GOOGLE_CLOUD_PROJECT;
 
   it.skipIf(!hasAKey)(
-    'should hit token threshold and maintain a persistent scratchpad at index 0',
+    'should hit token threshold and maintain a persistent scratchpad',
     async () => {
       const agent = createAnchoredCompactionAgent();
       const plugin = new TestCompactionPlugin();
@@ -126,15 +125,20 @@ describe('E2e Anchored Context Compaction', () => {
       const compactedEvents = events.filter(isCompactedEvent);
       expect(compactedEvents.length).toBeGreaterThan(0);
 
-      // In AnchoredContextCompactor, the scratchpad should be at index 0
-      const firstEvent = events[0];
-      expect(isScratchpadEvent(firstEvent)).toBe(true);
-      expect(firstEvent.author).toBe('system');
-      expect((firstEvent as CompactedEvent).compactedContent).toBeTruthy();
-
-      // Verify that there is at most one scratchpad event
       const scratchpads = events.filter(isScratchpadEvent);
-      expect(scratchpads.length).toBe(1);
+      const latestScratchpad = scratchpads[scratchpads.length - 1];
+      expect(latestScratchpad.author).toBe('system');
+      expect(latestScratchpad.compactedContent).toBeTruthy();
+
+      // A session service only appends, so the scratchpad follows the events it
+      // summarizes and those events stay in the stored log.
+      expect(events.indexOf(latestScratchpad)).toBeGreaterThan(0);
+      expect(
+        events.some(
+          (e) =>
+            !isScratchpadEvent(e) && e.timestamp <= latestScratchpad.endTime,
+        ),
+      ).toBe(true);
 
       // Verify that the plugin callbacks were called
       expect(plugin.beforeCalled).toBe(true);
