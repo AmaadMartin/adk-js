@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LongRunningFunctionTool} from '@google/adk';
+import {
+  ActiveStreamingTool,
+  Context,
+  createSession,
+  InvocationContext,
+  LiveRequestQueue,
+  LongRunningFunctionTool,
+  PluginManager,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 const LONG_RUNNING_INSTRUCTION = `\n\nNOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status.`;
@@ -68,5 +76,31 @@ describe('LongRunningFunctionTool', () => {
     });
 
     expect(result).toBe(42);
+  });
+
+  it('receives the live input stream registered under its name', async () => {
+    const stream = new LiveRequestQueue();
+    let received: LiveRequestQueue | undefined;
+    const tool = new LongRunningFunctionTool({
+      name: 'watch_feed',
+      description: 'Watches the live input stream.',
+      execute: (_input, _toolContext, inputStream) => {
+        received = inputStream;
+        return 'done';
+      },
+    });
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        session: createSession({id: 'test-session', appName: 'test-app'}),
+        pluginManager: new PluginManager([]),
+        activeStreamingTools: {watch_feed: new ActiveStreamingTool({stream})},
+      }),
+    });
+
+    const result = await tool.runAsync({args: {}, toolContext});
+
+    expect(received).toBe(stream);
+    expect(result).toBe('done');
   });
 });
