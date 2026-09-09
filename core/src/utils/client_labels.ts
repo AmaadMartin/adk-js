@@ -83,3 +83,42 @@ export function getClientLabels(): string[] {
   }
   return labels;
 }
+
+/**
+ * Returns the tracking headers that identify a call as coming from ADK.
+ */
+export function getTrackingHeaders(): Record<string, string> {
+  const headerValue = getClientLabels().join(' ');
+  return {'x-goog-api-client': headerValue, 'user-agent': headerValue};
+}
+
+/**
+ * Merges the ADK tracking headers into a caller's headers.
+ *
+ * A caller's own value for a tracking header is kept: its parts are appended
+ * after the ADK ones, without duplicates. A plain overwrite would drop the
+ * caller's client identity from the header instead.
+ *
+ * @param headers The caller's headers, which are not modified.
+ * @return A new set of headers carrying both sets of labels.
+ */
+export function mergeTrackingHeaders(
+  headers: Record<string, string> | undefined,
+): Record<string, string> {
+  const merged: Record<string, string> = {...headers};
+  for (const [name, trackingValue] of Object.entries(getTrackingHeaders())) {
+    const callerValue = merged[name];
+    if (!callerValue) {
+      merged[name] = trackingValue;
+      continue;
+    }
+    const parts = trackingValue.split(' ');
+    for (const part of callerValue.split(' ')) {
+      if (!parts.includes(part)) {
+        parts.push(part);
+      }
+    }
+    merged[name] = parts.join(' ');
+  }
+  return merged;
+}

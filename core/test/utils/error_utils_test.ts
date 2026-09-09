@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, isHttpStatusError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -207,4 +207,39 @@ describe('formatError', () => {
     });
     expect(formatError(err)).toContain('text body');
   });
+});
+
+describe('isHttpStatusError', () => {
+  it('accepts an SDK error carrying a numeric status', () => {
+    const err = Object.assign(new Error('quota exceeded'), {status: 429});
+
+    expect(isHttpStatusError(err)).toBe(true);
+  });
+
+  it('accepts a plain object with a message and a status', () => {
+    expect(isHttpStatusError({message: 'nope', status: 500})).toBe(true);
+  });
+
+  it('rejects an error with no status', () => {
+    expect(isHttpStatusError(new Error('boom'))).toBe(false);
+  });
+
+  it('rejects a status that is not a number', () => {
+    expect(isHttpStatusError({message: 'nope', status: '429'})).toBe(false);
+  });
+
+  it('rejects a status carried without a message', () => {
+    expect(isHttpStatusError({status: 429})).toBe(false);
+  });
+
+  it('rejects a message that is not a string', () => {
+    expect(isHttpStatusError({message: 1, status: 429})).toBe(false);
+  });
+
+  it.each([[null], [undefined], ['429'], [429]])(
+    'rejects the non-object value %s',
+    (value) => {
+      expect(isHttpStatusError(value)).toBe(false);
+    },
+  );
 });
