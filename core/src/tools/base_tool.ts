@@ -130,7 +130,7 @@ export abstract class BaseTool {
   /**
    * Whether this tool needs a human to approve `args` before it runs.
    *
-   * The gate itself lives in the tool that owns it (see `FunctionTool`), but
+   * The gate a tool declares here is enforced by {@link checkConfirmation}, but
    * the resume path has to ask the same question a turn later, to check that an
    * approval it is about to honour belongs to a tool that gates at all. A tool
    * that never gates returns false here, which is the safe default: an approval
@@ -146,6 +146,46 @@ export abstract class BaseTool {
     _toolContext?: Context,
   ): Promise<boolean> {
     return false;
+  }
+
+  /**
+   * Enforces the gate {@link checkRequireConfirmation} declares.
+   *
+   * @param args The arguments the tool would run with.
+   * @param toolContext The context of the call, when there is one.
+   * @return Undefined when the tool may proceed, otherwise the function
+   *     response payload to surface instead of running: a request for
+   *     confirmation on the first pass, or a rejection once the user declined.
+   */
+  protected async checkConfirmation(
+    args: Record<string, unknown>,
+    toolContext?: Context,
+  ): Promise<{error: string} | undefined> {
+    if (!(await this.checkRequireConfirmation(args, toolContext))) {
+      return undefined;
+    }
+    if (!toolContext) {
+      throw new Error(
+        `Tool '${this.name}' requires confirmation but no tool context was provided.`,
+      );
+    }
+    if (!toolContext.toolConfirmation) {
+      toolContext.requestConfirmation({
+        hint:
+          `Please approve or reject the tool call ${this.name}() by ` +
+          'responding with a FunctionResponse with an expected ' +
+          'ToolConfirmation payload.',
+      });
+      toolContext.actions.skipSummarization = true;
+      return {
+        error:
+          'This tool call requires confirmation, please approve or reject.',
+      };
+    }
+    if (!toolContext.toolConfirmation.confirmed) {
+      return {error: 'This tool call is rejected.'};
+    }
+    return undefined;
   }
 
   /**
