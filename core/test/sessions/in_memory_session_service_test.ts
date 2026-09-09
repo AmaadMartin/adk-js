@@ -175,6 +175,77 @@ describe('InMemorySessionService', () => {
       expect(retrievedSession?.events[1].timestamp).toBe(4000);
     });
 
+    it('applies numRecentEvents and afterTimestamp together', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+      for (let i = 1; i <= 5; i++) {
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: i}),
+        });
+      }
+
+      const retrievedSession = await service.getSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: session.id,
+        config: {numRecentEvents: 3, afterTimestamp: 4},
+      });
+
+      expect(retrievedSession?.events).toHaveLength(2);
+      expect(retrievedSession?.events[0].timestamp).toBe(4);
+      expect(retrievedSession?.events[1].timestamp).toBe(5);
+    });
+
+    it('returns no events when afterTimestamp is past every event', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+      for (let i = 1; i <= 5; i++) {
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: i}),
+        });
+      }
+
+      const retrievedSession = await service.getSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: session.id,
+        config: {afterTimestamp: 50},
+      });
+
+      expect(retrievedSession?.events).toHaveLength(0);
+    });
+
+    it('keeps every event when afterTimestamp equals the oldest event', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+      for (let i = 1; i <= 5; i++) {
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: i}),
+        });
+      }
+
+      const retrievedSession = await service.getSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: session.id,
+        config: {afterTimestamp: 1},
+      });
+
+      // The boundary is inclusive: the event at the cutoff survives.
+      expect(retrievedSession?.events).toHaveLength(5);
+      expect(retrievedSession?.events[0].timestamp).toBe(1);
+      expect(retrievedSession?.events[4].timestamp).toBe(5);
+    });
+
     it('merges current state into retrieved session', async () => {
       const appName = 'app';
       const userId = 'user';
