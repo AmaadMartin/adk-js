@@ -85,6 +85,11 @@ export class MCPToolset extends BaseToolset {
       return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
     });
 
+    // The MCP spec does not make tools/list order contractual. A server that
+    // reorders between calls would change the declaration order sent to the
+    // model every turn and invalidate the context cache, so pin it here.
+    tools.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.
     const filter = this.toolFilter;
