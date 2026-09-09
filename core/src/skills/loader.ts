@@ -195,13 +195,10 @@ export function parseSkillMdContent(content: string): {
 
 /**
  * Checks whether a zip member name attempts to escape the extraction root (zip
- * slip). adk-python's `_load_skill_from_zip_bytes` tests `startswith("/")`,
- * `startswith("../")` and `"/../" in filename`, which miss a `..` component
- * that no `/` follows (`scripts/..`) and miss backslash separators. adk-js is
- * deliberately stricter: it splits on both separators and rejects any component
- * that is exactly `..`, a strict superset of what Python rejects. This is a
- * name-shape check on archive metadata, not a sandbox: it says nothing about
- * symlinks.
+ * slip). The check splits on both separators and rejects any component that is
+ * exactly `..`, so it also catches a `..` that no `/` follows (`scripts/..`).
+ * This is a name-shape check on archive metadata, not a sandbox: it says
+ * nothing about symlinks.
  */
 function isDangerousZipEntryName(entryName: string): boolean {
   if (path.posix.isAbsolute(entryName) || path.win32.isAbsolute(entryName)) {
@@ -211,10 +208,9 @@ function isDangerousZipEntryName(entryName: string): boolean {
 }
 
 /**
- * Checks that a skill name is a single bare path segment, mirroring
- * adk-python's `pathlib.Path(name).name != name`. '.' and '..' are rejected
- * explicitly because `path.basename('..') === '..'` whereas
- * `pathlib.Path('..').name === ''`.
+ * Checks that a skill name is a single bare path segment. '.' and '..' need an
+ * explicit check because `path.basename()` returns them unchanged, so the
+ * bare-segment test alone would accept them.
  */
 function isBareSkillName(name: string): boolean {
   return name !== '.' && name !== '..' && path.basename(name) === name;

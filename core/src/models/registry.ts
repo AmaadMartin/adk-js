@@ -14,8 +14,9 @@ import {OciGenAiLlm} from './oci_genai_llm.js';
 import {OpenAILlm} from './openai_llm.js';
 
 /**
- * type[BaseLlm] equivalent in TypeScript, represents a class that can be new-ed
- * to create a BaseLlm instance.
+ * The constructor of a {@link BaseLlm} subclass, rather than an instance of
+ * one: a class that can be `new`-ed with a model name, and that also exposes
+ * the static `supportedModels` patterns the registry matches against.
  */
 export type BaseLlmType = (new (params: {model: string}) => BaseLlm) & {
   readonly supportedModels: Array<string | RegExp>;
@@ -114,8 +115,8 @@ export class LLMRegistry {
     }
 
     for (const [regex, llmClass] of LLMRegistry.llmRegistryDict.entries()) {
-      // Replicates Python's `re.fullmatch` by anchoring the regex
-      // to the start (^) and end ($) of the string.
+      // A registered pattern must match the whole model name, so anchor it
+      // with ^...$; `RegExp.test` would otherwise match anywhere in the string.
       // TODO - b/425992518: validate it works well.
       const pattern = new RegExp(
         `^${regex instanceof RegExp ? regex.source : regex}$`,

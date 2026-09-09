@@ -42,26 +42,29 @@ import {MCPTool} from './mcp_tool.js';
  * LLM invokes the prefixed tool, this toolset transparently strips the prefix
  * before sending the request to the underlying MCP server.
  *
- * Usage:
- *   import { MCPToolset } from '@google/adk';
- *   import { StreamableHTTPConnectionParamsSchema } from '@google/adk';
+ * @example
+ * ```ts
+ * import {MCPToolset} from '@google/adk';
+ * import type {StreamableHTTPConnectionParams} from '@google/adk';
  *
- *   const connectionParams = StreamableHTTPConnectionParamsSchema.parse({
- *     type: "StreamableHTTPConnectionParams",
- *     url: "http://localhost:8788/mcp"
- *   });
+ * const connectionParams: StreamableHTTPConnectionParams = {
+ *   type: 'StreamableHTTPConnectionParams',
+ *   url: 'http://localhost:8788/mcp',
+ * };
  *
- *   const mcpToolset = new MCPToolset(connectionParams);
- *   const tools = await mcpToolset.getTools();
+ * const mcpToolset = new MCPToolset(connectionParams);
+ * const tools = await mcpToolset.getTools();
+ * ```
  *
  * Pass {@link MCPSessionOptions} to answer server-initiated requests. An
  * `elicitationCallback` handles `elicitation/create`, which servers use for
  * out-of-band flows such as auth challenges:
  *
- *   const mcpToolset = new MCPToolset(connectionParams, [], undefined, {
- *     elicitationCallback: () => ({action: 'decline'}),
- *   });
- *
+ * ```ts
+ * const mcpToolset = new MCPToolset(connectionParams, [], undefined, {
+ *   elicitationCallback: () => ({action: 'decline'}),
+ * });
+ * ```
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;

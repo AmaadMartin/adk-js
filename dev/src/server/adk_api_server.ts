@@ -43,6 +43,7 @@ import {version} from '../version.js';
 
 import type {AgentFileOptions} from '../utils/agent_loader.js';
 import {AgentLoader, isAgentNotFoundError} from '../utils/agent_loader.js';
+import {formatHeaderForLog} from '../utils/log_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -63,6 +64,10 @@ import {
   isDnsRebindingRequest,
 } from './dns_rebinding_guard.js';
 import {metricsFlushingMiddleware} from './metrics_middleware.js';
+import {
+  createOriginCheckMiddleware,
+  parseAllowedOrigins,
+} from './origin_check.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -101,6 +106,13 @@ interface ServerOptions {
   agentLoader?: ServerAgentLoader;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
+  /**
+   * Comma-separated list of origins allowed to send cross-origin requests.
+   * More than a CORS header: an entry both allows that origin at the request
+   * gate and adds its host to the DNS-rebinding allowlist. Each entry must be
+   * an `http://` or `https://` origin; a scheme-less entry is dropped with a
+   * warning. `'*'` allows every origin and disables the DNS-rebinding guard.
+   */
   allowOrigins?: string;
   /**
    * Additional Host header values the DNS-rebinding guard accepts besides
@@ -309,7 +321,7 @@ export class AdkApiServer {
   private readonly memoryService: BaseMemoryService;
   private readonly artifactService: BaseArtifactService;
   private readonly serveDebugUI: boolean;
-  private readonly allowOrigins?: string;
+  private readonly allowedOrigins: string[];
   private readonly allowedHosts?: string[];
   private readonly otelToCloud: boolean;
   private readonly registerProcessors?: (
@@ -341,7 +353,12 @@ export class AdkApiServer {
         options.reloadAgents ?? false,
       );
     this.serveDebugUI = options.serveDebugUI ?? false;
-    this.allowOrigins = options.allowOrigins;
+    // A browser sends one Origin per request, so a comma-separated
+    // `--allow_origins` must become a list: `cors` never matches the joined
+    // string, and the DNS-rebinding guard reads only its first host from it.
+    const {origins: allowedOrigins, rejected: rejectedOrigins} =
+      parseAllowedOrigins(options.allowOrigins);
+    this.allowedOrigins = allowedOrigins;
     this.allowedHosts = options.allowedHosts;
     this.otelToCloud = options.otelToCloud ?? false;
     this.registerProcessors = options.registerProcessors;
@@ -357,6 +374,12 @@ export class AdkApiServer {
         },
       });
     this.logger.setLogLevel(options.logLevel ?? LogLevel.INFO);
+    for (const rejected of rejectedOrigins) {
+      this.logger.warn(
+        `Ignoring --allow_origins entry ${formatHeaderForLog(rejected)}: ` +
+          'only http:// and https:// origins are allowed.',
+      );
+    }
     this.a2a = options.a2a ?? false;
     // An exported-but-empty value means "no token"; anything else is handed
     // to the authenticator, which rejects a token that is not usable.
@@ -439,7 +462,7 @@ export class AdkApiServer {
     // omits Origin for them, so safe methods (GET/HEAD/OPTIONS) get the
     // same check as everything else.
     const allowedRequestHosts = getAllowedRequestHosts(
-      this.allowOrigins,
+      this.allowedOrigins,
       this.allowedHosts,
     );
     app.use((req: Request, res: Response, next: express.NextFunction) => {
@@ -447,7 +470,7 @@ export class AdkApiServer {
         isDnsRebindingRequest(req.headers.host, this.host, allowedRequestHosts)
       ) {
         this.logger.warn(
-          `Rejected request with Host ${JSON.stringify(String(req.headers.host).slice(0, 128))}: the server is bound to ` +
+          `Rejected request with Host ${formatHeaderForLog(req.headers.host)}: the server is bound to ` +
             `${this.host} and only loopback hosts are accepted. Set the ` +
             `allowedHosts server option (or --allowed_hosts on the CLI) to ` +
             `the host you are reaching this server through.`,
@@ -460,6 +483,22 @@ export class AdkApiServer {
       }
       next();
     });
+
+    // The Origin gate covers cross-origin state-changing requests, which the
+    // Host guard above does not. Registered before the CORS block so a rejected
+    // origin never receives Access-Control-Allow-Origin headers.
+    app.use(createOriginCheckMiddleware(this.allowedOrigins, this.logger));
+
+    // Registered before any route so that /, /health, /dev-ui and /version all
+    // carry CORS headers, not only the routes declared further down.
+    if (this.allowedOrigins.length > 0) {
+      app.use(
+        cors({
+          // `cors` only emits the wildcard header for the literal '*' string.
+          origin: this.allowedOrigins.includes('*') ? '*' : this.allowedOrigins,
+        }),
+      );
+    }
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
@@ -487,14 +526,6 @@ export class AdkApiServer {
     app.get('/version', (req: Request, res: Response) => {
       res.status(200).json({version});
     });
-
-    if (this.allowOrigins) {
-      app.use(
-        cors({
-          origin: this.allowOrigins!,
-        }),
-      );
-    }
 
     app.use(
       express.json({
