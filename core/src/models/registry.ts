@@ -50,6 +50,39 @@ class LRUCache<K, V> {
     }
     this.cache.set(key, value);
   }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+/**
+ * Splits a `prefix:model` name on the first colon.
+ *
+ * `openai:gpt-4` gives `{prefix: 'openai', actualModel: 'gpt-4'}`, and a name
+ * without a colon gives an empty prefix.
+ */
+function parseModel(model: string): {prefix: string; actualModel: string} {
+  const separator = model.indexOf(':');
+  if (separator === -1) {
+    return {prefix: '', actualModel: model};
+  }
+  return {
+    prefix: model.slice(0, separator),
+    actualModel: model.slice(separator + 1),
+  };
+}
+
+/**
+ * Reports whether a model-name prefix names the given class.
+ *
+ * The comparison is case-insensitive and ignores one trailing `Llm`, so both
+ * `lite` and `LiteLlm` name `LiteLlm`.
+ */
+function matchPrefix(prefix: string, className: string): boolean {
+  const name = className.toLowerCase();
+  const prefixLower = prefix.toLowerCase();
+  return prefixLower === name || prefixLower === name.replace(/llm$/, '');
 }
 
 /**
@@ -65,11 +98,23 @@ export class LLMRegistry {
 
   /**
    * Creates a new LLM instance.
+   *
+   * A `prefix:model` name that selects its class by prefix is constructed
+   * without the prefix, so `lite:openai/gpt-4o` gives
+   * `LiteLlm({model: 'openai/gpt-4o'})`. A prefix that does not name the
+   * resolved class stays in the model string.
+   *
    * @param model The model name.
    * @returns The LLM instance.
    */
   static newLlm(model: string): BaseLlm {
-    return new (LLMRegistry.resolve(model))({model});
+    const {prefix, actualModel} = parseModel(model);
+    const llmClass = LLMRegistry.resolve(model);
+
+    if (prefix && matchPrefix(prefix, llmClass.name)) {
+      return new llmClass({model: actualModel});
+    }
+    return new llmClass({model});
   }
 
   private static _register(
@@ -82,6 +127,7 @@ export class LLMRegistry {
       );
     }
     LLMRegistry.llmRegistryDict.set(modelNameRegex, llmCls);
+    LLMRegistry.resolveCache.clear();
   }
 
   /**
@@ -100,6 +146,13 @@ export class LLMRegistry {
 
   /**
    * Resolves the model to a BaseLlm subclass.
+   *
+   * A name shaped `prefix:model` treats the prefix as a class name and skips
+   * regex matching. The comparison is case-insensitive and ignores a trailing
+   * `Llm`, so `lite:openai/gpt-4o` and `LiteLlm:openai/gpt-4o` both select
+   * `LiteLlm`. A prefix that names no registered class is not an error: the
+   * full name goes on to regex matching.
+   *
    * @param model The model name.
    * @returns The BaseLlm subclass.
    * @throws If the model is not found.
@@ -108,6 +161,16 @@ export class LLMRegistry {
     const cachedLlm = LLMRegistry.resolveCache.get(model);
     if (cachedLlm) {
       return cachedLlm;
+    }
+
+    const {prefix} = parseModel(model);
+    if (prefix) {
+      for (const llmClass of LLMRegistry.llmRegistryDict.values()) {
+        if (matchPrefix(prefix, llmClass.name)) {
+          LLMRegistry.resolveCache.set(model, llmClass);
+          return llmClass;
+        }
+      }
     }
 
     for (const [regex, llmClass] of LLMRegistry.llmRegistryDict.entries()) {
