@@ -20,6 +20,7 @@ import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
+import {installShutdownHandlers} from '../utils/shutdown.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
@@ -274,6 +275,7 @@ export function createProgram(): Command {
         });
 
         await server.start();
+        installShutdownHandlers(server, logger);
       } catch (error) {
         logger.error('Error starting web server:', (error as Error).message);
         process.exit(1);
@@ -321,6 +323,7 @@ export function createProgram(): Command {
           reloadAgents: getBoolean(options['reload_agents']),
         });
         await server.start();
+        installShutdownHandlers(server, logger);
       } catch (error) {
         logger.error('Error starting API server:', (error as Error).message);
         process.exit(1);
