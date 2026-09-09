@@ -5,15 +5,26 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {toSnakeCaseIdentifier} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
+import {
+  createApiParameter,
+  findResponseMediaType,
+  findSuccessResponse,
+  type ApiParameter,
+} from '../common/common.js';
 
-export interface ApiParameter {
-  originalName: string;
-  paramLocation: string;
-  paramSchema: OpenAPIV3.SchemaObject;
-  description?: string;
-  name: string; // The name used in the generated tool schema (may be snake_cased)
-  required: boolean;
+/**
+ * Narrows a schema the document may leave unusable.
+ *
+ * `resolveReferences` leaves a dangling internal `$ref` in place, and one
+ * broken pointer must not cost every tool in the document, so an unreadable
+ * schema becomes an unconstrained one.
+ */
+function toSchemaObject(
+  value: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
+): OpenAPIV3.SchemaObject {
+  return value && !('$ref' in value) ? value : {};
 }
 
 /**
@@ -39,14 +50,9 @@ export class OperationParser {
     this.dedupeParamNames();
   }
 
-  private getParamName(originalName: string): string {
-    if (this.preservePropertyNames) {
-      return originalName;
-    }
-    // Simple snake_case conversion
-    return originalName
-      .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
-      .replace(/^_/, '');
+  /** The name to force on a parameter, or nothing to let it derive one. */
+  private overrideName(originalName: string): string | undefined {
+    return this.preservePropertyNames ? originalName : undefined;
   }
 
   private processOperationParameters() {
@@ -54,19 +60,16 @@ export class OperationParser {
     for (const param of parameters) {
       // Assume resolved references for now
       if ('name' in param) {
-        const originalName = param.name;
-        const description = param.description || '';
-        const location = param.in || '';
-        const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
-
-        this.params.push({
-          originalName,
-          paramLocation: location,
-          paramSchema: schema,
-          description,
-          required: param.required || false,
-          name: this.getParamName(originalName),
-        });
+        this.params.push(
+          createApiParameter({
+            originalName: param.name,
+            paramLocation: param.in || '',
+            paramSchema: toSchemaObject(param.schema),
+            description: param.description || '',
+            required: param.required || false,
+            name: this.overrideName(param.name),
+          }),
+        );
       }
     }
   }
@@ -94,14 +97,16 @@ export class OperationParser {
         if (Object.keys(properties).length > 0) {
           for (const [propName, propDetails] of Object.entries(properties)) {
             if (!('$ref' in propDetails)) {
-              this.params.push({
-                originalName: propName,
-                paramLocation: 'body',
-                paramSchema: propDetails,
-                description: propDetails.description,
-                required: (schema.required || []).includes(propName),
-                name: this.getParamName(propName),
-              });
+              this.params.push(
+                createApiParameter({
+                  originalName: propName,
+                  paramLocation: 'body',
+                  paramSchema: propDetails,
+                  description: propDetails.description,
+                  required: (schema.required || []).includes(propName),
+                  name: this.overrideName(propName),
+                }),
+              );
             }
           }
         } else {
@@ -137,25 +142,9 @@ export class OperationParser {
   }
 
   private processReturnValue() {
-    const responses = this.operation.responses || {};
-    // Find first 2xx response
-    const validCodes = Object.keys(responses).filter((k) => k.startsWith('2'));
-    const min20x = validCodes.sort()[0];
-
-    let returnSchema: OpenAPIV3.SchemaObject = {};
-
-    if (min20x) {
-      const response = responses[min20x];
-      if (!('$ref' in response) && response.content) {
-        const firstMimeType = Object.keys(response.content)[0];
-        if (firstMimeType) {
-          const schema = response.content[firstMimeType].schema;
-          if (schema && !('$ref' in schema)) {
-            returnSchema = schema;
-          }
-        }
-      }
-    }
+    const response = findSuccessResponse(this.operation.responses || {});
+    const mediaType = response && findResponseMediaType(response);
+    const returnSchema = toSchemaObject(mediaType?.schema);
 
     this.returnValue = {
       originalName: '',
@@ -225,7 +214,10 @@ export class OperationParser {
     if (!operationId) {
       throw new Error('Operation ID is missing');
     }
-    return this.getParamName(operationId).substring(0, 60);
+    const name = this.preservePropertyNames
+      ? operationId
+      : toSnakeCaseIdentifier(operationId);
+    return name.substring(0, 60);
   }
 
   /**

@@ -92,4 +92,44 @@ describe('OperationParser', () => {
     expect(schema).toBeTruthy();
     expect(schema.title).toBe('testOp_Arguments');
   });
+
+  it.each([
+    ['REST API', 'rest_api'],
+    ['user-id', 'user_id'],
+    ['UpperCamelCase', 'upper_camel_case'],
+  ])('should derive the parameter name %s as %s', (original, expected) => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [{name: original, in: 'query', schema: {type: 'string'}}],
+      responses: {},
+    };
+
+    const parser = new OperationParser(op);
+
+    expect(parser.getParameters()[0].name).toBe(expected);
+  });
+
+  it('should rename a parameter named after a reserved word', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [{name: 'in', in: 'query', schema: {type: 'string'}}],
+      responses: {},
+    };
+
+    const parser = new OperationParser(op);
+
+    expect(parser.getParameters()[0].name).toBe('param_in');
+  });
+
+  it('should keep the original parameter name when asked to', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      parameters: [{name: 'REST API', in: 'query', schema: {type: 'string'}}],
+      responses: {},
+    };
+
+    const parser = new OperationParser(op, {preservePropertyNames: true});
+
+    expect(parser.getParameters()[0].name).toBe('REST API');
+  });
 });
