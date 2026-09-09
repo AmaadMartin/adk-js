@@ -16,6 +16,7 @@ import {
   createDockerFile,
   createDockerFileContent,
   createPackageJson,
+  getServiceUriEnvVars,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -61,12 +62,20 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
   const regionOptions: string[] = options.region
     ? ['--region', options.region]
     : [];
+  const adkEnvVars = getServiceUriEnvVars(options);
+  if (options.a2aAuthToken) {
+    adkEnvVars[A2A_AUTH_TOKEN_ENV_VAR] = options.a2aAuthToken;
+  }
+  const adkEnvVarPairs = Object.entries(adkEnvVars).map(
+    ([name, value]) => `${name}=${value}`,
+  );
+
   const adkManagedArgs = ['--source', '--project', '--port', '--verbosity'];
   if (options.region) {
     adkManagedArgs.push('--region');
   }
-  if (options.a2aAuthToken) {
-    // Any gcloud env-var flag can drop the injected token, so claim them all.
+  if (adkEnvVarPairs.length) {
+    // Any gcloud env-var flag can drop the injected values, so claim them all.
     adkManagedArgs.push(
       '--update-env-vars',
       '--set-env-vars',
@@ -93,11 +102,10 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
     options.logLevel.toLowerCase(),
   ];
 
-  if (options.a2aAuthToken) {
-    gcloudCommands.push(
-      '--update-env-vars',
-      `${A2A_AUTH_TOKEN_ENV_VAR}=${options.a2aAuthToken}`,
-    );
+  if (adkEnvVarPairs.length) {
+    // gcloud's dict-valued flags do not accumulate: a second --update-env-vars
+    // replaces the first, so every ADK variable goes in this one flag.
+    gcloudCommands.push('--update-env-vars', adkEnvVarPairs.join(','));
   }
 
   const userLabels = [];
@@ -207,6 +215,8 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
       withUi: options.withUi,
       logLevel: options.logLevel,
       allowOrigins: options.allowOrigins,
+      sessionServiceUri: options.sessionServiceUri,
+      artifactServiceUri: options.artifactServiceUri,
       otelToCloud: options.otelToCloud,
       a2a: options.a2a,
     });

