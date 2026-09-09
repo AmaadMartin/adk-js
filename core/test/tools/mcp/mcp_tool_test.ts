@@ -5,10 +5,13 @@
  */
 
 import {
+  BaseAgent,
   Context,
+  createSession,
   InvocationContext,
   MCPSessionManager,
   MCPTool,
+  PluginManager,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
@@ -161,5 +164,57 @@ describe('MCPTool', () => {
 
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
+  });
+
+  describe('headers', () => {
+    const mockTool: Tool = {
+      name: 'test-tool',
+      description: 'A test tool',
+      inputSchema: {type: 'object', properties: {}},
+    };
+
+    /** A real session manager whose sessions are stubbed out. */
+    const createSpiedSessionManager = () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test'},
+      });
+      const createSession = vi.spyOn(manager, 'createSession');
+      createSession.mockResolvedValue({
+        callTool: vi.fn().mockResolvedValue({content: []}),
+        close: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Client);
+      return {manager, createSession};
+    };
+
+    const createToolContext = () =>
+      new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-1',
+          agent: {} as BaseAgent,
+          session: createSession({id: 'session-1', appName: 'app'}),
+          pluginManager: new PluginManager(),
+          abortSignal: new AbortController().signal,
+        }),
+      });
+
+    it('passes configured headers to createSession', async () => {
+      const {manager, createSession: spy} = createSpiedSessionManager();
+      const headers = new Headers({Authorization: 'Bearer t'});
+      const tool = new MCPTool(mockTool, manager, undefined, headers);
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(spy).toHaveBeenCalledWith(headers);
+    });
+
+    it('calls createSession with undefined when no headers are configured', async () => {
+      const {manager, createSession: spy} = createSpiedSessionManager();
+      const tool = new MCPTool(mockTool, manager);
+
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(spy).toHaveBeenCalledWith(undefined);
+    });
   });
 });

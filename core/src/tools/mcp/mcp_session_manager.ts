@@ -93,7 +93,14 @@ export class MCPSessionManager {
     this.connectionParams = connectionParams;
   }
 
-  async createSession(): Promise<Client> {
+  /**
+   * Opens a new MCP client session.
+   *
+   * @param extraHeaders Headers merged over the connection's static headers
+   *     for this session only; on key conflict these win. Ignored for stdio
+   *     connections, which have no headers.
+   */
+  async createSession(extraHeaders?: Headers): Promise<Client> {
     const {Client} = await loadOptionalPeer(
       MCP_SDK,
       () => import('@modelcontextprotocol/sdk/client/index.js'),
@@ -115,14 +122,30 @@ export class MCPSessionManager {
           break;
         }
         case 'StreamableHTTPConnectionParams': {
-          const options = this.connectionParams.transportOptions ?? {};
+          const params = this.connectionParams;
+          // Copy-on-write: `params.transportOptions` is shared across every
+          // session, so per-session headers must never be written back into it.
+          let options: StreamableHTTPClientTransportOptions =
+            params.transportOptions ?? {};
 
-          if (
-            !options.requestInit &&
-            this.connectionParams.header !== undefined
-          ) {
-            options.requestInit = {
-              headers: this.connectionParams.header as Record<string, string>,
+          if (!options.requestInit && params.header !== undefined) {
+            const headers: Record<string, string> = {};
+            for (const [name, value] of Object.entries(params.header)) {
+              headers[name] = String(value);
+            }
+            options = {...options, requestInit: {headers}};
+          }
+
+          if (extraHeaders) {
+            // `set` matches names case-insensitively, so an extra header
+            // replaces a static one of the same name rather than joining it.
+            const headers = new Headers(options.requestInit?.headers);
+            extraHeaders.forEach((value, name) => {
+              headers.set(name, value);
+            });
+            options = {
+              ...options,
+              requestInit: {...options.requestInit, headers},
             };
           }
 
@@ -131,7 +154,7 @@ export class MCPSessionManager {
             () => import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
           );
           const transport = new StreamableHTTPClientTransport(
-            new URL(this.connectionParams.url),
+            new URL(params.url),
             options,
           );
           transport.onerror = logTransportError;
