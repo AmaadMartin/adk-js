@@ -52,9 +52,10 @@ export class CodeExecutorContext {
    * @return The state delta to update in the persistent session state.
    */
   getStateDelta(): Record<string, unknown> {
-    return {
-      [CONTEXT_KEY]: cloneDeep(this.context),
-    };
+    return cloneDeep({
+      ...this.sessionState.getDelta(),
+      [CONTEXT_KEY]: this.context,
+    });
   }
 
   /**
@@ -106,11 +107,7 @@ export class CodeExecutorContext {
    * @return A list of input files in the code executor context.
    */
   getInputFiles(): File[] {
-    if (!this.sessionState.has(INPUT_FILE_KEY)) {
-      return [];
-    }
-
-    return this.sessionState.get(INPUT_FILE_KEY) as File[];
+    return this.sessionState.get<File[]>(INPUT_FILE_KEY) ?? [];
   }
 
   /**
@@ -118,11 +115,10 @@ export class CodeExecutorContext {
    * @param inputFiles The input files to add to the session state.
    */
   addInputFiles(inputFiles: File[]) {
-    if (!this.sessionState.has(INPUT_FILE_KEY)) {
-      this.sessionState.set(INPUT_FILE_KEY, []);
-    }
-
-    (this.sessionState.get(INPUT_FILE_KEY) as File[]).push(...inputFiles);
+    this.sessionState.set(INPUT_FILE_KEY, [
+      ...this.getInputFiles(),
+      ...inputFiles,
+    ]);
   }
 
   clearInputFiles() {
@@ -135,21 +131,17 @@ export class CodeExecutorContext {
     }
   }
 
+  private getErrorCounts(): Record<string, number> {
+    return this.sessionState.get<Record<string, number>>(ERROR_COUNT_KEY) ?? {};
+  }
+
   /**
    * Gets the error count from the session state.
    * @param invocationId The invocation ID to get the error count for.
    * @return The error count for the given invocation ID.
    */
   getErrorCount(invocationId: string): number {
-    if (!this.sessionState.has(ERROR_COUNT_KEY)) {
-      return 0;
-    }
-
-    return (
-      ((this.sessionState.get(ERROR_COUNT_KEY) as Record<string, number>)[
-        invocationId
-      ] as number) || 0
-    );
+    return this.getErrorCounts()[invocationId] ?? 0;
   }
 
   /**
@@ -157,13 +149,12 @@ export class CodeExecutorContext {
    * @param invocationId The invocation ID to increment the error count for.
    */
   incrementErrorCount(invocationId: string) {
-    if (!this.sessionState.has(ERROR_COUNT_KEY)) {
-      this.sessionState.set(ERROR_COUNT_KEY, {});
-    }
+    const errorCounts = this.getErrorCounts();
 
-    (this.sessionState.get(ERROR_COUNT_KEY) as Record<string, number>)[
-      invocationId
-    ] = this.getErrorCount(invocationId) + 1;
+    this.sessionState.set(ERROR_COUNT_KEY, {
+      ...errorCounts,
+      [invocationId]: (errorCounts[invocationId] ?? 0) + 1,
+    });
   }
 
   /**
@@ -171,18 +162,15 @@ export class CodeExecutorContext {
    * @param invocationId The invocation ID to reset the error count for.
    */
   resetErrorCount(invocationId: string) {
-    if (!this.sessionState.has(ERROR_COUNT_KEY)) {
+    const errorCounts = this.getErrorCounts();
+
+    if (!(invocationId in errorCounts)) {
       return;
     }
 
-    const errorCounts = this.sessionState.get(ERROR_COUNT_KEY) as Record<
-      string,
-      number
-    >;
-
-    if (invocationId in errorCounts) {
-      delete errorCounts[invocationId];
-    }
+    const remainingCounts = {...errorCounts};
+    delete remainingCounts[invocationId];
+    this.sessionState.set(ERROR_COUNT_KEY, remainingCounts);
   }
 
   /**
@@ -199,23 +187,17 @@ export class CodeExecutorContext {
     resultStdout,
     resultStderr,
   }: UpdateCodeExecutionResultParams) {
-    if (!this.sessionState.has(CODE_EXECUTION_RESULTS_KEY)) {
-      this.sessionState.set(CODE_EXECUTION_RESULTS_KEY, {});
-    }
+    const codeExecutionResults =
+      this.sessionState.get<Record<string, CodeExecutionResult[]>>(
+        CODE_EXECUTION_RESULTS_KEY,
+      ) ?? {};
 
-    const codeExecutionResults = this.sessionState.get(
-      CODE_EXECUTION_RESULTS_KEY,
-    ) as Record<string, CodeExecutionResult[]>;
-
-    if (!(invocationId in codeExecutionResults)) {
-      codeExecutionResults[invocationId] = [];
-    }
-
-    codeExecutionResults[invocationId].push({
-      code,
-      resultStdout,
-      resultStderr,
-      timestamp: Date.now(),
+    this.sessionState.set(CODE_EXECUTION_RESULTS_KEY, {
+      ...codeExecutionResults,
+      [invocationId]: [
+        ...(codeExecutionResults[invocationId] ?? []),
+        {code, resultStdout, resultStderr, timestamp: Date.now()},
+      ],
     });
   }
 

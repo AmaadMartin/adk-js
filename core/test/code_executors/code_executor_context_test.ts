@@ -37,6 +37,153 @@ describe('CodeExecutorContext', () => {
     });
   });
 
+  describe('getStateDelta persistence', () => {
+    const fileA: File = {
+      name: 'a.csv',
+      content: 'YQ==',
+      contentEncoding: undefined,
+      mimeType: 'text/csv',
+    };
+    const fileB: File = {
+      name: 'b.csv',
+      content: 'Yg==',
+      contentEncoding: undefined,
+      mimeType: 'text/csv',
+    };
+
+    it('publishes input files added to an empty state', () => {
+      const {ctx} = makeContext();
+
+      ctx.addInputFiles([fileA]);
+
+      expect(ctx.getStateDelta()['_code_executor_input_files']).toEqual([
+        fileA,
+      ]);
+    });
+
+    it('publishes input files added to a state that already holds some', () => {
+      const {ctx} = makeContext({_code_executor_input_files: [fileA]});
+
+      ctx.addInputFiles([fileB]);
+
+      expect(ctx.getStateDelta()['_code_executor_input_files']).toEqual([
+        fileA,
+        fileB,
+      ]);
+    });
+
+    it('publishes the first error count for an invocation', () => {
+      const {ctx} = makeContext();
+
+      ctx.incrementErrorCount('inv-1');
+
+      expect(ctx.getStateDelta()['_code_executor_error_counts']).toEqual({
+        'inv-1': 1,
+      });
+    });
+
+    it('publishes an error count incremented from a pre-seeded state', () => {
+      const {ctx} = makeContext({_code_executor_error_counts: {'inv-1': 1}});
+
+      ctx.incrementErrorCount('inv-1');
+
+      expect(ctx.getStateDelta()['_code_executor_error_counts']).toEqual({
+        'inv-1': 2,
+      });
+    });
+
+    it('publishes the remaining counts after a reset', () => {
+      const {ctx} = makeContext({
+        _code_executor_error_counts: {'inv-1': 2, 'inv-2': 1},
+      });
+
+      ctx.resetErrorCount('inv-1');
+
+      expect(ctx.getStateDelta()['_code_executor_error_counts']).toEqual({
+        'inv-2': 1,
+      });
+    });
+
+    it('publishes a code execution result appended to an empty state', () => {
+      const {ctx} = makeContext();
+
+      ctx.updateCodeExecutionResult({
+        invocationId: 'inv-1',
+        code: 'print("hi")',
+        resultStdout: 'hi',
+        resultStderr: '',
+      });
+
+      const results = ctx.getStateDelta()['_code_execution_results'] as Record<
+        string,
+        Array<Record<string, unknown>>
+      >;
+      expect(results['inv-1']).toHaveLength(1);
+      expect(results['inv-1'][0]['code']).toBe('print("hi")');
+    });
+
+    it('publishes a code execution result appended to a pre-seeded state', () => {
+      const existing = {
+        code: 'x = 1',
+        resultStdout: '',
+        resultStderr: '',
+        timestamp: 1,
+      };
+      const {ctx} = makeContext({
+        _code_execution_results: {'inv-1': [existing]},
+      });
+
+      ctx.updateCodeExecutionResult({
+        invocationId: 'inv-1',
+        code: 'print(x)',
+        resultStdout: '1',
+        resultStderr: '',
+      });
+
+      const results = ctx.getStateDelta()['_code_execution_results'] as Record<
+        string,
+        Array<Record<string, unknown>>
+      >;
+      expect(results['inv-1']).toHaveLength(2);
+      expect(results['inv-1'][0]).toEqual(existing);
+      expect(results['inv-1'][1]['code']).toBe('print(x)');
+    });
+
+    it('publishes the emptied list after clearInputFiles', () => {
+      const {ctx} = makeContext({_code_executor_input_files: [fileA]});
+
+      ctx.clearInputFiles();
+
+      expect(ctx.getStateDelta()['_code_executor_input_files']).toEqual([]);
+    });
+
+    it('publishes nothing for read-only calls', () => {
+      const {ctx} = makeContext({
+        _code_executor_input_files: [fileA],
+        _code_executor_error_counts: {'inv-1': 1},
+      });
+
+      ctx.getInputFiles();
+      ctx.getErrorCount('inv-1');
+      ctx.getProcessedFileNames();
+
+      expect(ctx.getStateDelta()).toEqual({_code_execution_context: {}});
+    });
+
+    it('returns a deep clone of the published session state keys', () => {
+      const {ctx, state} = makeContext();
+      ctx.addInputFiles([fileA]);
+
+      const files = ctx.getStateDelta()['_code_executor_input_files'] as File[];
+      files[0].name = 'mutated.csv';
+
+      expect(ctx.getInputFiles()[0].name).toBe('a.csv');
+      expect(
+        (state.get<File[]>('_code_executor_input_files') ?? [])[0].name,
+      ).toBe('a.csv');
+    });
+  });
+
   describe('getExecutionId / setExecutionId', () => {
     it('returns undefined when execution ID has not been set', () => {
       const {ctx} = makeContext();
