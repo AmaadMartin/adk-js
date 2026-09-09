@@ -206,7 +206,7 @@ describe('MCPSessionManager', () => {
 
       await manager.createSession({Authorization: 'Bearer per-call'});
 
-      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
         {requestInit: {headers: {Authorization: 'Bearer per-call'}}},
       );
@@ -221,7 +221,7 @@ describe('MCPSessionManager', () => {
 
       await manager.createSession({Authorization: 'Bearer per-call'});
 
-      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
         {
           requestInit: {
@@ -240,7 +240,7 @@ describe('MCPSessionManager', () => {
 
       await manager.createSession({Authorization: 'Bearer per-call'});
 
-      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
         {
           requestInit: {
@@ -260,7 +260,7 @@ describe('MCPSessionManager', () => {
 
       await manager.createSession({Authorization: 'Bearer per-call'});
 
-      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
         {
           requestInit: {
@@ -294,7 +294,7 @@ describe('MCPSessionManager', () => {
 
       await manager.createSession({Authorization: 'Bearer per-call'});
 
-      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
         {
           requestInit: {
@@ -313,7 +313,7 @@ describe('MCPSessionManager', () => {
 
       await manager.createSession({Authorization: 'Bearer per-call'});
 
-      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
         expect.any(URL),
         {
           requestInit: {
