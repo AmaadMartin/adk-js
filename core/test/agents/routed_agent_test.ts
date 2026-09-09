@@ -9,8 +9,8 @@ import {
   BaseAgentConfig,
   Event,
   InvocationContext,
-  InvocationContextParams,
   LlmAgent,
+  PluginManager,
   RoutedAgent,
   Session,
   createEvent,
@@ -55,6 +55,17 @@ class MockAgent extends BaseAgent {
   }
 }
 
+function createTestSession(): Session {
+  return {
+    id: 'test-session',
+    appName: 'test-app',
+    userId: 'test-user',
+    state: {},
+    events: [] as Event[],
+    lastUpdateTime: Date.now(),
+  };
+}
+
 function createTestContext(params: {
   invocationId?: string;
   branch?: string;
@@ -65,8 +76,9 @@ function createTestContext(params: {
     invocationId: params.invocationId ?? 'test-invocation',
     branch: params.branch ?? 'test-branch',
     agent: params.agent,
-    session: params.session,
-  } as unknown as InvocationContextParams);
+    session: params.session ?? createTestSession(),
+    pluginManager: new PluginManager(),
+  });
 }
 
 describe('RoutedAgent', () => {

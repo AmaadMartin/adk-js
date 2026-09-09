@@ -8,6 +8,8 @@ import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
   BaseAgentConfig,
+  BasePlugin,
+  Context,
   Event,
   FunctionTool,
   InvocationContext,
@@ -41,7 +43,249 @@ class MockAgent extends BaseAgent {
   }
 }
 
+const AGENT_FAILURE = new Error('agent exploded');
+const NON_ERROR_FAILURE = 'agent exploded without an Error';
+
+/** An agent that streams one event and then fails, in both run modes. */
+class ThrowingAgent extends BaseAgent {
+  failure: unknown = AGENT_FAILURE;
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'partial work'}]},
+    });
+    throw this.failure;
+  }
+
+  protected async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'partial live work'}]},
+    });
+    throw this.failure;
+  }
+}
+
+/** Records every agent error it is notified of, and can fail on purpose. */
+class AgentErrorPlugin extends BasePlugin {
+  readonly notifications: Array<{
+    agentName: string;
+    invocationId: string;
+    error: Error;
+  }> = [];
+  failInHook = false;
+
+  constructor(name = 'agent_error_plugin') {
+    super(name);
+  }
+
+  override async onAgentErrorCallback({
+    agent,
+    callbackContext,
+    error,
+  }: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
+    this.notifications.push({
+      agentName: agent.name,
+      invocationId: callbackContext.invocationId,
+      error,
+    });
+    if (this.failInHook) {
+      throw new Error('plugin hook exploded');
+    }
+  }
+}
+
+function createParentContext(
+  agent: BaseAgent,
+  pluginManager: PluginManager,
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'test-invocation',
+    agent,
+    session: {
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      state: {},
+      events: [],
+      lastUpdateTime: Date.now(),
+    } as Session,
+    pluginManager,
+  });
+}
+
+async function drain(
+  events: AsyncGenerator<Event, void, void>,
+): Promise<Event[]> {
+  const collected: Event[] = [];
+  for await (const event of events) {
+    collected.push(event);
+  }
+  return collected;
+}
+
 describe('BaseAgent', () => {
+  describe('agent error callbacks', () => {
+    it('notifies the plugin once when runAsyncImpl throws', async () => {
+      const plugin = new AgentErrorPlugin();
+      const agent = new ThrowingAgent({name: 'crashing_agent'});
+      const parentContext = createParentContext(
+        agent,
+        new PluginManager([plugin]),
+      );
+
+      await expect(drain(agent.runAsync(parentContext))).rejects.toBe(
+        AGENT_FAILURE,
+      );
+
+      expect(plugin.notifications).toEqual([
+        {
+          agentName: 'crashing_agent',
+          invocationId: 'test-invocation',
+          error: AGENT_FAILURE,
+        },
+      ]);
+    });
+
+    it('does not run the after-agent callback when runAsyncImpl throws', async () => {
+      let afterAgentCallbackCalled = false;
+      const plugin = new AgentErrorPlugin();
+      const agent = new ThrowingAgent({
+        name: 'crashing_agent',
+        afterAgentCallback: async () => {
+          afterAgentCallbackCalled = true;
+          return undefined;
+        },
+      });
+      const parentContext = createParentContext(
+        agent,
+        new PluginManager([plugin]),
+      );
+
+      await expect(drain(agent.runAsync(parentContext))).rejects.toBe(
+        AGENT_FAILURE,
+      );
+
+      expect(afterAgentCallbackCalled).toBe(false);
+    });
+
+    it('notifies the plugin when a before-agent callback throws', async () => {
+      const beforeFailure = new Error('before-agent callback exploded');
+      const plugin = new AgentErrorPlugin();
+      const agent = new MockAgent({
+        name: 'callback_crash_agent',
+        beforeAgentCallback: async () => {
+          throw beforeFailure;
+        },
+      });
+      const parentContext = createParentContext(
+        agent,
+        new PluginManager([plugin]),
+      );
+
+      await expect(drain(agent.runAsync(parentContext))).rejects.toBe(
+        beforeFailure,
+      );
+
+      expect(plugin.notifications).toEqual([
+        {
+          agentName: 'callback_crash_agent',
+          invocationId: 'test-invocation',
+          error: beforeFailure,
+        },
+      ]);
+    });
+
+    it('notifies the plugin when runLiveImpl throws', async () => {
+      const plugin = new AgentErrorPlugin();
+      const agent = new ThrowingAgent({name: 'crashing_live_agent'});
+      const parentContext = createParentContext(
+        agent,
+        new PluginManager([plugin]),
+      );
+
+      await expect(drain(agent.runLive(parentContext))).rejects.toBe(
+        AGENT_FAILURE,
+      );
+
+      expect(plugin.notifications).toEqual([
+        {
+          agentName: 'crashing_live_agent',
+          invocationId: 'test-invocation',
+          error: AGENT_FAILURE,
+        },
+      ]);
+    });
+
+    it('keeps the original error when the plugin hook itself throws', async () => {
+      const plugin = new AgentErrorPlugin();
+      plugin.failInHook = true;
+      const agent = new ThrowingAgent({name: 'crashing_agent'});
+      const parentContext = createParentContext(
+        agent,
+        new PluginManager([plugin]),
+      );
+
+      await expect(drain(agent.runAsync(parentContext))).rejects.toBe(
+        AGENT_FAILURE,
+      );
+
+      expect(plugin.notifications).toHaveLength(1);
+    });
+
+    it('wraps a non-Error failure for the plugin and rethrows the original', async () => {
+      const plugin = new AgentErrorPlugin();
+      const agent = new ThrowingAgent({name: 'crashing_agent'});
+      agent.failure = NON_ERROR_FAILURE;
+      const parentContext = createParentContext(
+        agent,
+        new PluginManager([plugin]),
+      );
+
+      await expect(drain(agent.runAsync(parentContext))).rejects.toBe(
+        NON_ERROR_FAILURE,
+      );
+
+      expect(plugin.notifications).toHaveLength(1);
+      expect(plugin.notifications[0].agentName).toBe('crashing_agent');
+      expect(plugin.notifications[0].error).toBeInstanceOf(Error);
+      expect(plugin.notifications[0].error.message).toBe(NON_ERROR_FAILURE);
+    });
+
+    it('notifies no plugin on a successful run', async () => {
+      let afterAgentCallbackCalled = false;
+      const plugin = new AgentErrorPlugin();
+      const agent = new MockAgent({
+        name: 'healthy_agent',
+        afterAgentCallback: async () => {
+          afterAgentCallbackCalled = true;
+          return undefined;
+        },
+      });
+      const parentContext = createParentContext(
+        agent,
+        new PluginManager([plugin]),
+      );
+
+      const events = await drain(agent.runAsync(parentContext));
+
+      expect(events).toHaveLength(1);
+      expect(plugin.notifications).toEqual([]);
+      expect(afterAgentCallbackCalled).toBe(true);
+    });
+  });
+
   describe('rootAgent', () => {
     it('should return the actual root agent for sub-agents', () => {
       const subAgent = new LlmAgent({
