@@ -168,11 +168,20 @@ export class AgentTool extends BaseTool {
       return '';
     }
 
+    // CFC describes how the caller's own model executes. Handing it to the
+    // wrapped agent replaces that agent's code executor, and refuses to run it
+    // unless its model is Gemini 2 or above.
+    const runConfig = {
+      ...toolContext.invocationContext.runConfig,
+      supportCfc: false,
+    };
+
     let lastEvent: Event | undefined;
     for await (const event of runner.runAsync({
       userId: session.userId,
       sessionId: session.id,
       newMessage: content,
+      runConfig,
       abortSignal: toolContext.abortSignal,
     })) {
       if (toolContext.abortSignal?.aborted) {

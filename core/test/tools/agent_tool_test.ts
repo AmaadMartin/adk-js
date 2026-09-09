@@ -14,8 +14,10 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  RunConfig,
   Runner,
   State,
+  StreamingMode,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
@@ -31,6 +33,64 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     })),
   };
 });
+
+/**
+ * Runs `tool` with a stubbed nested Runner and returns the RunConfig that
+ * `AgentTool` handed to that Runner.
+ */
+async function captureNestedRunConfig(
+  tool: AgentTool,
+  toolContext: Context,
+): Promise<RunConfig | undefined> {
+  let captured: RunConfig | undefined;
+
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        async *runAsync(params: {runConfig?: RunConfig}) {
+          captured = params.runConfig;
+          yield createEvent({
+            author: 'sub-agent',
+            content: {role: 'model', parts: [{text: 'done'}]},
+          });
+        },
+      }) as unknown as Runner,
+  );
+
+  await tool.runAsync({args: {request: 'go'}, toolContext});
+
+  return captured;
+}
+
+/** Builds an AgentTool over a stub sub-agent. */
+function createAgentTool(): AgentTool {
+  return new AgentTool({agent: createSubAgent()});
+}
+
+/** A stub sub-agent. AgentTool only reads its name. */
+function createSubAgent(): LlmAgent {
+  return new LlmAgent({name: 'sub-agent'});
+}
+
+/** Builds a tool context whose invocation carries `runConfig`. */
+function createToolContext(runConfig?: RunConfig): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: createSubAgent(),
+      session: createSession({
+        id: 'parent-session',
+        appName: 'sub-agent',
+        userId: 'parent-user',
+      }),
+      pluginManager: new PluginManager([]),
+      sessionService: new InMemorySessionService(),
+      runConfig,
+    }),
+  });
+}
 
 describe('AgentTool', () => {
   it('propagates session context and state delta', async () => {
@@ -510,5 +570,57 @@ describe('AgentTool', () => {
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
     );
+  });
+
+  it("forwards the caller's run config to the nested runner", async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.SSE,
+    };
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(callerRunConfig),
+    );
+
+    expect(forwarded).toMatchObject({
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.SSE,
+    });
+  });
+
+  it('does not forward supportCfc to the nested runner', async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {supportCfc: true, maxLlmCalls: 7};
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(callerRunConfig),
+    );
+
+    expect(forwarded?.supportCfc).toBe(false);
+    expect(forwarded?.maxLlmCalls).toBe(7);
+  });
+
+  it("leaves the caller's run config unmutated", async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {supportCfc: true, maxLlmCalls: 7};
+    const toolContext = createToolContext(callerRunConfig);
+
+    const forwarded = await captureNestedRunConfig(tool, toolContext);
+
+    expect(forwarded).toEqual({supportCfc: false, maxLlmCalls: 7});
+    expect(forwarded).not.toBe(callerRunConfig);
+    expect(toolContext.invocationContext.runConfig).toBe(callerRunConfig);
+    expect(callerRunConfig.supportCfc).toBe(true);
+  });
+
+  it('forwards only supportCfc: false when the caller has no run config', async () => {
+    const tool = createAgentTool();
+
+    const forwarded = await captureNestedRunConfig(tool, createToolContext());
+
+    expect(forwarded).toEqual({supportCfc: false});
   });
 });
