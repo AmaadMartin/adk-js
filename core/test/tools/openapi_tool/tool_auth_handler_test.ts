@@ -291,6 +291,13 @@ describe('ToolAuthHandler', () => {
       };
     }
 
+    // The handler reads only `state`, `getAuthResponse` and
+    // `requestCredential`, so these tests build a partial Context in one
+    // place, the way the rest of this file does inline.
+    function fakeContext(parts: Partial<Context>): Context {
+      return parts as unknown as Context;
+    }
+
     let restoreFetch: (() => void) | undefined;
 
     function stubTokenEndpoint(response: Response) {
@@ -319,11 +326,11 @@ describe('ToolAuthHandler', () => {
 
     it('refreshes an expired cached OAuth2 credential before using it', async () => {
       const fetchSpy = stubTokenEndpoint(freshTokenResponse());
-      const mockContext = {
+      const mockContext = fakeContext({
         state: new State({
           [OIDC_STORE_KEY]: cachedCredential(Date.now() - 1000),
         }),
-      } as unknown as Context;
+      });
 
       const result = await new ToolAuthHandler(
         mockContext,
@@ -344,7 +351,7 @@ describe('ToolAuthHandler', () => {
       const state = new State({
         [OIDC_STORE_KEY]: cachedCredential(Date.now() - 1000),
       });
-      const mockContext = {state} as unknown as Context;
+      const mockContext = fakeContext({state});
 
       await new ToolAuthHandler(
         mockContext,
@@ -363,7 +370,7 @@ describe('ToolAuthHandler', () => {
       // more than a minute from now.
       const valid = cachedCredential(Date.now() + 3_600_000);
       const state = new State({[OIDC_STORE_KEY]: valid});
-      const mockContext = {state} as unknown as Context;
+      const mockContext = fakeContext({state});
 
       const result = await new ToolAuthHandler(
         mockContext,
@@ -378,11 +385,11 @@ describe('ToolAuthHandler', () => {
 
     it('keeps the cached credential when the refresh request fails', async () => {
       stubTokenEndpoint(new Response('{}', {status: 400}));
-      const mockContext = {
+      const mockContext = fakeContext({
         state: new State({
           [OIDC_STORE_KEY]: cachedCredential(Date.now() - 1000),
         }),
-      } as unknown as Context;
+      });
 
       const result = await new ToolAuthHandler(
         mockContext,
@@ -400,11 +407,11 @@ describe('ToolAuthHandler', () => {
         authType: AuthCredentialTypes.OAUTH2,
         oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
       };
-      const mockContext = {
+      const mockContext = fakeContext({
         state: new State({[OIDC_STORE_KEY]: tokenless}),
         getAuthResponse: vi.fn().mockReturnValue(undefined),
         requestCredential: vi.fn(),
-      } as unknown as Context;
+      });
 
       const result = await new ToolAuthHandler(
         mockContext,
@@ -421,7 +428,7 @@ describe('ToolAuthHandler', () => {
         oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
       };
       const state = new State({[OIDC_STORE_KEY]: tokenless});
-      const mockContext = {
+      const mockContext = fakeContext({
         state,
         getAuthResponse: vi.fn().mockReturnValue({
           authType: AuthCredentialTypes.OAUTH2,
@@ -432,7 +439,7 @@ describe('ToolAuthHandler', () => {
           },
         }),
         requestCredential: vi.fn(),
-      } as unknown as Context;
+      });
 
       const result = await new ToolAuthHandler(
         mockContext,
