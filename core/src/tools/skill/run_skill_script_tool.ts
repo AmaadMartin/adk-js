@@ -19,6 +19,7 @@ import {
 } from '../../utils/file_extension_utils.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {missingArgumentsError} from './skill_tool_utils.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
@@ -61,23 +62,18 @@ export class RunSkillScriptTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
+    const invalidArguments = missingArgumentsError(args, [
+      'skill_name',
+      'script_path',
+    ]);
+    if (invalidArguments) {
+      return invalidArguments;
+    }
+
     const skillName = args['skill_name'] as string;
     const scriptPath = args['script_path'] as string;
     const scriptArgs =
       (args['args'] as Record<string, string | number | boolean>) || {};
-
-    if (!skillName) {
-      return {
-        error: 'Skill name is required.',
-        errorCode: 'MISSING_SKILL_NAME',
-      };
-    }
-    if (!scriptPath) {
-      return {
-        error: 'Script path is required.',
-        errorCode: 'MISSING_SCRIPT_PATH',
-      };
-    }
 
     let skill;
     try {
@@ -88,14 +84,14 @@ export class RunSkillScriptTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
-        errorCode: 'REGISTRY_ERROR',
+        error_code: 'REGISTRY_ERROR',
       };
     }
 
     if (!skill) {
       return {
         error: `Skill '${skillName}' not found.`,
-        errorCode: 'SKILL_NOT_FOUND',
+        error_code: 'SKILL_NOT_FOUND',
       };
     }
 
@@ -110,7 +106,7 @@ export class RunSkillScriptTool extends BaseTool {
     if (!script) {
       return {
         error: `Script '${scriptPath}' not found in skill '${skillName}'.`,
-        errorCode: 'SCRIPT_NOT_FOUND',
+        error_code: 'SCRIPT_NOT_FOUND',
       };
     }
 
@@ -125,7 +121,7 @@ export class RunSkillScriptTool extends BaseTool {
     if (!codeExecutor) {
       return {
         error: 'No code executor configured.',
-        errorCode: 'NO_CODE_EXECUTOR',
+        error_code: 'NO_CODE_EXECUTOR',
       };
     }
 
@@ -155,7 +151,7 @@ export class RunSkillScriptTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to execute script '${scriptPath}': ${(e as Error).message}`,
-        errorCode: 'EXECUTION_ERROR',
+        error_code: 'EXECUTION_ERROR',
       };
     }
   }

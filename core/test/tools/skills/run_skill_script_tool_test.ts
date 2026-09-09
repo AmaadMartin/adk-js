@@ -50,7 +50,7 @@ class MockCodeExecutor extends BaseCodeExecutor {
 
 interface ToolErrorResponse {
   error: string;
-  errorCode: string;
+  error_code: string;
 }
 
 describe('RunSkillScriptTool', () => {
@@ -115,8 +115,8 @@ describe('RunSkillScriptTool', () => {
     })) as ToolErrorResponse;
 
     expect(result).toEqual({
-      error: 'Skill name is required.',
-      errorCode: 'MISSING_SKILL_NAME',
+      error: "Argument 'skill_name' is required.",
+      error_code: 'INVALID_ARGUMENTS',
     });
   });
 
@@ -129,8 +129,8 @@ describe('RunSkillScriptTool', () => {
     })) as ToolErrorResponse;
 
     expect(result).toEqual({
-      error: 'Script path is required.',
-      errorCode: 'MISSING_SCRIPT_PATH',
+      error: "Argument 'script_path' is required.",
+      error_code: 'INVALID_ARGUMENTS',
     });
   });
 
@@ -144,7 +144,7 @@ describe('RunSkillScriptTool', () => {
 
     expect(result).toEqual({
       error: "Skill 'invalid-skill' not found.",
-      errorCode: 'SKILL_NOT_FOUND',
+      error_code: 'SKILL_NOT_FOUND',
     });
   });
 
@@ -158,7 +158,7 @@ describe('RunSkillScriptTool', () => {
 
     expect(result).toEqual({
       error: "Script 'scripts/invalid.js' not found in skill 'test-skill'.",
-      errorCode: 'SCRIPT_NOT_FOUND',
+      error_code: 'SCRIPT_NOT_FOUND',
     });
   });
 
@@ -172,7 +172,7 @@ describe('RunSkillScriptTool', () => {
 
     expect(result).toEqual({
       error: 'No code executor configured.',
-      errorCode: 'NO_CODE_EXECUTOR',
+      error_code: 'NO_CODE_EXECUTOR',
     });
   });
 
