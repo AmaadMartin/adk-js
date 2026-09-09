@@ -77,4 +77,12 @@ describe('createRunConfig', () => {
       createRunConfig({maxLlmCalls: Number.MAX_SAFE_INTEGER + 1}),
     ).toThrow();
   });
+
+  it('defaults saveLiveBlob to false', () => {
+    expect(createRunConfig().saveLiveBlob).toBe(false);
+  });
+
+  it('keeps saveLiveBlob when the caller turns it on', () => {
+    expect(createRunConfig({saveLiveBlob: true}).saveLiveBlob).toBe(true);
+  });
 });

@@ -99,6 +99,16 @@ export interface RunConfig {
   contextWindowCompression?: ContextWindowCompressionConfig;
 
   /**
+   * Saves the live audio of each turn to the artifact service, and records a
+   * reference to it in the session, instead of dropping it. Off by default.
+   *
+   * The user's audio and the model's audio accumulate separately. Each
+   * direction is written as one audio artifact per turn, and the session gets
+   * an event that carries a `fileData` reference to it. Video is not supported.
+   */
+  saveLiveBlob?: boolean;
+
+  /**
    * A limit on the total number of llm calls for a given run.
    *
    * Valid Values:
@@ -168,6 +178,7 @@ export interface RunConfig {
  * - `saveInputBlobsAsArtifacts` → `false`
  * - `supportCfc` → `false`
  * - `enableAffectiveDialog` → `false`
+ * - `saveLiveBlob` → `false`
  * - `streamingMode` → {@link StreamingMode.NONE}
  * - `maxLlmCalls` → `500` (validated via `validateMaxLlmCalls`)
  * - `pauseOnToolCalls` → `false`
@@ -183,6 +194,7 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
     saveInputBlobsAsArtifacts: false,
     supportCfc: false,
     enableAffectiveDialog: false,
+    saveLiveBlob: false,
     streamingMode: StreamingMode.NONE,
     pauseOnToolCalls: false,
     ...params,
