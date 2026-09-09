@@ -12,6 +12,15 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {logToTmpFolder} from '../../src/utils/log_to_tmp_folder.js';
+import {resetFileLogTarget} from '../../src/utils/logger.js';
+
+// `vi.hoisted`: the mock factory below runs before module-level consts are
+// initialised.
+const {LOG_FILE_PATH, LATEST_LOG_PATH} = vi.hoisted(() => ({
+  LOG_FILE_PATH: '/tmp/agents_log/agent.20260817_081102.log',
+  LATEST_LOG_PATH: '/tmp/agents_log/agent.latest.log',
+}));
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -35,6 +44,20 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+}));
+
+// Only the flush is replaced; `createProgram` still builds a real AdkLogger.
+vi.mock('../../src/utils/logger', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/utils/logger.js')>();
+  return {...actual, resetFileLogTarget: vi.fn(async () => {})};
+});
+
+vi.mock('../../src/utils/log_to_tmp_folder', () => ({
+  logToTmpFolder: vi.fn(() => ({
+    logFilePath: LOG_FILE_PATH,
+    latestLogPath: LATEST_LOG_PATH,
+  })),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -298,6 +321,64 @@ describe('CLI Entrypoint', () => {
           otelToCloud: true,
         }),
       );
+    });
+  });
+
+  describe('log destination', () => {
+    it('sends the run logs to the temp folder and prints where', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['run', 'agent.ts']);
+
+      expect(logToTmpFolder).toHaveBeenCalledTimes(1);
+      expect(logSpy).toHaveBeenCalledWith(
+        `Log setup complete: ${LOG_FILE_PATH}`,
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        `To access latest log: tail -F ${LATEST_LOG_PATH}`,
+      );
+    });
+
+    it('points at the timestamped file when there is no latest pointer', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.mocked(logToTmpFolder).mockReturnValueOnce({
+        logFilePath: LOG_FILE_PATH,
+      });
+
+      await parse(['run', 'agent.ts']);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        `To access latest log: tail -F ${LOG_FILE_PATH}`,
+      );
+    });
+
+    it('names the log file on the terminal when the run fails', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('exit');
+      });
+      (runAgent as Mock).mockRejectedValueOnce(new Error('boom'));
+
+      await expect(parse(['run', 'agent.ts'])).rejects.toThrow('exit');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        `Error running agent: boom (see ${LOG_FILE_PATH})`,
+      );
+      // The mocked exit throws, so this call can only have run before it.
+      expect(resetFileLogTarget).toHaveBeenCalled();
+    });
+
+    it('leaves the web server logging to the console', async () => {
+      await parse(['web']);
+
+      expect(logToTmpFolder).not.toHaveBeenCalled();
+    });
+
+    it('leaves the api server logging to the console', async () => {
+      await parse(['api_server']);
+
+      expect(logToTmpFolder).not.toHaveBeenCalled();
     });
   });
 
