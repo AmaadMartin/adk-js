@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, isFileNotFoundError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,31 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('isFileNotFoundError', () => {
+  it('accepts a Node ENOENT error', () => {
+    const err = Object.assign(new Error('no such file'), {code: 'ENOENT'});
+    expect(isFileNotFoundError(err)).toBe(true);
+  });
+
+  it('accepts a plain object carrying the code', () => {
+    expect(isFileNotFoundError({code: 'ENOENT'})).toBe(true);
+  });
+
+  it('rejects a different error code', () => {
+    const err = Object.assign(new Error('permission denied'), {code: 'EACCES'});
+    expect(isFileNotFoundError(err)).toBe(false);
+  });
+
+  it('rejects an error carrying no code', () => {
+    expect(isFileNotFoundError(new Error('boom'))).toBe(false);
+  });
+
+  it('rejects a non-object value', () => {
+    expect(isFileNotFoundError('ENOENT')).toBe(false);
+    expect(isFileNotFoundError(null)).toBe(false);
+    expect(isFileNotFoundError(undefined)).toBe(false);
   });
 });
