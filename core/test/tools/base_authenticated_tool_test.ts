@@ -126,6 +126,11 @@ function createOAuth2AuthConfig(): AuthConfig {
 }
 
 describe('BaseAuthenticatedTool', () => {
+  it('uses the pending message adk-python returns', () => {
+    // The model sees this string, so it crosses the language boundary.
+    expect(PENDING_USER_AUTHORIZATION).toBe('Pending User Authorization.');
+  });
+
   describe('without authentication', () => {
     it('runs the body with no credential when authConfig is absent', async () => {
       const credentialService = new EmptyCredentialService();
