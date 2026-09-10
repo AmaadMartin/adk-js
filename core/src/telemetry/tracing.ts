@@ -411,6 +411,9 @@ export function traceCallLlm({
     shouldAddRequestResponseToSpans() ? safeJsonSerialize(llmResponse) : '{}',
   );
 
+  // A count is emitted when the model reported it, including a reported zero,
+  // and omitted when the model reported nothing. Parity with adk-python
+  // `TokenUsage.from_usage_metadata`.
   span.setAttributes(tokenUsageAttributes(llmResponse.usageMetadata));
 
   if (llmResponse.finishReason) {
