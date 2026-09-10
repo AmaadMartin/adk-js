@@ -16,6 +16,14 @@ import {
 } from '../utils/hitl_utils.js';
 
 /**
+ * A unique symbol branding {@link FunctionNode} instances (see
+ * {@link isFunctionNode}).
+ */
+const FUNCTION_NODE_SIGNATURE_SYMBOL = Symbol.for(
+  'google.adk.workflow.functionNode',
+);
+
+/**
  * A value a {@link FunctionNodeHandler} may return or yield.
  */
 export type FunctionNodeResult<TOutput> =
@@ -71,6 +79,9 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
   TInput,
   TOutput
 > {
+  /** Brand identifying this object as a {@link FunctionNode}. */
+  readonly [FUNCTION_NODE_SIGNATURE_SYMBOL] = true;
+
   readonly authConfig?: AuthConfig;
   private readonly handler: FunctionNodeHandler<TInput, TOutput>;
   /** Per-run shadow of the state entries already attached to an emitted event. */
@@ -253,6 +264,19 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
       actions: stateDelta ? {stateDelta} : undefined,
     });
   }
+}
+
+/**
+ * Type guard for {@link FunctionNode}. Matches on the brand rather than
+ * `instanceof` so it stays correct across package copies (mirrors `isWorkflow`).
+ */
+export function isFunctionNode(value: unknown): value is FunctionNode {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    FUNCTION_NODE_SIGNATURE_SYMBOL in value &&
+    value[FUNCTION_NODE_SIGNATURE_SYMBOL] === true
+  );
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {

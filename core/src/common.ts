@@ -429,6 +429,7 @@ export {
   createNodeErrorEvent,
   createNodeState,
   createSubBranch,
+  isFunctionNode,
   isNodeErrorEvent,
   isNodeReportedError,
   isNodeSchemaValidationError,
