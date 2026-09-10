@@ -11,6 +11,7 @@ import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.j
 import {experimental} from '../../utils/experimental.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {REQUIRE_CONFIRMATION_MESSAGE} from '../tool_confirmation.js';
 import {SkillToolset} from './skill_toolset.js';
 
 /**
@@ -25,15 +26,6 @@ export enum RunSkillInlineScriptErrorCode {
   EXECUTION_ERROR = 'EXECUTION_ERROR',
   CONFIRMATION_REJECTED = 'CONFIRMATION_REJECTED',
 }
-
-/**
- * Message returned while the tool call is paused waiting for the client to
- * confirm (or reject) execution of the model-provided inline script. Mirrors
- * the intermediate message used by the tool-confirmation flow elsewhere in the
- * codebase (see `SecurityPlugin`).
- */
-const REQUIRE_CONFIRMATION_MESSAGE =
-  'This tool call needs external confirmation before completion.';
 
 @experimental
 export class RunSkillInlineScriptTool extends BaseTool {
