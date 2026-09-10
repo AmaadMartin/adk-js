@@ -4,32 +4,58 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseNode} from '../base_node.js';
+import {logger} from '../../utils/logger.js';
+import {BaseNode, START} from '../base_node.js';
 import {isNodeInterruptedError} from '../errors.js';
 import {RunnableNode} from '../graph.js';
 import {NodeContext} from '../node_context.js';
 import {buildNode} from '../utils/workflow_graph_utils.js';
 
 /**
- * Default concurrency when `maxParallelWorkers` is not set. Bounded so a
- * data-driven list length can't fan out into an unbounded burst of concurrent
- * inner runs (a rate-limit / cost hazard when the inner node is an LLM or a
- * remote tool). Pass `Infinity` for explicitly unbounded concurrency.
+ * How long to wait for cancelled items to actually stop before giving up on
+ * them, so an item that ignores its abort signal cannot hang this node forever.
+ * Mirrors `_CANCELLED_ITEM_DRAIN_TIMEOUT_SECONDS` (5.0) in `google/adk-python`
+ * `workflow/_parallel_worker.py`.
  */
-const DEFAULT_MAX_PARALLEL_WORKERS = 8;
+const CANCELLED_ITEM_DRAIN_TIMEOUT_MS = 5000;
+
+/**
+ * Resolves to whether `promise` settled within `ms`. The timer is cleared on
+ * both outcomes, so a fan-out that finished never holds the event loop open.
+ */
+async function settlesWithin(
+  promise: Promise<unknown>,
+  ms: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Options for a {@link ParallelWorker}. */
 export interface ParallelWorkerConfig {
   /**
-   * Maximum number of items processed concurrently. Defaults to
-   * `DEFAULT_MAX_PARALLEL_WORKERS` (8); pass `Infinity` for unbounded.
+   * Maximum number of items processed concurrently. Unbounded when unset, so
+   * every item of the list runs at once — set this when the inner node is an
+   * LLM or a remote tool and the list length is data-driven.
    */
   maxParallelWorkers?: number;
+  /** Maximum time, in seconds, for the whole fan-out to complete. */
+  timeout?: number;
 }
 
 /**
  * A node that runs a wrapped node once per item of a list input, preserving
  * order, bounded by `maxParallelWorkers`, and stopping on the first error.
+ * Without `maxParallelWorkers` every item runs at once, matching Python.
  *
  * Ported from `google/adk-python` `workflow/_parallel_worker.py`. A non-list
  * input is treated as a single-element list. Each item runs via
@@ -43,22 +69,32 @@ export interface ParallelWorkerConfig {
  * node — which is also where the worker's own name comes from.
  *
  * Notes:
- * - **retry/timeout live on the inner node.** `retryConfig`/`timeout` passed to
- *   `buildNode` apply to the wrapped node (per item); the ParallelWorker itself
- *   carries neither, so the two levels don't compose. Wrapping the value
- *   yourself — `new ParallelWorker(node(myAgent, {timeout: 5}))` — is how those
- *   options are set.
- * - **All-or-nothing.** If any item throws, the first error is rethrown and the
- *   already-computed sibling outputs are discarded. Make individual items
- *   failure-tolerant if partial results matter.
+ * - **Two levels of timeout.** `timeout` in {@link ParallelWorkerConfig}
+ *   bounds the fan-out as a whole. The same option passed to `buildNode`
+ *   bounds the wrapped node, once per item; set that by wrapping the value
+ *   yourself — `new ParallelWorker(node(myAgent, {timeout: 5}))`.
+ * - **No `retryConfig`.** The worker deliberately takes none, unlike
+ *   adk-python. A retried fan-out re-enters `ctx.runNode` for every item, and
+ *   the dynamic scheduler hands back the recorded run for an item it has
+ *   already seen — including one that was cancelled when a sibling failed,
+ *   whose recorded output is empty. The retry would therefore return a list
+ *   with silent holes in it. Wrap the inner node with `node(x, {retryConfig})`
+ *   to retry an individual item.
+ * - **All-or-nothing.** If any item throws, one error is rethrown and the
+ *   already-computed sibling outputs are discarded. When several items fail
+ *   together the lowest input index wins, so the surfaced error is the same on
+ *   every run and on replay. Make individual items failure-tolerant if partial
+ *   results matter.
  * - **An item that interrupts pauses the whole worker.** It has no output to
  *   contribute, so the worker stops claiming items, emits no list, and raises
  *   the child's interrupt ids as its own. Once they are answered the worker
  *   re-runs from the top (`rerunOnResume`), and items that already completed
  *   are fast-forwarded by their run id rather than executed again.
- * - **Cancellation stops scheduling only.** On abort/timeout the loop stops
- *   claiming new items, but items already in flight run to completion —
- *   `ctx.runNode` has no way to forward a signal into a child run.
+ * - **Cancellation reaches the items in flight.** On a failure, an interrupt,
+ *   an abort or a fired timeout the loop stops claiming new items and each
+ *   running item sees its `ctx.abortSignal` fire. Cancellation is cooperative,
+ *   so an item that ignores the signal keeps running; the worker waits five
+ *   seconds for it, then warns and abandons it.
  */
 export class ParallelWorker extends BaseNode {
   readonly maxParallelWorkers?: number;
@@ -66,7 +102,12 @@ export class ParallelWorker extends BaseNode {
 
   constructor(inner: RunnableNode, config: ParallelWorkerConfig = {}) {
     const built = buildNode(inner);
-    super({name: built.name, rerunOnResume: true});
+    // Checked on the built node so the `'START'` literal a JavaScript caller
+    // can still pass lands here too: `buildNode` maps it to the sentinel.
+    if (built === START) {
+      throw new Error('ParallelWorker cannot wrap a START node.');
+    }
+    super({name: built.name, rerunOnResume: true, timeout: config.timeout});
     if (
       config.maxParallelWorkers !== undefined &&
       config.maxParallelWorkers < 1
@@ -89,31 +130,55 @@ export class ParallelWorker extends BaseNode {
 
     const results = new Array<unknown>(items.length);
     const poolSize = Math.min(
-      this.maxParallelWorkers ?? DEFAULT_MAX_PARALLEL_WORKERS,
+      this.maxParallelWorkers ?? items.length,
       items.length,
     );
 
     let nextIndex = 0;
-    // Separate flag from `firstError` so an item that rejects with `undefined`
-    // (a bare `Promise.reject()`) still counts as a failure instead of leaving a
-    // silent hole in `results` and resolving successfully.
-    let failed = false;
-    let firstError: unknown;
+    // Keyed by item index rather than by completion order: when several items
+    // fail together the lowest input index is the one that propagates, so the
+    // surfaced error is the same on every run and on replay. A Map checked by
+    // `.size` rather than a sentinel value, so an item that rejects with
+    // `undefined` (a bare `Promise.reject()`) still counts as a failure.
+    const errors = new Map<number, unknown>();
     // An item that stops to ask the user has no result to contribute, so the
     // fan-out stops claiming work the same way a failure does.
     let interrupted = false;
     const interruptIds: string[] = [];
 
-    // Populated only when the ParallelWorker itself declares a timeout; on a
-    // plain invocation abort the invocation-level signal is the one that fires.
-    const isAborted = (): boolean =>
-      ctx.abortSignal?.aborted === true ||
-      ctx.invocationContext.abortSignal?.aborted === true;
+    // Whatever would have cancelled the items anyway, as one signal: the
+    // node's own (set by the engine under a deadline or an external abort) and
+    // the invocation's.
+    const upstream = AbortSignal.any(
+      [ctx.abortSignal, ctx.invocationContext.abortSignal].filter(
+        (signal): signal is AbortSignal => signal !== undefined,
+      ),
+    );
 
-    // Keep claiming the next item until the list is exhausted, an item fails,
-    // or the invocation is aborted.
+    // Chained to the upstream signal, so aborting ours stops the items without
+    // detaching them from the invocation's or the workflow's signal.
+    const itemAbort = new AbortController();
+    const childSignal = AbortSignal.any([itemAbort.signal, upstream]);
+
+    let resolveStop!: () => void;
+    const stopRequested = new Promise<void>((resolve) => {
+      resolveStop = resolve;
+    });
+    let stopping = false;
+    const requestStop = (): void => {
+      stopping = true;
+      resolveStop();
+    };
+    if (upstream.aborted) {
+      requestStop();
+    } else {
+      upstream.addEventListener('abort', requestStop, {once: true});
+    }
+
+    // Keep claiming the next item until the list is exhausted, an item fails or
+    // interrupts, or the invocation is aborted.
     const worker = async (): Promise<void> => {
-      while (!failed && !interrupted && !isAborted()) {
+      while (!stopping) {
         const i = nextIndex++;
         if (i >= items.length) {
           break;
@@ -128,38 +193,64 @@ export class ParallelWorker extends BaseNode {
             useSubBranch: true,
             runId: String(i),
             overrideNodePath: `${ctx.nodePath}.${this.inner.name}@${i}`,
+            abortSignal: childSignal,
           });
           if (child.interruptIds.length > 0) {
-            interrupted = true;
-            for (const id of child.interruptIds) {
-              if (!interruptIds.includes(id)) {
-                interruptIds.push(id);
+            if (!itemAbort.signal.aborted) {
+              interrupted = true;
+              for (const id of child.interruptIds) {
+                if (!interruptIds.includes(id)) {
+                  interruptIds.push(id);
+                }
               }
             }
+            requestStop();
             break;
           }
           results[i] = child.output;
-        } catch (err) {
+        } catch (err: unknown) {
           // Inside a workflow the engine unwinds an interrupted caller by
           // throwing rather than returning; that is a pause, not a failure.
           // The ids are already on `ctx`, put there before the throw.
           if (isNodeInterruptedError(err)) {
-            interrupted = true;
+            if (!itemAbort.signal.aborted) {
+              interrupted = true;
+            }
+            requestStop();
             break;
           }
-          if (!failed) {
-            failed = true;
-            firstError = err;
+          // Only a failure observed before the items were asked to stop is a
+          // real one. Anything after that is an item reacting to its own
+          // cancellation, which Python likewise discards in its drain.
+          if (!itemAbort.signal.aborted) {
+            errors.set(i, err);
           }
+          requestStop();
           break;
         }
       }
     };
 
-    await Promise.all(Array.from({length: poolSize}, () => worker()));
+    // Workers never reject, so this settles once every item has stopped.
+    const pool = Promise.all(Array.from({length: poolSize}, () => worker()));
+    try {
+      await Promise.race([pool, stopRequested]);
+      if (stopping) {
+        itemAbort.abort();
+        if (!(await settlesWithin(pool, CANCELLED_ITEM_DRAIN_TIMEOUT_MS))) {
+          logger.warn(
+            `Node ${this.name}: item(s) did not stop within ` +
+              `${CANCELLED_ITEM_DRAIN_TIMEOUT_MS / 1000}s of being cancelled; ` +
+              `abandoning them.`,
+          );
+        }
+      }
+    } finally {
+      upstream.removeEventListener('abort', requestStop);
+    }
 
-    if (failed) {
-      throw firstError;
+    if (errors.size > 0) {
+      throw errors.get(Math.min(...errors.keys()));
     }
     if (interrupted) {
       for (const id of interruptIds) {
@@ -169,7 +260,7 @@ export class ParallelWorker extends BaseNode {
       }
       return;
     }
-    if (isAborted()) {
+    if (upstream.aborted) {
       // Aborted mid-flight: `results` may have holes for unscheduled items, so
       // don't emit a wrong partial list — the invocation is being torn down.
       return;

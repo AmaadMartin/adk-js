@@ -449,6 +449,55 @@ describe('retry backoff cancellation', () => {
   });
 });
 
+describe('caller-supplied abortSignal', () => {
+  it('forwards a caller-supplied abortSignal to the child run', async () => {
+    const controller = new AbortController();
+    let sawAbort = false;
+    const inner = new FnNode('inner', async (ctx) => {
+      await new Promise<void>((resolve) => {
+        ctx.abortSignal?.addEventListener('abort', () => resolve(), {
+          once: true,
+        });
+        // Bounded, so a child that never sees the signal fails the assertion
+        // below instead of hanging the runner.
+        setTimeout(resolve, 50);
+        controller.abort();
+      });
+      sawAbort = ctx.abortSignal?.aborted === true;
+      return 'done';
+    });
+    const outer = new FnNode('outer', async (ctx) => {
+      const child = await ctx.runNode(inner, 'x', {
+        abortSignal: controller.signal,
+      });
+      return child.output;
+    });
+
+    const {output} = await driveNode(outer);
+
+    expect(sawAbort).toBe(true);
+    expect(output).toBe('done');
+  });
+
+  it('wins over the parent invocation signal the child would inherit', async () => {
+    const parentController = new AbortController();
+    const callerController = new AbortController();
+    let observed: AbortSignal | undefined;
+    const inner = new FnNode('inner', (ctx) => {
+      observed = ctx.abortSignal;
+      return 'done';
+    });
+    const outer = new FnNode('outer', async (ctx) => {
+      await ctx.runNode(inner, 'x', {abortSignal: callerController.signal});
+      return 'ok';
+    });
+
+    await driveNode(outer, undefined, createIc({}, parentController.signal));
+
+    expect(observed).toBe(callerController.signal);
+  });
+});
+
 describe('outputFor — which nodes an output answers for', () => {
   it('names the emitting node on its own output event', async () => {
     const node = new FnNode('solo', () => 'done');
