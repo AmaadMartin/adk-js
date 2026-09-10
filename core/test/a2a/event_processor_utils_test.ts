@@ -105,6 +105,72 @@ describe('event_processor_utils', () => {
       );
     });
 
+    it('reports the last error when several events failed', () => {
+      const events: AdkEvent[] = [
+        createEvent({errorCode: 'FIRST', errorMessage: 'first failure'}),
+        createEvent({errorCode: 'SECOND', errorMessage: 'second failure'}),
+      ];
+      const result = getFinalTaskStatusUpdate(events, mockContext);
+
+      expect(result.status?.state).toBe('failed');
+      const parts = result.status?.message?.parts;
+      expect((parts?.[0] as TextPart)?.text).toContain('second failure');
+      expect(result.metadata).toEqual(
+        expect.objectContaining({adk_error_code: 'SECOND'}),
+      );
+    });
+
+    it('falls back to the default text when the event names only an errorCode', () => {
+      const events: AdkEvent[] = [
+        createEvent({errorCode: 'MALFORMED_FUNCTION_CALL'}),
+      ];
+      const result = getFinalTaskStatusUpdate(events, mockContext);
+
+      const parts = result.status?.message?.parts;
+      expect((parts?.[0] as TextPart)?.text).toBe(
+        'An error occurred during processing',
+      );
+      expect(result.metadata).toEqual(
+        expect.objectContaining({adk_error_code: 'MALFORMED_FUNCTION_CALL'}),
+      );
+    });
+
+    it('keeps escalate and transferToAgent raised after the error', () => {
+      const events: AdkEvent[] = [
+        createEvent({errorMessage: 'boom'}),
+        createEvent({
+          actions: createEventActions({
+            escalate: true,
+            transferToAgent: 'agent-y',
+          }),
+        }),
+      ];
+      const result = getFinalTaskStatusUpdate(events, mockContext);
+
+      expect(result.status?.state).toBe('failed');
+      expect(result.metadata).toEqual(
+        expect.objectContaining({
+          'adk_escalate': true,
+          'adk_transfer_to_agent': 'agent-y',
+        }),
+      );
+    });
+
+    it('throws when the configured converter drops every long-running part', () => {
+      const events: AdkEvent[] = [
+        createEvent({
+          longRunningToolIds: ['call_1'],
+          content: {
+            parts: [{functionCall: {id: 'call_1', name: 'myFunc', args: {}}}],
+          },
+        }),
+      ];
+
+      expect(() =>
+        getFinalTaskStatusUpdate(events, mockContext, () => undefined),
+      ).toThrow('Long-running function calls produced no A2A response parts');
+    });
+
     it('returns TaskInputRequiredEvent if there are longRunningToolIds that match functionCall', () => {
       const events: AdkEvent[] = [
         createEvent({

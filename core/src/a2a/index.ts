@@ -33,3 +33,5 @@ export {
 export type {A2aUserBuilder, ToA2aOptions} from './agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './auth.js';
 export type {ExecutorContext} from './executor_context.js';
+export {toA2APart} from './part_converter_utils.js';
+export type {GenAIPartToA2APartConverter} from './part_converter_utils.js';
