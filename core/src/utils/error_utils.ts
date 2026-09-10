@@ -159,3 +159,22 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Whether a thrown value is Node's "no such file or directory" failure.
+ *
+ * The check is structural because Node does not export a class to test with,
+ * and because two copies of one package in a single runtime defeat
+ * `instanceof`.
+ *
+ * @param err The thrown or rejected value to inspect.
+ * @return `true` when the value carries the `ENOENT` code.
+ */
+export function isFileNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    err.code === 'ENOENT'
+  );
+}
