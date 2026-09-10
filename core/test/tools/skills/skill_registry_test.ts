@@ -74,13 +74,23 @@ Instruction body`;
   describe('GCPSkillRegistry', () => {
     it('initializes with default options', () => {
       const envProj = process.env.GOOGLE_CLOUD_PROJECT;
+      const envLoc = process.env.GOOGLE_CLOUD_LOCATION;
       process.env.GOOGLE_CLOUD_PROJECT = 'mock-env-proj';
+      // The Agent Registry path needs a location as well as a project, so this
+      // case now sets both. Its subject is unchanged: the environment alone
+      // configures the registry.
+      process.env.GOOGLE_CLOUD_LOCATION = 'mock-env-loc';
       const reg = new GCPSkillRegistry();
       expect(reg).toBeDefined();
       if (envProj === undefined) {
         delete process.env.GOOGLE_CLOUD_PROJECT;
       } else {
         process.env.GOOGLE_CLOUD_PROJECT = envProj;
+      }
+      if (envLoc === undefined) {
+        delete process.env.GOOGLE_CLOUD_LOCATION;
+      } else {
+        process.env.GOOGLE_CLOUD_LOCATION = envLoc;
       }
     });
 
