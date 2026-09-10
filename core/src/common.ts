@@ -121,7 +121,9 @@ export type {
   ExchangeResult,
 } from './auth/exchanger/base_credential_exchanger.js';
 export {OAuth2CredentialExchanger} from './auth/oauth2/oauth2_credential_exchanger.js';
+export {OAuth2CredentialRefresher} from './auth/oauth2/oauth2_credential_refresher.js';
 export {OAuth2DiscoveryManager} from './auth/oauth2/oauth2_discovery.js';
+export {CredentialRefresherError} from './auth/refresher/base_credential_refresher.js';
 export type {BaseCredentialRefresher} from './auth/refresher/base_credential_refresher.js';
 export {CredentialRefresherRegistry} from './auth/refresher/credential_refresher_registry.js';
 export {BaseCodeExecutor} from './code_executors/base_code_executor.js';
@@ -331,6 +333,14 @@ export {
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
+export {BaseRetrievalTool} from './tools/retrieval/base_retrieval_tool.js';
+export {LlamaIndexRetrieval} from './tools/retrieval/llama_index_retrieval.js';
+export type {
+  LlamaIndexNode,
+  LlamaIndexNodeWithScore,
+  LlamaIndexRetrievalParams,
+  LlamaIndexRetriever,
+} from './tools/retrieval/llama_index_retrieval.js';
 export {
   IntentMismatchError,
   ToolConfirmation,

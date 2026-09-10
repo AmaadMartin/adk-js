@@ -8,6 +8,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -77,7 +78,21 @@ export class ToolAuthHandler {
     const existingCredential = store.getCredential(this.authScheme);
 
     if (existingCredential) {
-      return {state: 'done', authCredential: existingCredential};
+      // Returns the same object unless it actually obtained new tokens: a
+      // non-OAuth2 credential, a token that is still valid and a failed
+      // refresh all come back untouched.
+      const credential = await new OAuth2CredentialRefresher().refresh(
+        existingCredential,
+        this.authScheme,
+      );
+      if (credential !== existingCredential) {
+        store.storeCredential(
+          store.getCredentialKey(this.authScheme),
+          credential,
+        );
+      }
+
+      return {state: 'done', authCredential: credential};
     }
 
     const authConfig: AuthConfig = {
