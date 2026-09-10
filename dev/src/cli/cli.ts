@@ -215,6 +215,10 @@ export const AGENT_ENGINE_ID_OPTION = new Option(
   '--agent_engine_id [id]',
   'Optional. ID of the Agent Engine instance to update if it exists (default: undefined, which means a new instance will be created). If project and region are set, this should be the resource ID or the full resource name (projects/.../locations/.../reasoningEngines/...).',
 );
+const DEPLOY_AGENT_ARGUMENT = new Argument(
+  '[agent]',
+  'The path to the agent source code folder, or a single agent file.',
+).default(process.cwd(), 'the current directory');
 
 /**
  * Creates the ADK CLI program.
@@ -493,7 +497,7 @@ export function createProgram(): Command {
 
   const registerAgentEngineCommand = (cmd: Command) => {
     cmd
-      .addArgument(AGENT_DIR_ARGUMENT)
+      .addArgument(DEPLOY_AGENT_ARGUMENT)
       .allowUnknownOption()
       .allowExcessArguments()
       .addOption(PROJECT_DEPLOY_OPTION)
@@ -517,6 +521,12 @@ export function createProgram(): Command {
       .addOption(AGENT_FILE_MODULE_TYPE)
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
+      .addHelpText(
+        'after',
+        `\nExample:\n` +
+          `  adk deploy ${cmd.name()} --project=[project] --region=[region] \\\n` +
+          `    --repository=[repository] path/to/my_agent\n`,
+      )
       .action(async (agentPath: string, options: Record<string, string>) => {
         try {
           await deployToAgentEngine({
@@ -544,8 +554,16 @@ export function createProgram(): Command {
       });
   };
 
-  registerAgentEngineCommand(DEPLOY_COMMAND.command('agent_engine'));
-  registerAgentEngineCommand(DEPLOY_COMMAND.command('reasoning_engine'));
+  registerAgentEngineCommand(
+    DEPLOY_COMMAND.command('agent_engine').description(
+      'Deploys an agent to Agent Engine.',
+    ),
+  );
+  registerAgentEngineCommand(
+    DEPLOY_COMMAND.command('reasoning_engine').description(
+      'Deploys an agent to Agent Engine. Alias of `deploy agent_engine`.',
+    ),
+  );
 
   const CONFORMANCE_COMMAND = program
     .command('integration')

@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {Command} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -12,6 +13,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {getAbsolutePath} from '../../src/utils/file_utils.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -62,6 +64,30 @@ function isCleanCommanderExit(error: unknown): boolean {
     'exitCode' in error &&
     error.exitCode === 0
   );
+}
+
+function findSubcommand(parent: Command, name: string): Command {
+  const subcommand = parent.commands.find((cmd) => cmd.name() === name);
+  if (!subcommand) {
+    expect.fail(`no subcommand named '${name}' under '${parent.name()}'`);
+  }
+  return subcommand;
+}
+
+/**
+ * Renders the full `--help` output of a command. `helpInformation()` omits
+ * text registered with `addHelpText`, which only `outputHelp()` emits.
+ */
+function renderHelp(command: Command): string {
+  let out = '';
+  command.configureOutput({writeOut: (text) => (out += text)});
+  command.outputHelp();
+  return out;
+}
+
+/** Joins the lines commander wraps, so a phrase can be matched as a whole. */
+function unwrap(help: string): string {
+  return help.replace(/\s+/g, ' ');
 }
 
 describe('CLI Entrypoint', () => {
@@ -484,6 +510,71 @@ describe('CLI Entrypoint', () => {
         agentEngineId: '12345',
       });
     });
+
+    it('should summarise the command', () => {
+      const agentEngine = findSubcommand(
+        findSubcommand(program, 'deploy'),
+        'agent_engine',
+      );
+
+      expect(agentEngine.description()).toBe(
+        'Deploys an agent to Agent Engine.',
+      );
+      expect(agentEngine.helpInformation()).toContain(
+        'Deploys an agent to Agent Engine.',
+      );
+    });
+
+    it('should document the positional argument as a single agent path', () => {
+      const help = findSubcommand(
+        findSubcommand(program, 'deploy'),
+        'agent_engine',
+      ).helpInformation();
+
+      expect(help).toContain('[agent]');
+      expect(help).toContain('The path to the agent source code folder');
+      expect(help).not.toContain('directory of agents to serve');
+      expect(help).not.toContain('agents_dir');
+    });
+
+    it('should render the default as a phrase instead of the current path', () => {
+      const help = unwrap(
+        renderHelp(
+          findSubcommand(findSubcommand(program, 'deploy'), 'agent_engine'),
+        ),
+      );
+
+      expect(help).toContain('(default: the current directory)');
+      expect(help).not.toContain(process.cwd());
+    });
+
+    it('should show a worked example', () => {
+      const help = renderHelp(
+        findSubcommand(findSubcommand(program, 'deploy'), 'agent_engine'),
+      );
+
+      expect(help).toContain('Example:');
+      expect(help).toContain('adk deploy agent_engine --project=[project]');
+      expect(help).toContain('--repository=[repository]');
+    });
+
+    it('should default agentPath to the current directory', async () => {
+      await parse(['deploy', 'agent_engine']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledWith(
+        expect.objectContaining({agentPath: process.cwd()}),
+      );
+    });
+
+    it('should pass an explicit agent path through', async () => {
+      await parse(['deploy', 'agent_engine', './my-agent-path']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: getAbsolutePath('./my-agent-path'),
+        }),
+      );
+    });
   });
 
   describe('command: deploy reasoning_engine', () => {
@@ -505,6 +596,52 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+
+    it('should summarise the command as an alias of agent_engine', () => {
+      const reasoningEngine = findSubcommand(
+        findSubcommand(program, 'deploy'),
+        'reasoning_engine',
+      );
+
+      expect(reasoningEngine.description()).toBe(
+        'Deploys an agent to Agent Engine. Alias of `deploy agent_engine`.',
+      );
+      expect(reasoningEngine.helpInformation()).toContain(
+        'The path to the agent source code folder',
+      );
+    });
+
+    it('should name itself in its worked example', () => {
+      const help = renderHelp(
+        findSubcommand(findSubcommand(program, 'deploy'), 'reasoning_engine'),
+      );
+
+      expect(help).toContain('adk deploy reasoning_engine --project=');
+      expect(help).not.toContain('adk deploy agent_engine --project=');
+    });
+  });
+
+  describe('command: deploy', () => {
+    it('should list a summary for each agent engine subcommand', () => {
+      const help = unwrap(findSubcommand(program, 'deploy').helpInformation());
+
+      expect(help).toContain(
+        'agent_engine [options] [agent] Deploys an agent to Agent Engine.',
+      );
+      expect(help).toContain(
+        'reasoning_engine [options] [agent] Deploys an agent to Agent Engine. Alias of `deploy agent_engine`.',
+      );
+    });
+
+    it('should leave the cloud_run help text unchanged', () => {
+      const help = findSubcommand(
+        findSubcommand(program, 'deploy'),
+        'cloud_run',
+      ).helpInformation();
+
+      expect(help).toContain('[agents_dir]');
+      expect(help).toContain('directory of agents to serve');
     });
   });
 });
