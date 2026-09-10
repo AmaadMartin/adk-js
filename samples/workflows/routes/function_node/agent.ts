@@ -22,6 +22,10 @@
  * recognising now, because most routers later on look "skipped" for the same
  * reason.
  *
+ * The third node declares its parameters instead of reading state by hand. Each
+ * declared key is bound from `ctx.state`, validated, and defaulted when the key
+ * is absent.
+ *
  * Run (offline, no API key):
  *   npm run sample -- samples/workflows/routes/function_node/agent.ts
  */
@@ -33,6 +37,7 @@ import {
   Workflow,
   type FunctionNodeHandler,
 } from '@google/adk';
+import {z} from 'zod';
 
 /** A bare return value: boxed into an event's `output` for you. */
 const myFunctionNode: FunctionNodeHandler<string, string> = (
@@ -47,6 +52,21 @@ const myFunctionNode: FunctionNodeHandler<string, string> = (
 const myExplicitEventNode = (_ctx: NodeContext, nodeInput: string) =>
   createEvent({output: `${nodeInput} IS AWESOME!`});
 
+/**
+ * Declared parameters, bound from state. `nodeInput` is the upstream node's
+ * output; `excitement` is read from `ctx.state` and falls back to its default,
+ * because nothing in this sample writes that key.
+ */
+const announceParameters = z.object({
+  nodeInput: z.string(),
+  excitement: z.string().default('!!!'),
+});
+
+const announce = (
+  _ctx: NodeContext,
+  {nodeInput, excitement}: z.infer<typeof announceParameters>,
+) => `${nodeInput}${excitement}`;
+
 export const rootAgent = new Workflow({
   name: 'function_node_pipeline',
   edges: [
@@ -54,6 +74,7 @@ export const rootAgent = new Workflow({
       'START',
       node(myFunctionNode, {name: 'my_function_node'}),
       node(myExplicitEventNode, {name: 'add_suffix'}),
+      node(announce, {name: 'announce', parameters: announceParameters}),
     ],
   ],
 });

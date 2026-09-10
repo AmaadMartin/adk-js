@@ -45,7 +45,7 @@ describe('node builder registry', () => {
   });
 
   it('throws for an unnamed function with no name option', () => {
-    expect(() => buildNode(anonymousFn())).toThrow(/no name/i);
+    expect(() => buildNode(anonymousFn())).toThrow(/must have a name/i);
   });
 
   it('builds a ToolNode from a BaseTool', () => {

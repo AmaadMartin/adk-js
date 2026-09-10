@@ -16,16 +16,8 @@ import type {
 /** Builds a {@link FunctionNode} from a plain function. */
 const FUNCTION_BUILDER: NodeBuilder = {
   match: (value) => typeof value === 'function',
-  build: (value, options) => {
-    const handler = value as FunctionNodeHandler;
-    const name = options.name ?? (handler as {name?: string}).name;
-    if (!name) {
-      throw new Error(
-        'node(): the wrapped function has no name; pass {name} explicitly.',
-      );
-    }
-    return new FunctionNode(name, handler, options);
-  },
+  build: (value, options) =>
+    new FunctionNode(value as FunctionNodeHandler, options),
 };
 
 /** Builds a {@link ToolNode} from a {@link BaseTool}. */
