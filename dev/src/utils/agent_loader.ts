@@ -108,6 +108,10 @@ const EXTERNAL_PACKAGES = [
   'pg-query-stream',
   'tedious',
   'libsql',
+  // dockerode (used by ContainerCodeExecutor) pulls in ssh2, which
+  // bundles native `.node` addons esbuild cannot process.
+  'ssh2',
+  'cpu-features',
   // Optional peer dependencies of vite and eslint that are not
   // installed and MUST NOT be bundled.
   'lightningcss',
