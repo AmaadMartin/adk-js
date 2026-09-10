@@ -12,6 +12,10 @@ import {
   File,
 } from '../../code_executors/code_execution_utils.js';
 import {Script, Skill} from '../../skills/skill.js';
+import {
+  attachSkillTelemetry,
+  SkillScriptExecutionTelemetry,
+} from '../../telemetry/_skill_instrumentation.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -79,6 +83,13 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
+    const skillTelemetry: SkillScriptExecutionTelemetry = {
+      kind: 'scriptExecution',
+      skillName,
+      scriptPath,
+    };
+    attachSkillTelemetry(skillTelemetry);
+
     let skill;
     try {
       skill = await this.toolset.getOrFetchSkill(
@@ -98,6 +109,10 @@ export class RunSkillScriptTool extends BaseTool {
         errorCode: 'SKILL_NOT_FOUND',
       };
     }
+
+    skillTelemetry.skill = skill;
+    // The registry can resolve an alias, so the resolved skill names itself.
+    skillTelemetry.skillName = skill.frontmatter.name;
 
     const relScriptPath = scriptPath.startsWith('scripts/')
       ? scriptPath.substring('scripts/'.length)
@@ -140,6 +155,7 @@ export class RunSkillScriptTool extends BaseTool {
           args: scriptArgs,
         },
       });
+      skillTelemetry.scriptExitCode = result.exitCode;
 
       // Output file names are chosen by the executed script, so they are
       // materialized into a dedicated output directory rather than being
