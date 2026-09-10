@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Auth
+
+- [Authenticated tools](auth/tool_auth/index.md) - Declaring the credential a tool needs, and the pause-for-consent handshake.
+
 ### Tools
 
 #### Retrieval

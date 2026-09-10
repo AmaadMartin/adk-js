@@ -27,7 +27,10 @@ interface RefreshResult {
 }
 
 /** Auth scheme types whose credential can only come from the end user. */
-const USER_CONSENT_SCHEME_TYPES: readonly string[] = ['oauth2', 'openIdConnect'];
+const USER_CONSENT_SCHEME_TYPES: readonly string[] = [
+  'oauth2',
+  'openIdConnect',
+];
 
 /** Credential types that are usable as configured, with no exchange. */
 const READY_CREDENTIAL_TYPES: readonly AuthCredentialTypes[] = [
