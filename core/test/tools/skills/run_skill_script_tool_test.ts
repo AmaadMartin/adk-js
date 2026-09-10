@@ -228,6 +228,40 @@ describe('RunSkillScriptTool', () => {
     expect(binaryFile?.contentEncoding).toBe('base64');
   });
 
+  it('carries the content of every resource kind, not just its name', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([mockSkill], {
+      codeExecutor: mockExecutor,
+      scriptOutputDir: outputDir,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    });
+
+    const inputFiles =
+      mockExecutor.executeCodeParams?.codeExecutionInput.inputFiles;
+    if (!inputFiles) {
+      expect.fail('the executor received no input files');
+    }
+    const contentOf = (name: string) =>
+      inputFiles.find((f) => f.name === name)?.content;
+
+    // A script travels as its src, not as the Script wrapper around it.
+    expect(contentOf('scripts/setup.js')).toBe('console.log("setup");');
+    expect(contentOf('references/doc.txt')).toBe('Doc content');
+    // An extension with no known mime type is base64, so .sh and .dat differ
+    // from the utf8 cases above.
+    expect(contentOf('scripts/run.sh')).toBe(
+      Buffer.from('echo "run";', 'utf8').toString('base64'),
+    );
+    expect(contentOf('assets/binary.dat')).toBe(
+      Buffer.from('hello', 'utf8').toString('base64'),
+    );
+  });
+
   it('calls materializeFiles with output files from executor', async () => {
     const mockExecutor = new MockCodeExecutor();
     const testFile: File = {

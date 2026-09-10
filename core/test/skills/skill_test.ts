@@ -4,9 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it} from 'vitest';
+import {
+  getAsset,
+  getReference,
+  getScript,
+  listAssets,
+  listReferences,
+  listScripts,
+} from '@google/adk';
+import {afterEach, describe, expect, it} from 'vitest';
 import {
   FrontmatterSchema,
+  KEBAB_NAME_PATTERN,
   SNAKE_OR_KEBAB_NAME_PATTERN,
 } from '../../src/skills/skill.js';
 
@@ -167,6 +176,138 @@ describe('skill', () => {
         });
         expect(result.success).toBe(false);
       });
+    });
+  });
+
+  describe('non-object input', () => {
+    it.each([['a string'], [null], [42]])(
+      'rejects %o without preprocessing it',
+      (input) => {
+        expect(FrontmatterSchema.safeParse(input).success).toBe(false);
+      },
+    );
+  });
+
+  describe('KEBAB_NAME_PATTERN', () => {
+    it('matches the same kebab-case names as SNAKE_OR_KEBAB_NAME_PATTERN', () => {
+      expect(KEBAB_NAME_PATTERN.test('valid-kebab-name')).toBe(true);
+      expect(KEBAB_NAME_PATTERN.test('valid123-name')).toBe(true);
+      expect(KEBAB_NAME_PATTERN.test('name')).toBe(true);
+    });
+
+    it('does not match snake_case names', () => {
+      expect(KEBAB_NAME_PATTERN.test('valid_snake_name')).toBe(false);
+      expect(KEBAB_NAME_PATTERN.test('valid123_name')).toBe(false);
+    });
+
+    it('does not match leading, trailing or consecutive hyphens', () => {
+      expect(KEBAB_NAME_PATTERN.test('-invalid-name')).toBe(false);
+      expect(KEBAB_NAME_PATTERN.test('invalid-name-')).toBe(false);
+      expect(KEBAB_NAME_PATTERN.test('invalid--name')).toBe(false);
+    });
+  });
+
+  describe('NFKC name normalization', () => {
+    it('folds a full-width name and returns the folded value', () => {
+      const result = FrontmatterSchema.safeParse({
+        name: 'ｍｙ－ｓｋｉｌｌ',
+        description: 'A valid description',
+      });
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        expect.fail(result.error.message);
+      }
+      expect(result.data.name).toBe('my-skill');
+    });
+
+    it('folds a ligature before the pattern check', () => {
+      const result = FrontmatterSchema.safeParse({
+        name: 'ﬁle-skill',
+        description: 'A valid description',
+      });
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        expect.fail(result.error.message);
+      }
+      expect(result.data.name).toBe('file-skill');
+    });
+
+    it('measures the length after folding, not before', () => {
+      // 33 ligatures are 33 characters, and 66 once NFKC expands each to 'fi'.
+      const result = FrontmatterSchema.safeParse({
+        name: 'ﬁ'.repeat(33),
+        description: 'A valid description',
+      });
+
+      expect(result.success).toBe(false);
+      if (result.success) {
+        expect.fail('expected the normalized name to exceed 64 characters');
+      }
+      expect(result.error.message).toContain('at most 64 characters');
+    });
+  });
+
+  describe('ADK_ENABLE_SNAKE_CASE_SKILL_NAME', () => {
+    afterEach(() => {
+      delete process.env['ADK_ENABLE_SNAKE_CASE_SKILL_NAME'];
+    });
+
+    it('accepts a snake_case name when the env var is set', () => {
+      process.env['ADK_ENABLE_SNAKE_CASE_SKILL_NAME'] = 'true';
+
+      const result = FrontmatterSchema.safeParse({
+        name: 'my_skill',
+        description: 'A valid description',
+      });
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        expect.fail(result.error.message);
+      }
+      expect(result.data.name).toBe('my_skill');
+    });
+
+    it('rejects a snake_case name once the env var is gone', () => {
+      const result = FrontmatterSchema.safeParse({
+        name: 'my_skill',
+        description: 'A valid description',
+      });
+
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('resource accessors on absent fields', () => {
+    it('returns undefined when the resources are undefined', () => {
+      expect(getReference(undefined, 'x')).toBeUndefined();
+      expect(getAsset(undefined, 'x')).toBeUndefined();
+      expect(getScript(undefined, 'x')).toBeUndefined();
+    });
+
+    it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])(
+      'does not resolve the inherited key %s',
+      (inheritedKey) => {
+        const resources = {
+          references: {'doc.md': 'Doc content'},
+          assets: {'a.txt': 'asset content'},
+          scripts: {'run.sh': {src: 'echo hello'}},
+        };
+
+        expect(getReference(resources, inheritedKey)).toBeUndefined();
+        expect(getAsset(resources, inheritedKey)).toBeUndefined();
+        expect(getScript(resources, inheritedKey)).toBeUndefined();
+      },
+    );
+
+    it('returns an empty list when the resource map is absent', () => {
+      expect(listReferences({})).toEqual([]);
+      expect(listAssets({})).toEqual([]);
+      expect(listScripts({})).toEqual([]);
+      expect(listReferences(undefined)).toEqual([]);
+      expect(listAssets(undefined)).toEqual([]);
+      expect(listScripts(undefined)).toEqual([]);
     });
   });
 });

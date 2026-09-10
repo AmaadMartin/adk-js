@@ -29,8 +29,7 @@ export function formatSkillsAsXml(skills: Array<Skill | Frontmatter>): string {
   const lines = ['<available_skills>'];
 
   for (const item of skills) {
-    const frontmatter =
-      'frontmatter' in item ? (item.frontmatter as Frontmatter) : item;
+    const frontmatter = 'frontmatter' in item ? item.frontmatter : item;
 
     lines.push('  <skill>');
     lines.push(`    <name>${escapeHtml(frontmatter.name)}</name>`);
