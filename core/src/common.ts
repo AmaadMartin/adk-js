@@ -112,6 +112,7 @@ export {OAuthGrantType} from './auth/auth_schemes.js';
 export type {AuthScheme, OpenIdConnectWithConfig} from './auth/auth_schemes.js';
 export type {AuthConfig} from './auth/auth_tool.js';
 export type {BaseAuthProvider} from './auth/base_auth_provider.js';
+export {CredentialManager} from './auth/credential_manager.js';
 export type {BaseCredentialService} from './auth/credential_service/base_credential_service.js';
 export {InMemoryCredentialService} from './auth/credential_service/in_memory_credential_service.js';
 export {SessionStateCredentialService} from './auth/credential_service/session_state_credential_service.js';
@@ -281,6 +282,19 @@ export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
+export {AuthenticatedFunctionTool} from './tools/authenticated_function_tool.js';
+export type {
+  AuthenticatedToolExecuteFunction,
+  AuthenticatedToolOptions,
+} from './tools/authenticated_function_tool.js';
+export {
+  BaseAuthenticatedTool,
+  PENDING_USER_AUTHORIZATION,
+} from './tools/base_authenticated_tool.js';
+export type {
+  AuthenticatedRunRequest,
+  BaseAuthenticatedToolParams,
+} from './tools/base_authenticated_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
 export type {
   BaseToolParams,
@@ -331,6 +345,14 @@ export {
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
+export {BaseRetrievalTool} from './tools/retrieval/base_retrieval_tool.js';
+export {LlamaIndexRetrieval} from './tools/retrieval/llama_index_retrieval.js';
+export type {
+  LlamaIndexNode,
+  LlamaIndexNodeWithScore,
+  LlamaIndexRetrievalParams,
+  LlamaIndexRetriever,
+} from './tools/retrieval/llama_index_retrieval.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
