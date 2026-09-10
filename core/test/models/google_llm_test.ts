@@ -55,6 +55,9 @@ class TestGemini extends Gemini {
   getTrackingHeaders(): Record<string, string> {
     return this.trackingHeaders;
   }
+  override getHttpOptions(): HttpOptions {
+    return super.getHttpOptions();
+  }
 }
 
 describe('GoogleLlm', () => {
@@ -114,6 +117,17 @@ describe('GoogleLlm', () => {
     expect(options).toBeDefined();
     expect(options.headers!['x-custom-header']).toEqual('custom-value');
     expect(options.headers!['x-goog-api-client']).toContain('google-adk/');
+  });
+
+  it('keeps the ADK token when a constructor header reuses a tracking key', () => {
+    // No adk-python counterpart: adk-python has no constructor headers option.
+    const llm = new TestGemini({
+      apiKey: 'test-key',
+      headers: {'user-agent': 'my-app/1.0'},
+    });
+    expect(llm.getHttpOptions().headers!['user-agent']).toEqual(
+      `${llm.getTrackingHeaders()['user-agent']} my-app/1.0`,
+    );
   });
 
   it('should initialize liveApiClient with only tracking headers and apiVersion', () => {
@@ -398,6 +412,93 @@ describe('GoogleLlm', () => {
   });
 
   describe('generateContentAsync', () => {
+    it('appends the caller tracking tokens to ADK tokens on a non-streaming call', async () => {
+      // adk-python: test_generate_content_async_with_custom_headers
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const tracking = llm.getTrackingHeaders();
+      const generateContentMock = vi.fn().mockResolvedValue({candidates: []});
+      llm.apiClient.models.generateContent = generateContentMock;
+
+      const llmRequest: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {
+          httpOptions: {
+            headers: {
+              'custom-header': 'custom-value',
+              'x-goog-api-client': 'custom',
+              'user-agent': 'custom',
+            },
+          },
+        },
+        toolsDict: {},
+      };
+
+      await llm.generateContentAsync(llmRequest, false).next();
+
+      const config = generateContentMock.mock.calls[0][0]['config'];
+      expect(config.httpOptions.headers).toEqual({
+        'custom-header': 'custom-value',
+        'x-goog-api-client': `${tracking['x-goog-api-client']} custom`,
+        'user-agent': `${tracking['user-agent']} custom`,
+      });
+    });
+
+    it('keeps a caller non-tracking header on a streaming call', async () => {
+      // adk-python: test_generate_content_async_stream_with_custom_headers
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const tracking = llm.getTrackingHeaders();
+      const generateContentStreamMock = vi.fn().mockResolvedValue([]);
+      llm.apiClient.models.generateContentStream = generateContentStreamMock;
+
+      const llmRequest: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {httpOptions: {headers: {'custom-header': 'custom-value'}}},
+        toolsDict: {},
+      };
+
+      await llm.generateContentAsync(llmRequest, true).next();
+
+      const config = generateContentStreamMock.mock.calls[0][0]['config'];
+      expect(config.httpOptions.headers).toEqual({
+        'custom-header': 'custom-value',
+        ...tracking,
+      });
+    });
+
+    it.each([false, true])(
+      'creates httpOptions carrying the tracking headers when the caller supplies none (stream: %s)',
+      async (stream) => {
+        // adk-python: test_generate_content_async_patches_tracking_headers
+        const llm = new TestGemini({apiKey: 'test-key'});
+        const tracking = llm.getTrackingHeaders();
+        const sendMock = vi
+          .fn()
+          .mockResolvedValue(stream ? [] : {candidates: []});
+        if (stream) {
+          llm.apiClient.models.generateContentStream = sendMock;
+        } else {
+          llm.apiClient.models.generateContent = sendMock;
+        }
+
+        const llmRequest: LlmRequest = {
+          model: 'gemini-2.5-flash',
+          contents: [],
+          liveConnectConfig: {},
+          config: {},
+          toolsDict: {},
+        };
+
+        await llm.generateContentAsync(llmRequest, stream).next();
+
+        const config = sendMock.mock.calls[0][0]['config'];
+        expect(config.httpOptions.headers).toEqual(tracking);
+      },
+    );
+
     it('should pass abortSignal to generateContentStream', async () => {
       const llm = new TestGemini({apiKey: 'test-key'});
       const abortController = new AbortController();
@@ -709,6 +810,62 @@ describe('GoogleLlm', () => {
           }),
         }),
       );
+    });
+
+    it('merges the tracking headers into caller live http options', async () => {
+      // adk-python: test_connect_with_custom_headers
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const tracking = llm.getTrackingHeaders();
+
+      const request: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {
+          httpOptions: {headers: {'custom-live-header': 'live-value'}},
+        },
+        config: {},
+        toolsDict: {},
+      };
+
+      await llm.connect(request);
+
+      expect(llm.liveApiClient.live.connect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            httpOptions: {
+              headers: {'custom-live-header': 'live-value', ...tracking},
+              apiVersion: llm.liveApiVersion,
+            },
+          }),
+        }),
+      );
+    });
+
+    it('leaves live http options undefined when the caller supplies none', async () => {
+      // adk-python: test_connect_without_custom_headers
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      const request: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {
+          systemInstruction: 'You are a helpful assistant.',
+          tools: [{googleSearch: {}}],
+        },
+        toolsDict: {},
+      };
+
+      await llm.connect(request);
+
+      const params = vi.mocked(llm.liveApiClient.live.connect).mock.calls[0][0];
+      expect(params.config).toEqual({
+        systemInstruction: {
+          role: 'system',
+          parts: [{text: 'You are a helpful assistant.'}],
+        },
+        tools: [{googleSearch: {}}],
+      });
     });
 
     it('strips sessionResumption.transparent on the Gemini API backend', async () => {
