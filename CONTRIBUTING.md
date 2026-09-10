@@ -144,6 +144,21 @@ commit it alongside your change:
 npx vitest run -u --project unit:core core/test/public_api/public_api_test.ts
 ```
 
+### Dependency declarations
+
+A workspace declares exactly what its own `src/` imports. `package.json` cannot
+hold comments, so the two deliberate exceptions are recorded here:
+
+1. **The five `@mikro-orm` dialect drivers in `dev/package.json`.** Core loads
+   them with a dynamic `import()` (`core/src/sessions/db/operations.ts`) and
+   declares them only as `peerDependencies`, and `adk deploy` generates a
+   Dockerfile that installs just `@google/adk-devtools` — so that package has to
+   ship them. Enforced by
+   `tests/integration/lazy_load_db_drivers/driver_manifest_test.ts`.
+1. **`@google/adk` in `integrations/package.json`.** Workspace hoisting means an
+   integration could import it undeclared and still resolve locally and in CI,
+   breaking only consumers of the published tarball.
+
 ### Sign our Contributor License Agreement
 
 Contributions to this project must be accompanied by a

@@ -50,8 +50,33 @@ const INTEGRATION_TEST_TIMEOUT_MS = 60000;
  */
 const AGENT_LOADER_BUNDLE_PATTERN = /[\\/]adk_agent_loader/;
 
+/**
+ * Per-worker setup. `setupFiles` is a project-scoped option, so it has to be
+ * repeated on every project: a root-level one is not inherited.
+ *
+ * `tests/setup.ts` and `tests/test_setup.ts` both pin the ADK log level in the
+ * worker. Two pull requests added that hook under different names, and this
+ * branch carries both. `setLogLevel` is idempotent, so both can load.
+ */
+const SETUP_FILES = ['./tests/setup.ts', './tests/test_setup.ts'];
+
+/**
+ * CI logs are non-interactive, so the `default` reporter cannot rewrite lines
+ * in place and appends a permanent one per test file. Use `dot` there instead.
+ * Setting `reporters` at all opts out of the `github-actions` reporter Vitest
+ * would otherwise add on its own, so re-add it to keep inline PR annotations.
+ */
+const reporters = process.env.CI
+  ? process.env.GITHUB_ACTIONS
+    ? ['dot', 'github-actions']
+    : ['dot']
+  : ['default'];
+
 export default defineConfig({
   test: {
+    reporters,
+    // Keep test stdout for failures only; a passing run has nothing to say.
+    silent: process.env.CI ? 'passed-only' : false,
     poolOptions: {
       forks: {
         execArgv: ['--max-old-space-size=8192'],
@@ -71,7 +96,7 @@ export default defineConfig({
         test: {
           name: 'unit:core',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts', './tests/unit_setup.ts'],
+          setupFiles: [...SETUP_FILES, './tests/unit_setup.ts'],
           unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
@@ -87,7 +112,7 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts', './tests/unit_setup.ts'],
+          setupFiles: [...SETUP_FILES, './tests/unit_setup.ts'],
           unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
@@ -103,7 +128,7 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts', './tests/unit_setup.ts'],
+          setupFiles: [...SETUP_FILES, './tests/unit_setup.ts'],
           unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
@@ -119,7 +144,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: SETUP_FILES,
           hookTimeout: INTEGRATION_HOOK_TIMEOUT_MS,
           testTimeout: INTEGRATION_TEST_TIMEOUT_MS,
           server: {deps: {external: [AGENT_LOADER_BUNDLE_PATTERN]}},
@@ -138,7 +163,7 @@ export default defineConfig({
         test: {
           name: 'e2e',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: SETUP_FILES,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -153,7 +178,7 @@ export default defineConfig({
         test: {
           name: 'cross-language',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: SETUP_FILES,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
