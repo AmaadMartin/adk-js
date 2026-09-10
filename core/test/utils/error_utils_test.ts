@@ -5,7 +5,11 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {
+  errorDetails,
+  errorStatusCode,
+  formatError,
+} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +210,56 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('errorStatusCode', () => {
+  it('prefers an explicit status field over the generic code', () => {
+    expect(errorStatusCode({statusCode: 1, status: 2, code: 3})).toBe(1);
+    expect(errorStatusCode({status: 2, code: 3})).toBe(2);
+    expect(errorStatusCode({code: 3})).toBe(3);
+  });
+
+  it('accepts a string code', () => {
+    expect(errorStatusCode({code: 'ECONNREFUSED'})).toBe('ECONNREFUSED');
+  });
+
+  it('ignores a status that is neither a string nor a number', () => {
+    expect(errorStatusCode({code: {nested: true}})).toBeUndefined();
+  });
+
+  it('returns undefined for a value that carries no status', () => {
+    expect(errorStatusCode(null)).toBeUndefined();
+    expect(errorStatusCode(undefined)).toBeUndefined();
+    expect(errorStatusCode('boom')).toBeUndefined();
+    expect(errorStatusCode(new Error('boom'))).toBeUndefined();
+  });
+});
+
+describe('errorDetails', () => {
+  it('prefers the details field over the response body', () => {
+    const err = {details: 'denied', response: {text: 'body'}};
+    expect(errorDetails(err)).toBe('denied');
+  });
+
+  it('falls back to the response body', () => {
+    expect(errorDetails({response: {text: 'forbidden body'}})).toBe(
+      'forbidden body',
+    );
+  });
+
+  it('returns undefined when neither field holds a string', () => {
+    expect(errorDetails({response: {text: 42}})).toBeUndefined();
+    expect(errorDetails({response: 'not an object'})).toBeUndefined();
+    expect(errorDetails(null)).toBeUndefined();
+    expect(errorDetails(new Error('boom'))).toBeUndefined();
+  });
+
+  it('falls through a non-string details to the response body', () => {
+    // Divergence: the reference returns the object, because its field is
+    // typed `Any`. This field is typed `string | undefined`.
+    expect(errorDetails({details: {a: 1}, response: {text: 'body'}})).toBe(
+      'body',
+    );
   });
 });
