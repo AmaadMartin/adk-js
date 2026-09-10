@@ -56,6 +56,13 @@ export interface RunNodeOptions {
    * resume). Defaults to `${parent.nodePath}.${nodeName}`.
    */
   overrideNodePath?: string;
+  /**
+   * Cancellation signal for this child, overriding the parent invocation's. A
+   * caller fanning work out uses it to stop the children it still has in
+   * flight; chain it to the invocation's own signal (see
+   * `chainAbortController`) so an outer cancel still reaches them.
+   */
+  abortSignal?: AbortSignal;
 }
 
 /** Parameters for {@link executeChildNode}. */

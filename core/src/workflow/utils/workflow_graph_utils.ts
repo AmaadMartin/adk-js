@@ -53,8 +53,10 @@ export interface NodeBuilder {
  * Wraps an already-built node in a parallel worker. Provided by the
  * `parallel_worker` node module via {@link PARALLEL_WORKER_FACTORY}.
  *
- * `retryConfig`/`timeout` are intentionally not forwarded to the wrapper: they
- * apply to the inner node (per item), so the two levels don't compose.
+ * `retryConfig`/`timeout` are intentionally not forwarded to the wrapper: this
+ * route applies them to the inner node, per item, as adk-python's `_node.py`
+ * does. To bound the whole fan-out, construct the `ParallelWorker` directly and
+ * pass them to it; the two levels compose.
  */
 export type ParallelWorkerFactory = (
   inner: BaseNode,

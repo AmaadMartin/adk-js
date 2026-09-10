@@ -236,7 +236,7 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
       parent: ctx,
       node,
       input,
-      abortSignal: this.abortSignal,
+      abortSignal: options.abortSignal ?? this.abortSignal,
       options: {
         nodeName: name,
         runId,

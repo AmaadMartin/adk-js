@@ -24,6 +24,8 @@ export interface ScheduleDynamicNodeOptions {
   overrideBranch?: string;
   /** Explicit isolation-scope override. */
   overrideIsolationScope?: string;
+  /** Cancellation signal for this child, overriding the workflow-scoped one. */
+  abortSignal?: AbortSignal;
 }
 
 /**
