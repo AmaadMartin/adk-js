@@ -4,8 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LlmRequest,
+  PluginManager,
+  URL_CONTEXT,
+  UrlContextTool,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+/** A real tool context, so no call site has to fake one. */
+function toolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv1',
+      session: createSession({id: 's1', appName: 'test', userId: 'user'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 function makeRequest(model?: string, tools = []): LlmRequest {
   return {
@@ -90,6 +109,21 @@ describe('UrlContextTool', () => {
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+  });
+
+  describe('managed agent requests', () => {
+    it('enables url context on a request that carries no model', async () => {
+      const tool = new UrlContextTool();
+      const req = makeRequest(undefined);
+      req.isManagedAgent = true;
+
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: toolContext(),
+      });
+
+      expect(req.config?.tools).toEqual([{urlContext: {}}]);
     });
   });
 

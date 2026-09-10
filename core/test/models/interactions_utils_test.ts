@@ -12,22 +12,25 @@ import {
   FunctionCall,
   FunctionResponse,
   GenerateContentConfig,
+  GoogleGenAI,
   Interactions,
   Language,
   Outcome,
   Part,
 } from '@google/genai';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   convertContentToSteps,
   convertInteractionEventToLlmResponse,
   convertInteractionToLlmResponse,
   convertStepToParts,
   convertToolsConfigToInteractionsFormat,
+  createInteractions,
   extractSystemInstruction,
   generateContentViaInteractions,
   getLatestUserContents,
 } from '../../src/models/interactions_utils.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
 
 describe('interactions_utils', () => {
   describe('getLatestUserContents', () => {
@@ -2194,5 +2197,74 @@ describe('interactions_utils', () => {
       }
       expect(responses[0].interactionId).toBe('int-camel-case');
     });
+  });
+});
+
+/**
+ * Drives the real genai SDK against a stubbed `fetch`, so the headers asserted
+ * here are the ones that reach the wire.
+ */
+describe('createInteractions extraHeaders', () => {
+  const completedInteraction = {
+    id: 'int-1',
+    status: 'completed',
+    steps: [{type: 'model_output', content: [{type: 'text', text: 'hi'}]}],
+  };
+
+  /** Records every request, and answers each with the completed interaction. */
+  function stubFetch(): Request[] {
+    const requests: Request[] = [];
+    vi.stubGlobal('fetch', async (...args: Parameters<typeof fetch>) => {
+      requests.push(new Request(...args));
+      return new Response(JSON.stringify(completedInteraction), {
+        status: 200,
+        headers: {'content-type': 'application/json'},
+      });
+    });
+    return requests;
+  }
+
+  async function drain(
+    generator: AsyncGenerator<LlmResponse, void, void>,
+  ): Promise<LlmResponse[]> {
+    const responses: LlmResponse[] = [];
+    for await (const response of generator) {
+      responses.push(response);
+    }
+    return responses;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('forwards the headers on a non-streaming call', async () => {
+    const requests = stubFetch();
+
+    const responses = await drain(
+      createInteractions(new GoogleGenAI({apiKey: 'test-api-key'}), {
+        createParams: {model: 'gemini-2.5-flash', input: []},
+        stream: false,
+        extraHeaders: {'x-custom': 'v'},
+      }),
+    );
+
+    expect(responses).toHaveLength(1);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers.get('x-custom')).toBe('v');
+  });
+
+  it('sends no custom header when none is given', async () => {
+    const requests = stubFetch();
+
+    await drain(
+      createInteractions(new GoogleGenAI({apiKey: 'test-api-key'}), {
+        createParams: {model: 'gemini-2.5-flash', input: []},
+        stream: false,
+      }),
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers.get('x-custom')).toBeNull();
   });
 });

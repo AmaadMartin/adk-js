@@ -25,14 +25,18 @@ export class GoogleSearchTool extends BuiltInTool {
   protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    if (!llmRequest.model) {
+    // A managed agent resolves its tools server-side and so builds a request
+    // with no model. The tool still has to enable itself on such a request.
+    if (!llmRequest.model && !llmRequest.isManagedAgent) {
       return;
     }
+
+    const model = llmRequest.model ?? '';
 
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
     llmRequest.config.tools = llmRequest.config.tools || [];
 
-    if (isGemini1Model(llmRequest.model)) {
+    if (isGemini1Model(model)) {
       if (llmRequest.config.tools.length > 0) {
         throw new Error(
           'Google search tool can not be used with other tools in Gemini 1.x.',
@@ -46,7 +50,7 @@ export class GoogleSearchTool extends BuiltInTool {
       return;
     }
 
-    if (isGeminiModel(llmRequest.model)) {
+    if (isGeminiModel(model) || llmRequest.isManagedAgent) {
       llmRequest.config.tools.push({
         googleSearch: {},
       });

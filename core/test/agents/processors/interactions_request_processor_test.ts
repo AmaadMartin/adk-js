@@ -9,6 +9,7 @@
 import {
   BaseAgent,
   BaseLlm,
+  createEvent,
   Event,
   EventActions,
   Gemini,
@@ -20,6 +21,7 @@ import {
   Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {findPreviousInteractionState} from '../../../src/agents/processors/interactions_request_processor.js';
 
 class MockLlm extends BaseLlm {
   constructor() {
@@ -225,6 +227,41 @@ describe('InteractionsRequestProcessor', () => {
     expect(llmRequest.previousInteractionId).toBe('int-2');
   });
 
+  it('should resolve a branchless event while on a branch', async () => {
+    // A branchless event was appended at the invocation root, so a branched
+    // run still sees it. The earlier inline scan compared the two branches
+    // strictly and missed it; `isEventInBranch` matches adk-python's
+    // `_is_event_in_branch`.
+    const rawEvents: Event[] = [
+      createEvent({author: 'test_agent', interactionId: 'int-root'}),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+      'test_agent',
+    );
+    invocationContext.branch = 'main';
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('int-root');
+  });
+
   it('should do nothing if agent is not LlmAgent', async () => {
     const rawEvents: Event[] = [
       createMockEvent('1', 'test_agent', 'main', 'int-1'),
@@ -248,5 +285,49 @@ describe('InteractionsRequestProcessor', () => {
     }
 
     expect(llmRequest.previousInteractionId).toBeUndefined();
+  });
+});
+
+describe('findPreviousInteractionState', () => {
+  it('returns both ids from the latest matching event', () => {
+    const events = [
+      createEvent({author: 'mgr', interactionId: 'old', environmentId: 'e0'}),
+      createEvent({author: 'mgr', interactionId: 'new', environmentId: 'e1'}),
+    ];
+
+    expect(findPreviousInteractionState(events, 'mgr')).toEqual({
+      interactionId: 'new',
+      environmentId: 'e1',
+    });
+  });
+
+  it('skips an event another agent authored', () => {
+    const events = [
+      createEvent({author: 'mgr', interactionId: 'mine'}),
+      createEvent({author: 'other', interactionId: 'theirs'}),
+    ];
+
+    expect(findPreviousInteractionState(events, 'mgr')).toEqual({
+      interactionId: 'mine',
+      environmentId: undefined,
+    });
+  });
+
+  it('skips an event outside the current branch', () => {
+    const events = [
+      createEvent({author: 'mgr', interactionId: 'mine', branch: 'wf.a'}),
+      createEvent({author: 'mgr', interactionId: 'elsewhere', branch: 'wf.b'}),
+    ];
+
+    expect(findPreviousInteractionState(events, 'mgr', 'wf.a')).toEqual({
+      interactionId: 'mine',
+      environmentId: undefined,
+    });
+  });
+
+  it('returns nothing when no event matches', () => {
+    const events = [createEvent({author: 'mgr'})];
+
+    expect(findPreviousInteractionState(events, 'mgr')).toEqual({});
   });
 });
