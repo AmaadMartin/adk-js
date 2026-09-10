@@ -14,6 +14,10 @@ Versioned binary and text storage (`Part` payloads) scoped to an individual sess
 
 - [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
 
+### Auth
+
+- [Authenticated tools](auth/tool_auth/index.md) - Declaring the credential a tool needs, and the pause-for-consent handshake.
+
 ### Tools
 
 #### Retrieval
