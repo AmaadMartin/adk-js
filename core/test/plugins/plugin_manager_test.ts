@@ -250,6 +250,24 @@ describe('PluginManager', () => {
     }
   });
 
+  it('should chain the original plugin error as the cause', async () => {
+    const originalException = new Error(
+      'Something went wrong inside the plugin!',
+    );
+    plugin1.exceptionsToRaise['beforeRunCallback'] = originalException;
+    service.registerPlugin(plugin1);
+
+    const caught = await service
+      .runBeforeRunCallback({invocationContext: mockInvocationContext})
+      .catch((e: unknown) => e);
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe(
+      "Error in plugin 'plugin1' during 'beforeRunCallback' callback: Error: Something went wrong inside the plugin!",
+    );
+    expect((caught as Error).cause).toBe(originalException);
+  });
+
   it('should support all callbacks', async () => {
     service.registerPlugin(plugin1);
 
