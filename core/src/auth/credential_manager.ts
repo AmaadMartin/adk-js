@@ -5,9 +5,6 @@
  */
 
 import {Context} from '../agents/context.js';
-// ServiceAccountCredentialExchanger belongs in `auth/exchanger/`; moving it out
-// of the tools layer is deliberately out of scope for this change.
-import {ServiceAccountCredentialExchanger} from '../tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
 import {experimental} from '../utils/experimental.js';
 
 import {AuthCredential, AuthCredentialTypes} from './auth_credential.js';
@@ -17,6 +14,7 @@ import {
   ExchangeResult,
 } from './exchanger/base_credential_exchanger.js';
 import {CredentialExchangerRegistry} from './exchanger/credential_exchanger_registry.js';
+import {ServiceAccountCredentialExchanger} from './exchanger/service_account_exchanger.js';
 import {OAuth2CredentialRefresher} from './oauth2/oauth2_credential_refresher.js';
 import {CredentialRefresherRegistry} from './refresher/credential_refresher_registry.js';
 
@@ -259,6 +257,10 @@ export class CredentialManager {
    * Writes the credential back to the credential service, so the next
    * invocation does not repeat the round trip. A run without a credential
    * service keeps the credential for this invocation only.
+   *
+   * The service receives a copy. One manager serves one tool instance, and
+   * every user and session shares that instance, so writing the credential
+   * into the caller's `AuthConfig` would hand one user's token to the next.
    */
   private async saveCredential(
     toolContext: Context,
@@ -269,7 +271,9 @@ export class CredentialManager {
       return;
     }
 
-    this.authConfig.exchangedAuthCredential = credential;
-    return credentialService.saveCredential(this.authConfig, toolContext);
+    return credentialService.saveCredential(
+      {...this.authConfig, exchangedAuthCredential: credential},
+      toolContext,
+    );
   }
 }

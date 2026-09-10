@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Context} from '../agents/context.js';
 import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {CredentialManager} from '../auth/credential_manager.js';
@@ -45,6 +46,66 @@ export interface AuthenticatedRunRequest extends RunAsyncToolRequest {
 }
 
 /**
+ * The outcome of the credential gate: either the tool may run, or it must
+ * return `response` while the client supplies a credential.
+ */
+export type CredentialResolution =
+  | {status: 'ready'; credential?: AuthCredential}
+  | {status: 'pending'; response: Record<string, unknown> | string};
+
+/**
+ * Builds the manager for an authenticated tool, or nothing when the tool needs
+ * no credential.
+ *
+ * @param authConfig The auth configuration of the tool, when it has one.
+ * @return The manager, or `undefined` to skip authentication.
+ */
+export function createCredentialManager(
+  authConfig?: AuthConfig,
+): CredentialManager | undefined {
+  if (!authConfig?.authScheme) {
+    logger.debug(
+      'authConfig or authConfig.authScheme is missing, so authentication will be skipped.',
+    );
+    return undefined;
+  }
+
+  return new CredentialManager(authConfig);
+}
+
+/**
+ * Resolves the credential for one tool call, and asks the client for one when
+ * none is available.
+ *
+ * @param credentialManager The manager, or `undefined` when the tool needs no
+ *     credential.
+ * @param toolContext The context of the tool call.
+ * @param responseForAuthRequired What to return while the client supplies a
+ *     credential. Defaults to {@link PENDING_USER_AUTHORIZATION}.
+ * @return Whether the tool may run, and the credential it runs with.
+ */
+export async function resolveCredentialOrRequest(
+  credentialManager: CredentialManager | undefined,
+  toolContext: Context,
+  responseForAuthRequired?: Record<string, unknown> | string,
+): Promise<CredentialResolution> {
+  if (!credentialManager) {
+    return {status: 'ready'};
+  }
+
+  const credential = await credentialManager.getAuthCredential(toolContext);
+  if (credential) {
+    return {status: 'ready', credential};
+  }
+
+  await credentialManager.requestCredential(toolContext);
+  return {
+    status: 'pending',
+    response: responseForAuthRequired ?? PENDING_USER_AUTHORIZATION,
+  };
+}
+
+/**
  * A tool that resolves its credential before its body runs.
  *
  * A subclass implements {@link runAsyncImpl} and receives the ready-to-use
@@ -64,13 +125,7 @@ export abstract class BaseAuthenticatedTool extends BaseTool {
   constructor(params: BaseAuthenticatedToolParams) {
     super(params);
 
-    if (params.authConfig?.authScheme) {
-      this.credentialManager = new CredentialManager(params.authConfig);
-    } else {
-      logger.debug(
-        'authConfig or authConfig.authScheme is missing, so authentication will be skipped.',
-      );
-    }
+    this.credentialManager = createCredentialManager(params.authConfig);
     this.responseForAuthRequired = params.responseForAuthRequired;
   }
 
@@ -82,19 +137,16 @@ export abstract class BaseAuthenticatedTool extends BaseTool {
    *     credential, otherwise whatever {@link runAsyncImpl} returns.
    */
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    let credential: AuthCredential | undefined;
-
-    if (this.credentialManager) {
-      credential = await this.credentialManager.getAuthCredential(
-        request.toolContext,
-      );
-      if (!credential) {
-        await this.credentialManager.requestCredential(request.toolContext);
-        return this.responseForAuthRequired ?? PENDING_USER_AUTHORIZATION;
-      }
+    const resolution = await resolveCredentialOrRequest(
+      this.credentialManager,
+      request.toolContext,
+      this.responseForAuthRequired,
+    );
+    if (resolution.status === 'pending') {
+      return resolution.response;
     }
 
-    return this.runAsyncImpl({...request, credential});
+    return this.runAsyncImpl({...request, credential: resolution.credential});
   }
 
   /**

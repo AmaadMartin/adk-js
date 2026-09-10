@@ -32,7 +32,7 @@ import {
 } from '@google/adk';
 import {GoogleAuth, JWT} from 'google-auth-library';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
-import {ServiceAccountCredentialExchanger} from '../../../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {ServiceAccountCredentialExchanger} from '../../../../../src/auth/exchanger/service_account_exchanger.js';
 
 vi.mock('google-auth-library', () => ({
   JWT: vi.fn().mockImplementation(() => ({

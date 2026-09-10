@@ -22,12 +22,12 @@ import {
 import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod/v3';
 
-const API_KEY_SCHEME = {
+const API_KEY_SCHEME: AuthScheme = {
   type: 'apiKey',
   in: 'header',
   name: 'X-Api-Key',
-} as const;
-const OAUTH2_SCHEME = {
+};
+const OAUTH2_SCHEME: AuthScheme = {
   type: 'oauth2',
   flows: {
     authorizationCode: {
@@ -36,7 +36,7 @@ const OAUTH2_SCHEME = {
       scopes: {read: 'Read access'},
     },
   },
-} as const;
+};
 
 const API_KEY_CREDENTIAL: AuthCredential = {
   authType: AuthCredentialTypes.API_KEY,
@@ -86,7 +86,7 @@ function createToolContext(
 
 function createApiKeyAuthConfig(): AuthConfig {
   return {
-    authScheme: API_KEY_SCHEME as AuthScheme,
+    authScheme: API_KEY_SCHEME,
     rawAuthCredential: API_KEY_CREDENTIAL,
     credentialKey: 'api-key',
   };
@@ -94,7 +94,7 @@ function createApiKeyAuthConfig(): AuthConfig {
 
 function createOAuth2AuthConfig(): AuthConfig {
   return {
-    authScheme: OAUTH2_SCHEME as AuthScheme,
+    authScheme: OAUTH2_SCHEME,
     rawAuthCredential: {
       authType: AuthCredentialTypes.OAUTH2,
       oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
@@ -300,7 +300,7 @@ describe('AuthenticatedFunctionTool', () => {
         name: 'invalid_config_tool',
         description: 'Has an invalid auth config.',
         authConfig: {
-          authScheme: {type: 'oauth2', flows: {}} as AuthScheme,
+          authScheme: {type: 'oauth2', flows: {}},
           credentialKey: 'oauth-key',
         },
         execute: async () => 'never',

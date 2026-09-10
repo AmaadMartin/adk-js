@@ -22,6 +22,7 @@ export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
 export {GcsArtifactService} from './artifacts/gcs_artifact_service.js';
 export {getArtifactServiceFromUri} from './artifacts/registry.js';
+export {ServiceAccountCredentialExchanger} from './auth/exchanger/service_account_exchanger.js';
 export {
   AgentEngineSandboxCodeExecutor,
   type AgentEngineSandboxCodeExecutorOptions,
@@ -79,7 +80,23 @@ export {
   exchangeCredential,
   OAuth2BearerExchanger,
 } from './tools/openapi_tool/auth/credential_exchangers/oauth2_exchanger.js';
-export {ServiceAccountCredentialExchanger} from './tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+// Exported from the Node entry, not `common.ts`: `CredentialManager` builds a
+// `ServiceAccountCredentialExchanger`, which pulls in `google-auth-library` and
+// its Node built-ins, so it cannot live in the browser bundle.
+export {CredentialManager} from './auth/credential_manager.js';
+export {AuthenticatedFunctionTool} from './tools/authenticated_function_tool.js';
+export type {
+  AuthenticatedToolExecuteFunction,
+  AuthenticatedToolOptions,
+} from './tools/authenticated_function_tool.js';
+export {
+  BaseAuthenticatedTool,
+  PENDING_USER_AUTHORIZATION,
+} from './tools/base_authenticated_tool.js';
+export type {
+  AuthenticatedRunRequest,
+  BaseAuthenticatedToolParams,
+} from './tools/base_authenticated_tool.js';
 export {
   createApiParameter,
   generateParamDoc,

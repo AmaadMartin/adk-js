@@ -21,11 +21,11 @@ import {
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
-const API_KEY_SCHEME = {
+const API_KEY_SCHEME: AuthScheme = {
   type: 'apiKey',
   in: 'header',
   name: 'X-Api-Key',
-} as const;
+};
 
 const API_KEY_CREDENTIAL: AuthCredential = {
   authType: AuthCredentialTypes.API_KEY,
@@ -99,7 +99,7 @@ function createToolContext(credentialService?: BaseCredentialService): Context {
 
 function createApiKeyAuthConfig(): AuthConfig {
   return {
-    authScheme: API_KEY_SCHEME as AuthScheme,
+    authScheme: API_KEY_SCHEME,
     rawAuthCredential: API_KEY_CREDENTIAL,
     credentialKey: 'api-key',
   };
@@ -116,7 +116,7 @@ function createOAuth2AuthConfig(): AuthConfig {
           scopes: {read: 'Read access'},
         },
       },
-    } as AuthScheme,
+    },
     rawAuthCredential: {
       authType: AuthCredentialTypes.OAUTH2,
       oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
@@ -279,7 +279,7 @@ describe('BaseAuthenticatedTool', () => {
           authScheme: {
             type: 'oauth2',
             flows: {},
-          } as AuthScheme,
+          },
           credentialKey: 'oauth-key',
         },
       });
