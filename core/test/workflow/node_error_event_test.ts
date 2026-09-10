@@ -304,7 +304,7 @@ describe('NodeErrorEvent — cancellation is not failure', () => {
 });
 
 describe('NodeErrorEvent — retries and timeouts', () => {
-  it('emits once for a node that exhausts its retryConfig, not once per attempt', async () => {
+  it('emits once per failed attempt for a node that exhausts its retryConfig', async () => {
     let attempts = 0;
     const flaky = new FunctionNode(
       'flaky',
@@ -319,9 +319,9 @@ describe('NodeErrorEvent — retries and timeouts', () => {
     const {errorEvents} = await driveExpectingFailure(wf, 'x');
 
     expect(attempts).toBe(3);
-    expect(errorEvents).toHaveLength(1);
-    expect(errorEvents[0].attemptCount).toBe(3);
-    expect(errorEvents[0].errorMessage).toBe('still broken');
+    expect(errorEvents).toHaveLength(3);
+    expect(errorEvents.map((e) => e.attemptCount)).toEqual([1, 2, 3]);
+    expect(errorEvents[2].errorMessage).toBe('still broken');
   });
 
   it('emits for a genuine timeout, identifying it as one', async () => {

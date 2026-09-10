@@ -5,6 +5,7 @@
  */
 
 import {Part} from '@google/genai';
+import {expect} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {LlmAgent, LlmAgentConfig} from '../../src/agents/llm_agent.js';
@@ -18,6 +19,7 @@ import {createSession} from '../../src/sessions/session.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {BaseNode, BaseNodeConfig} from '../../src/workflow/base_node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
+import {executeChildNode} from '../../src/workflow/node_runner.js';
 
 /** A minimal concrete {@link BaseAgent} for driving nodes directly in tests. */
 class TestAgent extends BaseAgent {
@@ -218,6 +220,82 @@ export async function driveWorkflow(
   return {events, output: root.output, interruptIds: result.interruptIds};
 }
 
+/** Options for {@link driveNodeRunner} and {@link driveNodeRunnerFailure}. */
+export interface DriveNodeRunnerOptions {
+  /** The input handed to the node. */
+  input?: unknown;
+  /** InvocationContext to run under (defaults to a fresh {@link createIc}). */
+  ic?: InvocationContext;
+  /** Output from a previous run, carried forward on resume. */
+  priorOutput?: unknown;
+  /** Unresolved interrupt ids from a previous run, carried forward on resume. */
+  priorInterruptIds?: readonly string[];
+}
+
+/** Runs one node through the node runner and drains its channel. */
+async function runOneNode(
+  node: BaseNode,
+  opts: DriveNodeRunnerOptions,
+): Promise<{child?: NodeContext; events: Event[]; thrown: unknown}> {
+  const channel = new AsyncQueue<Event>();
+  const root = new NodeContext({
+    invocationContext: opts.ic ?? createIc(),
+    channel,
+    nodePath: '',
+    runId: 'root',
+  });
+  let child: NodeContext | undefined;
+  let thrown: unknown;
+  try {
+    child = await executeChildNode({
+      parent: root,
+      node,
+      input: opts.input,
+      priorOutput: opts.priorOutput,
+      priorInterruptIds: opts.priorInterruptIds,
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  channel.close();
+  const events: Event[] = [];
+  for await (const event of channel) {
+    events.push(event);
+  }
+  return {child, events, thrown};
+}
+
+/**
+ * Runs one node through the node runner, returning its context and every event
+ * it pushed — the shape adk-python's node runner tests get from
+ * `NodeRunner(node=…, parent_ctx=…).run()`.
+ *
+ * Fails the test when the node threw; use {@link driveNodeRunnerFailure} for a
+ * node that is expected to fail.
+ */
+export async function driveNodeRunner(
+  node: BaseNode,
+  opts: DriveNodeRunnerOptions = {},
+): Promise<{child: NodeContext; events: Event[]}> {
+  const {child, events, thrown} = await runOneNode(node, opts);
+  if (!child) {
+    expect.fail(`node '${node.name}' threw unexpectedly: ${String(thrown)}`);
+  }
+  return {child, events};
+}
+
+/**
+ * Runs one node expected to fail, returning what it threw and the events it
+ * left on the channel on its way out.
+ */
+export async function driveNodeRunnerFailure(
+  node: BaseNode,
+  opts: DriveNodeRunnerOptions = {},
+): Promise<{events: Event[]; thrown: unknown}> {
+  const {events, thrown} = await runOneNode(node, opts);
+  return {events, thrown};
+}
+
 /** A node whose behavior is a plain function returning a value or Event. */
 export class FnNode extends BaseNode {
   constructor(
@@ -232,5 +310,25 @@ export class FnNode extends BaseNode {
   }
   protected async *runImpl(ctx: NodeContext, input: unknown) {
     yield await this.fn(ctx, input);
+  }
+}
+
+/**
+ * A node whose body is an async generator, for the cases {@link FnNode} cannot
+ * express: yielding more than once, or yielding between context writes.
+ */
+export class GenNode extends BaseNode {
+  constructor(
+    name: string,
+    private readonly body: (
+      ctx: NodeContext,
+      input: unknown,
+    ) => AsyncGenerator<unknown, void, void>,
+    config: Partial<Omit<BaseNodeConfig, 'name'>> = {},
+  ) {
+    super({name, ...config});
+  }
+  protected async *runImpl(ctx: NodeContext, input: unknown) {
+    yield* this.body(ctx, input);
   }
 }

@@ -52,6 +52,14 @@ describe('workflow sample: retry', () => {
     expect(finalOutput(events)).toBe('sunny');
     expect(texts).toContain('The weather is sunny');
 
-    expect(events.filter((e) => e.errorCode !== undefined)).toHaveLength(0);
+    // One error event per failed attempt, matching the shape of the Python
+    // golden: a content-less event follows each of the first two attempts.
+    const errorEvents = events.filter((e) => e.errorCode !== undefined);
+    expect(errorEvents).toHaveLength(2);
+    for (const errorEvent of errorEvents) {
+      expect(errorEvent.errorMessage).toBe(
+        'HTTP Error 500: Internal Server Error',
+      );
+    }
   }, 30000);
 });
