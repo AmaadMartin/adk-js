@@ -129,9 +129,12 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *    `requestedAuthConfigs`, `requestedToolConfirmations`) — all entries from
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
- * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
- *    last-writer-wins: the value from the last source that sets the field is
- *    kept.
+ * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
+ *    `agentState`, `endOfAgent`) — last-writer-wins: the value from the last
+ *    source that sets the field is kept.
+ *
+ * Every field of {@link EventActions} is covered. A field added to that type
+ * must be added here too, or a merge silently drops it.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -179,6 +182,12 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.agentState !== undefined) {
+      result.agentState = source.agentState;
+    }
+    if (source.endOfAgent !== undefined) {
+      result.endOfAgent = source.endOfAgent;
     }
   }
   return result;
