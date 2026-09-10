@@ -329,6 +329,10 @@ export {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
+export type {
+  RemoteMcpHeaderProvider,
+  RemoteMcpServer,
+} from './tools/remote_mcp_server.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
