@@ -6,6 +6,7 @@
 
 import {Content} from '@google/genai';
 
+import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
@@ -64,6 +65,7 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  resumabilityConfig?: ResumabilityConfig;
 }
 
 /**
@@ -268,6 +270,12 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * The app's resumability configuration, carried down from the `Runner`, so a
+   * node can tell whether this session persists the state a resume needs.
+   */
+  readonly resumabilityConfig?: ResumabilityConfig;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -289,6 +297,7 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
+    this.resumabilityConfig = params.resumabilityConfig;
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop
@@ -315,6 +324,17 @@ export class InvocationContext {
    */
   get userId() {
     return this.session.userId;
+  }
+
+  /**
+   * Whether this invocation runs against a resumable app.
+   *
+   * A resumable session persists the checkpoints a later run reads to see how
+   * far it got. A non-resumable one reconstructs the same state by replaying
+   * prior events, so writing those checkpoints would only add noise.
+   */
+  get isResumable(): boolean {
+    return this.resumabilityConfig?.isResumable ?? false;
   }
 
   /**
