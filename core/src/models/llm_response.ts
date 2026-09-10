@@ -107,6 +107,15 @@ export interface LlmResponse {
    */
   interactionId?: string;
 
+  /**
+   * The execution environment ID reported by the interactions API.
+   *
+   * The API reports one only when the request set an environment config. ADK
+   * sends no environment yet, so this is normally absent. It is surfaced here
+   * and persisted on the resulting Event for callers that read session history.
+   */
+  environmentId?: string;
+
   /** The model version used to generate the response. */
   modelVersion?: string;
 
