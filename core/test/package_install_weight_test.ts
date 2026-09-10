@@ -106,11 +106,15 @@ describe('core/package.json subpath exports', () => {
   ) as Array<[string, Record<string, string>]>;
 
   it('exports the situational subsystems as their own entry points', () => {
+    // `./tools/agent_simulator/agent_simulator_config` is the exception: it is
+    // a deprecation shim, not a subsystem. It needs its own subpath because it
+    // warns when it is evaluated, so the barrel must not reach it.
     expect(subpaths.map(([subpath]) => subpath).sort()).toEqual([
       './a2a',
       './artifacts/gcs',
       './sessions/database',
       './telemetry/gcp',
+      './tools/agent_simulator/agent_simulator_config',
       './tools/mcp',
     ]);
   });

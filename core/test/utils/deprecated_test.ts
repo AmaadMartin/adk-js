@@ -11,8 +11,50 @@ import {SequentialAgent} from '../../src/agents/sequential_agent.js';
 import {
   deprecated,
   resetDeprecationWarnings,
+  warnDeprecatedOnce,
 } from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
+
+describe('warnDeprecatedOnce', () => {
+  beforeEach(() => {
+    resetDeprecationWarnings();
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetDeprecationWarnings();
+  });
+
+  it('warns on the first call and stays silent afterwards', () => {
+    warnDeprecatedOnce('module.a', 'A has moved.');
+    warnDeprecatedOnce('module.a', 'A has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('A has moved.');
+  });
+
+  it('counts once per key, so one deprecation never silences another', () => {
+    warnDeprecatedOnce('module.a', 'A has moved.');
+    warnDeprecatedOnce('module.b', 'B has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith('B has moved.');
+  });
+
+  it('shares its registry with the decorator, so one reset clears both', () => {
+    @deprecated('Shared is deprecated.')
+    class Shared {}
+
+    new Shared();
+    warnDeprecatedOnce('module.a', 'A has moved.');
+    resetDeprecationWarnings();
+    new Shared();
+    warnDeprecatedOnce('module.a', 'A has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(4);
+  });
+});
 
 describe('deprecated', () => {
   beforeEach(() => {
