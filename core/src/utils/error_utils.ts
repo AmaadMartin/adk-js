@@ -32,7 +32,7 @@ const MAX_HTTP_STATUS = 599;
  * not a non-null object. Used to safely inspect duck-typed error shapes without
  * resorting to `any`.
  */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : undefined;
@@ -158,4 +158,14 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
  */
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
+}
+
+/**
+ * Whether `err` reports a missing file or directory.
+ *
+ * Node reports this as an `ENOENT` `code` on the thrown error, which is not
+ * part of the `Error` type, so callers cannot narrow it without a guard.
+ */
+export function isFileNotFoundError(err: unknown): boolean {
+  return asRecord(err)?.['code'] === 'ENOENT';
 }
