@@ -7,11 +7,12 @@
 import {Context} from '../agents/context.js';
 import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthConfig} from '../auth/auth_tool.js';
-import {CredentialManager} from '../auth/credential_manager.js';
 import {experimental} from '../utils/experimental.js';
-import {logger} from '../utils/logger.js';
 
-import {PENDING_USER_AUTHORIZATION} from './base_authenticated_tool.js';
+import {
+  createCredentialManager,
+  resolveCredentialOrRequest,
+} from './base_authenticated_tool.js';
 import {
   FunctionTool,
   ToolExecuteArgument,
@@ -70,14 +71,7 @@ export class AuthenticatedFunctionTool<
     // The credential is resolved into a local of this closure rather than an
     // instance field: one tool instance serves concurrent calls, and a field
     // would leak one call's credential into another.
-    const credentialManager = authConfig?.authScheme
-      ? new CredentialManager(authConfig)
-      : undefined;
-    if (!credentialManager) {
-      logger.debug(
-        'authConfig or authConfig.authScheme is missing, so authentication will be skipped.',
-      );
-    }
+    const credentialManager = createCredentialManager(authConfig);
 
     super({
       ...toolOptions,
@@ -94,14 +88,16 @@ export class AuthenticatedFunctionTool<
           );
         }
 
-        const credential =
-          await credentialManager.getAuthCredential(toolContext);
-        if (!credential) {
-          await credentialManager.requestCredential(toolContext);
-          return responseForAuthRequired ?? PENDING_USER_AUTHORIZATION;
+        const resolution = await resolveCredentialOrRequest(
+          credentialManager,
+          toolContext,
+          responseForAuthRequired,
+        );
+        if (resolution.status === 'pending') {
+          return resolution.response;
         }
 
-        return execute(input, toolContext, credential);
+        return execute(input, toolContext, resolution.credential);
       },
     });
   }

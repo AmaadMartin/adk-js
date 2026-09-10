@@ -22,12 +22,12 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 
 const TOKEN_URL = 'https://provider.example.com/token';
 
-const API_KEY_SCHEME = {
+const API_KEY_SCHEME: AuthScheme = {
   type: 'apiKey',
   in: 'header',
   name: 'X-Api-Key',
-} as const;
-const OAUTH2_SCHEME = {
+};
+const OAUTH2_SCHEME: AuthScheme = {
   type: 'oauth2',
   flows: {
     authorizationCode: {
@@ -36,13 +36,13 @@ const OAUTH2_SCHEME = {
       scopes: {read: 'Read access'},
     },
   },
-} as const;
-const OPEN_ID_CONNECT_SCHEME = {
+};
+const OPEN_ID_CONNECT_SCHEME: AuthScheme = {
   type: 'openIdConnect',
   openIdConnectUrl: 'https://provider.example.com/openid-configuration',
   authorizationEndpoint: 'https://provider.example.com/authorize',
   tokenEndpoint: TOKEN_URL,
-} as const;
+};
 
 const API_KEY_CREDENTIAL: AuthCredential = {
   authType: AuthCredentialTypes.API_KEY,
@@ -124,7 +124,7 @@ function createToolContext(credentialService?: BaseCredentialService): Context {
 
 function createAuthConfig(overrides: Partial<AuthConfig> = {}): AuthConfig {
   return {
-    authScheme: OAUTH2_SCHEME as AuthScheme,
+    authScheme: OAUTH2_SCHEME,
     rawAuthCredential: OAUTH2_CREDENTIAL,
     credentialKey: 'test-key',
     ...overrides,
@@ -154,7 +154,7 @@ describe('CredentialManager', () => {
       const credentialService = new RecordingCredentialService();
       const manager = new CredentialManager(
         createAuthConfig({
-          authScheme: API_KEY_SCHEME as AuthScheme,
+          authScheme: API_KEY_SCHEME,
           rawAuthCredential: API_KEY_CREDENTIAL,
         }),
       );
@@ -173,7 +173,7 @@ describe('CredentialManager', () => {
       const credentialService = new RecordingCredentialService();
       const manager = new CredentialManager(
         createAuthConfig({
-          authScheme: {type: 'http', scheme: 'bearer'} as AuthScheme,
+          authScheme: {type: 'http', scheme: 'bearer'},
           rawAuthCredential: httpCredential,
         }),
       );
@@ -210,7 +210,7 @@ describe('CredentialManager', () => {
     it('rejects an openIdConnect scheme with no raw credential', async () => {
       const manager = new CredentialManager(
         createAuthConfig({
-          authScheme: OPEN_ID_CONNECT_SCHEME as AuthScheme,
+          authScheme: OPEN_ID_CONNECT_SCHEME,
           rawAuthCredential: undefined,
         }),
       );
@@ -225,7 +225,7 @@ describe('CredentialManager', () => {
     it('accepts an apiKey scheme with no raw credential', async () => {
       const manager = new CredentialManager(
         createAuthConfig({
-          authScheme: API_KEY_SCHEME as AuthScheme,
+          authScheme: API_KEY_SCHEME,
           rawAuthCredential: undefined,
         }),
       );
@@ -252,7 +252,7 @@ describe('CredentialManager', () => {
     it('rejects an OpenID Connect credential that carries no oauth2 field', async () => {
       const manager = new CredentialManager(
         createAuthConfig({
-          authScheme: OPEN_ID_CONNECT_SCHEME as AuthScheme,
+          authScheme: OPEN_ID_CONNECT_SCHEME,
           rawAuthCredential: {authType: AuthCredentialTypes.OPEN_ID_CONNECT},
         }),
       );
@@ -323,7 +323,24 @@ describe('CredentialManager', () => {
 
       expect(credential).toEqual(fromAuthResponse);
       expect(credentialService.saved).toEqual([fromAuthResponse]);
-      expect(authConfig.exchangedAuthCredential).toEqual(fromAuthResponse);
+      // The caller's config is shared by every user of the tool, so the
+      // manager must not write the credential into it.
+      expect(authConfig.exchangedAuthCredential).toBeUndefined();
+    });
+
+    it('does not leak one user credential to the next user', async () => {
+      const authConfig = createAuthConfig();
+      const manager = new CredentialManager(authConfig);
+      const firstUser = createToolContext(new RecordingCredentialService());
+      vi.spyOn(firstUser, 'getAuthResponse').mockReturnValue({
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {accessToken: 'first-user-token'},
+      });
+
+      await manager.getAuthCredential(firstUser);
+      const secondUser = createToolContext(new RecordingCredentialService());
+
+      expect(await manager.getAuthCredential(secondUser)).toBeUndefined();
     });
 
     it('neither loads nor saves when no credential service is configured', async () => {
@@ -396,7 +413,7 @@ describe('CredentialManager', () => {
       const credentialService = new RecordingCredentialService(stored);
       const manager = new CredentialManager(
         createAuthConfig({
-          authScheme: API_KEY_SCHEME as AuthScheme,
+          authScheme: API_KEY_SCHEME,
           rawAuthCredential: undefined,
         }),
       );
@@ -512,7 +529,7 @@ describe('CredentialManager', () => {
       );
       const manager = new CredentialManager(
         createAuthConfig({
-          authScheme: OPEN_ID_CONNECT_SCHEME as AuthScheme,
+          authScheme: OPEN_ID_CONNECT_SCHEME,
           rawAuthCredential: {
             authType: AuthCredentialTypes.OPEN_ID_CONNECT,
             oauth2: {clientId: 'client-id'},
