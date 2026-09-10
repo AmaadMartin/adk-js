@@ -18,6 +18,10 @@ import {createSession} from '../../src/sessions/session.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {BaseNode, BaseNodeConfig} from '../../src/workflow/base_node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
+import {
+  executeChildNode,
+  ExecuteChildNodeParams,
+} from '../../src/workflow/node_runner.js';
 
 /** A minimal concrete {@link BaseAgent} for driving nodes directly in tests. */
 class TestAgent extends BaseAgent {
@@ -232,5 +236,101 @@ export class FnNode extends BaseNode {
   }
   protected async *runImpl(ctx: NodeContext, input: unknown) {
     yield await this.fn(ctx, input);
+  }
+}
+
+/**
+ * Closes a channel and returns everything buffered in it, for a test that ran a
+ * node against a channel it did not drain while the node was running.
+ */
+export async function drain(channel: AsyncQueue<Event>): Promise<Event[]> {
+  channel.close();
+  const events: Event[] = [];
+  for await (const event of channel) {
+    events.push(event);
+  }
+  return events;
+}
+
+/** Options for {@link runChildNode} and {@link runFailingChildNode}. */
+export interface RunChildNodeParams extends Omit<
+  Partial<ExecuteChildNodeParams>,
+  'parent' | 'node'
+> {
+  /** Invocation context to run under (defaults to a fresh {@link createIc}). */
+  ic?: InvocationContext;
+  /** Node path of the context standing in for the parent (default: root). */
+  parentNodePath?: string;
+}
+
+async function executeAndDrain(
+  node: BaseNode,
+  params: RunChildNodeParams,
+): Promise<{child?: NodeContext; error?: unknown; events: Event[]}> {
+  const {ic, parentNodePath = '', input, ...rest} = params;
+  const channel = new AsyncQueue<Event>();
+  const parent = new NodeContext({
+    invocationContext: ic ?? createIc(),
+    channel,
+    nodePath: parentNodePath,
+    runId: 'root',
+  });
+  try {
+    const child = await executeChildNode({...rest, parent, node, input});
+    return {child, events: await drain(channel)};
+  } catch (error) {
+    return {error, events: await drain(channel)};
+  }
+}
+
+/**
+ * Runs `node` as a child of a fresh parent context and returns that child
+ * together with every event the run pushed — the adk-js counterpart of
+ * adk-python's `NodeRunner(node=…, parent_ctx=…).run()`, which the ported
+ * reference tests are written against. Rethrows if the node fails.
+ */
+export async function runChildNode(
+  node: BaseNode,
+  params: RunChildNodeParams = {},
+): Promise<{child: NodeContext; events: Event[]}> {
+  const {child, error, events} = await executeAndDrain(node, params);
+  if (!child) {
+    throw error;
+  }
+  return {child, events};
+}
+
+/**
+ * {@link runChildNode} for a node that is expected to fail: hands back what it
+ * threw instead of rethrowing, along with the events it pushed first. `error`
+ * is `undefined` when the node unexpectedly succeeded.
+ */
+export async function runFailingChildNode(
+  node: BaseNode,
+  params: RunChildNodeParams = {},
+): Promise<{error: unknown; events: Event[]}> {
+  const {error, events} = await executeAndDrain(node, params);
+  return {error, events};
+}
+
+/**
+ * A node whose body is an async generator — the analogue of adk-python's
+ * `BaseNode._run_impl`, and what the ported reference tests are written
+ * against. Unlike `node(fn)` it is a plain {@link BaseNode}, so it brings none
+ * of `FunctionNode`'s own event or delta handling with it.
+ */
+export class GenNode extends BaseNode {
+  constructor(
+    name: string,
+    private readonly body: (
+      ctx: NodeContext,
+      input: unknown,
+    ) => AsyncGenerator<unknown, void, void>,
+    config: Partial<Omit<BaseNodeConfig, 'name'>> = {},
+  ) {
+    super({name, ...config});
+  }
+  protected async *runImpl(ctx: NodeContext, input: unknown) {
+    yield* this.body(ctx, input);
   }
 }

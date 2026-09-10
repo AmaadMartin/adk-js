@@ -41,6 +41,26 @@ export function claimNodeErrorReport(
   return true;
 }
 
+/**
+ * Whether this failure has already been reported in this invocation, without
+ * claiming it.
+ *
+ * The node runner asks before it reports an attempt: a failure that travelled
+ * up from a nested node was recorded where it happened, and must not be
+ * recorded again at every level it passes through. It claims separately, and
+ * only for the attempt it stops retrying on, so a retried failure still reports
+ * each attempt even when the node throws one error object every time.
+ */
+export function isNodeErrorReported(
+  error: unknown,
+  invocationId: string,
+): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  return reportedInvocationIds.get(error) === invocationId;
+}
+
 export function createNodeErrorEvent(
   params: CreateNodeErrorEventParams,
 ): NodeErrorEvent {
@@ -55,10 +75,24 @@ export function createNodeErrorEvent(
   };
 }
 
+/**
+ * The code reported for a failure: a `code` the error carries, otherwise its
+ * class name. `UNKNOWN_ERROR` is left for a thrown value that is neither an
+ * `Error` nor carries a code.
+ *
+ * The class-name rung is what `google/adk-python` reports
+ * (`workflow/_node_runner.py` builds its error event with
+ * `error_code=type(e).__name__`). The `code` rung is adk-js's own and stays in
+ * front of it, since an error that names its own failure says more than the
+ * class that carried it.
+ */
 function errorCodeOf(error: unknown): string {
   const code = (error as {code?: unknown} | null | undefined)?.code;
   if (typeof code === 'string' || typeof code === 'number') {
     return String(code);
+  }
+  if (error instanceof Error) {
+    return errorName(error);
   }
   return 'UNKNOWN_ERROR';
 }

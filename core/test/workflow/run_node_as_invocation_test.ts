@@ -343,8 +343,8 @@ describe('runNodeAsInvocation — the workflow output reaches the caller once', 
           'START',
           node(
             (ctx: NodeContext) => {
-              // Assigning rather than returning: nothing is yielded, so no
-              // event carries this value out.
+              // Assigning rather than returning: the node yields nothing, so
+              // its own end-of-run flush is what carries this value out.
               ctx.output = 'assigned';
             },
             {name: 'quiet'},
@@ -359,6 +359,6 @@ describe('runNodeAsInvocation — the workflow output reaches the caller once', 
 
     expect(withOutput).toHaveLength(1);
     expect(withOutput[0].output).toBe('assigned');
-    expect(withOutput[0].author).toBe('assigns');
+    expect(withOutput[0].author).toBe('quiet');
   });
 });
