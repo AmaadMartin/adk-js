@@ -20,6 +20,21 @@ export function getAbsolutePath(p: string): string {
   return path.resolve(process.cwd(), p);
 }
 
+/** Reports whether a caught error is Node's "no such file or directory". */
+export function isFileNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  );
+}
+
+/** Narrows a parsed JSON value to a plain object, excluding null and arrays. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** Check if the given folder exists. */
 export async function isFolderExists(folderPath: string): Promise<boolean> {
   try {
