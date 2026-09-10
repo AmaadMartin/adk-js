@@ -14,7 +14,7 @@ import {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {Content, ContentUnion} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {LoggingPlugin} from '../../src/plugins/logging_plugin.js';
 import {resetLogger, setLogger} from '../../src/utils/logger.js';
@@ -531,5 +531,518 @@ describe('LoggingPlugin', () => {
     });
 
     expect(infoCalls.some((m) => m.includes('...'))).toBe(true);
+  });
+
+  it('beforeModelCallback should render a Content system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {systemInstruction: {parts: [{text: 'be terse'}]}},
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: request,
+    });
+
+    expect(infoCalls.some((m) => m.includes('be terse'))).toBe(true);
+    expect(infoCalls.some((m) => m.includes('[object Object]'))).toBe(false);
+  });
+
+  it('beforeModelCallback should render a bare Part system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {systemInstruction: {text: 'be terse'}},
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: request,
+    });
+
+    expect(infoCalls.some((m) => m.includes('be terse'))).toBe(true);
+    expect(infoCalls.some((m) => m.includes('[object Object]'))).toBe(false);
+  });
+
+  it('beforeModelCallback should render every entry of a list system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {systemInstruction: ['global', {text: 'local'}]},
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: request,
+    });
+
+    expect(infoCalls.some((m) => m.includes('global'))).toBe(true);
+    expect(infoCalls.some((m) => m.includes('local'))).toBe(true);
+    expect(infoCalls.some((m) => m.includes('[object Object]'))).toBe(false);
+  });
+
+  it('beforeModelCallback should render every text part of a Content system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {
+        systemInstruction: {parts: [{text: 'first'}, {text: 'second'}]},
+      },
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: request,
+    });
+
+    expect(infoCalls.some((m) => m.includes('first'))).toBe(true);
+    expect(infoCalls.some((m) => m.includes('second'))).toBe(true);
+  });
+
+  it('beforeModelCallback should not reject on a list system instruction past the budget', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {
+        systemInstruction: Array.from({length: 300}, () => ({text: 'x'})),
+      },
+    };
+
+    await expect(
+      plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      }),
+    ).resolves.toBeUndefined();
+    expect(
+      infoCalls.some((m) => m.includes("System Instruction: 'text: 'x'")),
+    ).toBe(true);
+    expect(infoCalls.some((m) => m.includes("...'"))).toBe(true);
+  });
+
+  it('beforeModelCallback should describe a system instruction that carries no text', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {
+        systemInstruction: {
+          parts: [{inlineData: {mimeType: 'image/png', data: 'AAAA'}}],
+        },
+      },
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: request,
+    });
+
+    expect(
+      infoCalls.some((m) => m.includes("System Instruction: 'other_part'")),
+    ).toBe(true);
+    expect(infoCalls.some((m) => m.includes('[object Object]'))).toBe(false);
+  });
+
+  it('beforeModelCallback should truncate a long string system instruction at 200 characters', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {systemInstruction: 'A'.repeat(200) + 'Z'.repeat(100)},
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: request,
+    });
+
+    expect(
+      infoCalls.some((m) =>
+        m.includes(`System Instruction: '${'A'.repeat(200)}...'`),
+      ),
+    ).toBe(true);
+    expect(infoCalls.some((m) => m.includes('Z'))).toBe(false);
+  });
+
+  it('beforeModelCallback should not reject on a null entry in a list system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      // A JavaScript caller can pass these; `ContentUnion` cannot express
+      // them. The cast is the subject of the test: the plugin must render a
+      // value the type system says cannot occur, rather than throw.
+      config: {systemInstruction: [null, 42] as unknown as ContentUnion},
+    };
+
+    await expect(
+      plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      }),
+    ).resolves.toBeUndefined();
+    expect(
+      infoCalls.some((m) => m.includes("System Instruction: 'null | 42'")),
+    ).toBe(true);
+  });
+
+  it('beforeModelCallback should not reject on a primitive system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      // See the preceding test: a deliberate type violation.
+      config: {systemInstruction: 42 as unknown as ContentUnion},
+    };
+
+    await expect(
+      plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      }),
+    ).resolves.toBeUndefined();
+    expect(infoCalls.some((m) => m.includes("System Instruction: '42'"))).toBe(
+      true,
+    );
+  });
+
+  it('beforeToolCallback should not reject on a BigInt argument', async () => {
+    const plugin = new LoggingPlugin();
+
+    await expect(
+      plugin.beforeToolCallback({
+        tool: mockTool,
+        toolArgs: {id: 1n},
+        toolContext: mockToolContext,
+      }),
+    ).resolves.toBeUndefined();
+    expect(infoCalls.some((m) => m.includes('Arguments: {"id":"1"}'))).toBe(
+      true,
+    );
+  });
+
+  it('beforeToolCallback should not reject on a circular argument', async () => {
+    const plugin = new LoggingPlugin();
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+
+    await expect(
+      plugin.beforeToolCallback({
+        tool: mockTool,
+        toolArgs: cyclic,
+        toolContext: mockToolContext,
+      }),
+    ).resolves.toBeUndefined();
+    expect(infoCalls.some((m) => m.includes('[Circular]'))).toBe(true);
+  });
+
+  it('beforeToolCallback should not reject on a nested BigInt argument', async () => {
+    const plugin = new LoggingPlugin();
+
+    await expect(
+      plugin.beforeToolCallback({
+        tool: mockTool,
+        toolArgs: {page: {ids: [1n, 2n]}},
+        toolContext: mockToolContext,
+      }),
+    ).resolves.toBeUndefined();
+    expect(
+      infoCalls.some((m) =>
+        m.includes('Arguments: {"page":{"ids":["1","2"]}}'),
+      ),
+    ).toBe(true);
+  });
+
+  it('beforeToolCallback should not reject when an argument getter throws', async () => {
+    const plugin = new LoggingPlugin();
+    const hostile: Record<string, unknown> = {
+      get boom(): string {
+        throw new Error('getter failed');
+      },
+    };
+
+    await expect(
+      plugin.beforeToolCallback({
+        tool: mockTool,
+        toolArgs: hostile,
+        toolContext: mockToolContext,
+      }),
+    ).resolves.toBeUndefined();
+    expect(
+      infoCalls.some((m) => m.includes('Arguments: [object Object]')),
+    ).toBe(true);
+  });
+
+  it('beforeToolCallback should not reject when the arguments serialize to nothing', async () => {
+    const plugin = new LoggingPlugin();
+
+    await expect(
+      plugin.beforeToolCallback({
+        tool: mockTool,
+        toolArgs: {toJSON: () => undefined},
+        toolContext: mockToolContext,
+      }),
+    ).resolves.toBeUndefined();
+    expect(
+      infoCalls.some((m) => m.includes('Arguments: [object Object]')),
+    ).toBe(true);
+  });
+
+  it('afterToolCallback should not reject on a circular result', async () => {
+    const plugin = new LoggingPlugin();
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+
+    await expect(
+      plugin.afterToolCallback({
+        tool: mockTool,
+        toolArgs: {},
+        toolContext: mockToolContext,
+        result: cyclic,
+      }),
+    ).resolves.toBeUndefined();
+    expect(
+      infoCalls.some((m) => m.includes('Result: {"self":"[Circular]"}')),
+    ).toBe(true);
+  });
+
+  it('beforeToolCallback should still render ordinary arguments as JSON', async () => {
+    const plugin = new LoggingPlugin();
+
+    await plugin.beforeToolCallback({
+      tool: mockTool,
+      toolArgs: {query: 'test'},
+      toolContext: mockToolContext,
+    });
+
+    expect(
+      infoCalls.some((m) => m.includes('Arguments: {"query":"test"}')),
+    ).toBe(true);
+  });
+
+  it('should format content with an empty parts array as "None"', async () => {
+    const plugin = new LoggingPlugin();
+
+    await plugin.onUserMessageCallback({
+      invocationContext: mockInvocationContext,
+      userMessage: {parts: []},
+    });
+
+    expect(infoCalls.some((m) => m.includes('User Content: None'))).toBe(true);
+  });
+
+  /**
+   * Ported from adk-python main
+   * tests/unittests/plugins/test_logging_plugin.py. Each name is kept verbatim
+   * so a reviewer can grep it against the reference.
+   */
+  describe('ported from adk-python', () => {
+    it('test_before_model_callback_truncates_long_system_instruction', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        config: {systemInstruction: 'a'.repeat(200) + 'Z'.repeat(50)},
+      };
+
+      const result = await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain(
+        `System Instruction: '${'a'.repeat(200)}...'`,
+      );
+      // Everything past the 200-char budget is dropped, not merely elided.
+      expect(infoCalls.join('\n')).not.toContain('Z');
+    });
+
+    it('test_before_model_callback_keeps_system_instruction_at_budget', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        config: {systemInstruction: 'a'.repeat(200)},
+      };
+
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      expect(infoCalls.join('\n')).toContain(
+        `System Instruction: '${'a'.repeat(200)}'`,
+      );
+    });
+
+    it('test_before_model_callback_lists_available_tool_names', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        model: 'test-model',
+        toolsDict: {alpha: mockTool, beta: mockTool},
+      };
+
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      // adk-python prints the Python list repr `['alpha', 'beta']`; adk-js
+      // interpolates the array into a template literal.
+      expect(infoCalls.join('\n')).toContain('Available Tools: alpha,beta');
+      expect(infoCalls.join('\n')).toContain('Model: test-model');
+    });
+
+    it('test_after_model_callback_logs_error_instead_of_content', async () => {
+      const plugin = new LoggingPlugin();
+      const llmResponse: LlmResponse = {
+        content: {parts: [{text: 'unreachable-text'}]},
+        errorCode: '429',
+        errorMessage: 'rate limited',
+      };
+
+      const result = await plugin.afterModelCallback({
+        callbackContext: mockCallbackContext,
+        llmResponse,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain('ERROR - Code: 429');
+      expect(infoCalls.join('\n')).toContain('Error Message: rate limited');
+      // An errored response carries no usable content; logging it would bury
+      // the error under an empty "Content:" line.
+      expect(infoCalls.join('\n')).not.toContain('unreachable-text');
+      expect(infoCalls.join('\n')).not.toContain('Content:');
+    });
+
+    it('test_after_model_callback_logs_content_and_token_usage', async () => {
+      const plugin = new LoggingPlugin();
+      const llmResponse: LlmResponse = {
+        content: {parts: [{text: 'hello'}]},
+        usageMetadata: {promptTokenCount: 11, candidatesTokenCount: 7},
+      };
+
+      await plugin.afterModelCallback({
+        callbackContext: mockCallbackContext,
+        llmResponse,
+      });
+
+      expect(infoCalls.join('\n')).toContain("Content: text: 'hello'");
+      expect(infoCalls.join('\n')).toContain(
+        'Token Usage - Input: 11, Output: 7',
+      );
+    });
+
+    it('test_on_event_callback_summarizes_function_parts', async () => {
+      const plugin = new LoggingPlugin();
+      const event = createEvent({
+        author: 'test_agent',
+        content: {
+          parts: [
+            {functionCall: {name: 'do_thing', args: {x: 1}}},
+            {functionResponse: {name: 'do_thing', response: {ok: true}}},
+          ],
+        },
+      });
+
+      const result = await plugin.onEventCallback({
+        invocationContext: mockInvocationContext,
+        event,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain(
+        'Content: function_call: do_thing | function_response: do_thing',
+      );
+      // adk-python prints the Python list repr `['do_thing']`.
+      expect(infoCalls.join('\n')).toContain('Function Calls: do_thing');
+      expect(infoCalls.join('\n')).toContain('Function Responses: do_thing');
+    });
+
+    it('test_on_event_callback_renders_absent_content_as_none', async () => {
+      const plugin = new LoggingPlugin();
+      const event = createEvent({author: 'test_agent'});
+
+      await plugin.onEventCallback({
+        invocationContext: mockInvocationContext,
+        event,
+      });
+
+      expect(infoCalls.join('\n')).toContain('Content: None');
+    });
+
+    it('test_on_event_callback_truncates_long_text_part', async () => {
+      const plugin = new LoggingPlugin();
+      // The id is pinned because the plugin logs it and `createEvent`
+      // generates a random one, which can itself contain the 'Z' this test
+      // looks for.
+      const event = createEvent({
+        id: 'event-1',
+        author: 'test_agent',
+        content: {parts: [{text: 'a'.repeat(200) + 'Z'.repeat(50)}]},
+      });
+
+      await plugin.onEventCallback({
+        invocationContext: mockInvocationContext,
+        event,
+      });
+
+      expect(infoCalls.join('\n')).toContain(`text: '${'a'.repeat(200)}...'`);
+      expect(infoCalls.join('\n')).not.toContain('Z');
+    });
+
+    it('test_before_tool_callback_truncates_long_arguments', async () => {
+      const plugin = new LoggingPlugin();
+      const toolArgs = {payload: 'a'.repeat(400)};
+
+      const result = await plugin.beforeToolCallback({
+        tool: mockTool,
+        toolArgs,
+        toolContext: mockToolContext,
+      });
+
+      expect(result).toBeUndefined();
+      // adk-python asserts `str(tool_args)[:300]`, a Python dict repr; adk-js
+      // emits JSON.
+      expect(infoCalls.join('\n')).toContain(
+        `Arguments: ${JSON.stringify(toolArgs).slice(0, 300)}...}`,
+      );
+      // The full payload must not reach the console.
+      expect(infoCalls.join('\n')).not.toContain(JSON.stringify(toolArgs));
+    });
+
+    it('test_before_model_callback_formats_content_system_instruction', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        config: {
+          systemInstruction: {role: 'system', parts: [{text: 'Stay concise.'}]},
+        },
+      };
+
+      const result = await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain('Stay concise.');
+    });
+
+    it('test_before_model_callback_formats_list_system_instruction', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        config: {
+          systemInstruction: [{text: 'Stay concise.'}, {text: 'Cite sources.'}],
+        },
+      };
+
+      const result = await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain('Stay concise.');
+      expect(infoCalls.join('\n')).toContain('Cite sources.');
+    });
   });
 });
