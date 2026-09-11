@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {OCIGenAILlm} from './models/oci_genai_llm.js';
+import {LLMRegistry} from './models/registry.js';
 import {installNodeLogger} from './utils/logger_node.js';
 
 // The Node entry point installs the winston-backed logger. `utils/logger.ts`
@@ -13,6 +15,12 @@ import {installNodeLogger} from './utils/logger_node.js';
 // must log through the `logger` facade instead of holding the result of
 // `getLogger()`.
 installNodeLogger();
+
+// OCIGenAILlm is a Node-only provider, so it is registered here in the Node
+// entry point rather than in models/registry.ts, which the browser entry
+// reaches through common.ts. This keeps the OCI SDK and its Node built-ins out
+// of the web bundle; see https://github.com/google/adk-js/pull/614.
+LLMRegistry.register(OCIGenAILlm);
 
 // Also available as `@google/adk/a2a`, which does not evaluate the rest of
 // this barrel.
@@ -42,11 +50,10 @@ export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.
 export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
 export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';
 export type {VertexAiRagMemoryServiceOptions} from './memory/vertex_ai_rag_memory_service.js';
-export {OCIGenAILlm} from './models/oci_genai_llm.js';
 export type {
   OCIAuthType,
-  OCIGenAILlmParams,
   OciChatClient,
+  OCIGenAILlmParams,
 } from './models/oci_genai_llm.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
@@ -91,6 +98,7 @@ export {
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
+export {OCIGenAILlm};
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';
