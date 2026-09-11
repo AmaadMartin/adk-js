@@ -129,8 +129,8 @@ function hasToMillis(value: unknown): value is {toMillis(): number} {
  *
  * Firestore reads a server timestamp back as a `Timestamp`, but a document
  * written by another client can hold a `Date` or a plain number instead.
- * Anything else reads as 0, the value a session that was never written
- * carries. Milliseconds, not seconds: a caller must be able to feed
+ * Anything else reads as 0, the value an unwritten session carries.
+ * Milliseconds, not seconds: a caller must be able to feed
  * `session.lastUpdateTime` straight back into `config.afterTimestamp`.
  */
 export function toLastUpdateTime(updateTime: unknown): number {

@@ -112,9 +112,13 @@ import {isStaleSessionError} from '@google/adk';
 try {
   await sessions.appendEvent({session, event});
 } catch (error) {
-  if (isStaleSessionError(error)) {
-    // Another writer changed the session. Load it again and retry.
-    session = await sessions.getSession({appName, userId, sessionId});
+  if (!isStaleSessionError(error)) {
+    throw error;
+  }
+  // Another writer changed the session: load it again and append to that.
+  const fresh = await sessions.getSession({appName, userId, sessionId});
+  if (fresh) {
+    await sessions.appendEvent({session: fresh, event});
   }
 }
 ```
