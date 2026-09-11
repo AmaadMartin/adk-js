@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Part} from '@google/genai';
 import {BaseLlm} from '../models/base_llm.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
-import {DialogueHistory, assembleDialogueHistory} from './dialogue_history.js';
-import {Invocation} from './eval_case.js';
+import {AgentDetails} from './app_details.js';
+import {Invocation, InvocationEvent, isInvocationEvents} from './eval_case.js';
 import {EvalMetric, EvalStatus} from './eval_metrics.js';
 import {
   EvaluationResult,
@@ -18,6 +19,9 @@ import {
 } from './evaluator.js';
 import {JSON_INDENT, formatPromptTemplate} from './llm_as_judge_utils.js';
 import {RubricBasedEvaluator} from './rubric_based_evaluator.js';
+
+/** The agent name used when no invocation event names one. */
+const DEFAULT_AGENT_NAME = 'agent';
 
 /**
  * The prompt the judge model answers. Copied from adk-python, because the
@@ -125,37 +129,156 @@ Verdict: no
 </properties>
 `;
 
+/** Joins the non-empty text of the given parts with a single space. */
+function joinTextParts(parts?: Part[]): string {
+  return (parts ?? [])
+    .flatMap((part) => (part.text ? [part.text] : []))
+    .join(' ');
+}
+
+/** Renders a tool call's arguments or a tool response's payload as JSON. */
+function payloadJson(payload?: Record<string, unknown>): string {
+  return JSON.stringify(payload ?? {});
+}
+
+/** Returns how an event's author is named in the dialogue. */
+function eventRole(author: string): string {
+  return author.toLowerCase() === 'user' ? 'USER' : `AGENT (${author})`;
+}
+
+/** Returns the dialogue lines one invocation event contributes. */
+function eventLines(event: InvocationEvent, turn: number): string[] {
+  const parts = event.content?.parts;
+  if (parts === undefined) {
+    return [];
+  }
+
+  const role = eventRole(event.author);
+  const lines: string[] = [];
+  const text = joinTextParts(parts);
+  if (text) {
+    lines.push(`${role} TURN ${turn}: ${text}`);
+  }
+  for (const part of parts) {
+    if (part.functionCall) {
+      lines.push(
+        `${role} TURN ${turn} (tool call): ${part.functionCall.name}` +
+          `(${payloadJson(part.functionCall.args)})`,
+      );
+    }
+    if (part.functionResponse) {
+      lines.push(
+        `${role} TURN ${turn} (tool output): ${part.functionResponse.name}` +
+          ` -> ${payloadJson(part.functionResponse.response)}`,
+      );
+    }
+  }
+  return lines;
+}
+
+/** Returns the events one invocation recorded, empty when it recorded none. */
+function invocationEventsOf(invocation: Invocation): InvocationEvent[] {
+  return isInvocationEvents(invocation.intermediateData)
+    ? invocation.intermediateData.invocationEvents
+    : [];
+}
+
+/** Returns the dialogue lines one invocation contributes. */
+function invocationLines(invocation: Invocation, turn: number): string[] {
+  const lines: string[] = [];
+
+  const userText = joinTextParts(invocation.userContent?.parts);
+  if (userText) {
+    lines.push(`USER TURN ${turn}: ${userText}`);
+  }
+
+  const events = invocationEventsOf(invocation);
+  for (const event of events) {
+    lines.push(...eventLines(event, turn));
+  }
+
+  const finalText = joinTextParts(invocation.finalResponse?.parts);
+  if (finalText) {
+    const agentName = events[0]?.author ?? DEFAULT_AGENT_NAME;
+    lines.push(`AGENT (${agentName}) TURN ${turn}: ${finalText}`);
+  }
+  return lines;
+}
+
+/** Flattens a whole conversation into the transcript the judge reads. */
+function formatDialogue(invocations: Invocation[]): string {
+  return invocations
+    .flatMap((invocation, index) => invocationLines(invocation, index + 1))
+    .join('\n');
+}
+
+/** Returns every agent the conversation's app details describe, in order. */
+function agentEntries(
+  invocations: Invocation[],
+): Array<[string, AgentDetails]> {
+  return invocations.flatMap((invocation) =>
+    Object.entries(invocation.appDetails?.agentDetails ?? {}),
+  );
+}
+
+/** Returns the system instructions of every agent, de-duplicated. */
+function formatInstructions(invocations: Invocation[]): string {
+  const parts = agentEntries(invocations).map(
+    ([agentId, details]) =>
+      `Agent ${agentId} Instructions:\n${details.instructions ?? ''}`,
+  );
+  return [...new Set(parts)].join('\n\n');
+}
+
+/** Returns the tools every agent declares, de-duplicated. */
+function formatToolDefinitions(invocations: Invocation[]): string {
+  const parts: string[] = [];
+  for (const [agentId, details] of agentEntries(invocations)) {
+    parts.push(`Agent: ${agentId}`);
+    for (const tool of details.toolDeclarations ?? []) {
+      for (const func of tool.functionDeclarations ?? []) {
+        parts.push(`- ${func.name}: ${func.description ?? ''}`);
+      }
+    }
+  }
+  return [...new Set(parts)].join('\n');
+}
+
 /**
  * Grades an agent's whole multi-turn trajectory against written rubrics.
  *
- * Take a travel-booking agent that handles a multi-step itinerary. There is no
- * golden trajectory, but the conversation still has properties worth pinning:
+ * Take a travel-booking agent that plans an itinerary over several turns.
+ * There is no golden trajectory, but the run still has properties worth
+ * pinning:
  *
- * - The agent called the flight search tool with the user's origin,
+ * - The agent called the flight-search tool with the user's origin,
  *   destination and dates.
- * - The agent confirmed the booking details before finalising the reservation.
- * - The final reply carried the flight numbers and a confirmation code.
+ * - The agent confirmed the booking details with the user before finalizing.
+ * - The final response carried a complete itinerary with flight numbers,
+ *   times and confirmation codes.
  *
- * Each property is one rubric. Unlike its single-turn siblings, this metric
- * makes one judge call for the whole conversation: it flattens every
- * invocation into one transcript, grades the last invocation with that
- * transcript in the prompt, and reports the first N-1 invocations
- * `NOT_EVALUATED`. The score of that one judge call is the eval case's score.
+ * Each property is one rubric. A judge model answers `yes` or `no` per
+ * rubric; a `yes` scores 1.0 and a `no` scores 0.0, and the conversation
+ * scores the mean of its rubrics.
  *
- * {@link MultiTurnTrajectoryQualityV1Evaluator} scores the same idea through
- * the Vertex AI Gen AI evaluation service, which needs a Google Cloud project.
- * This metric runs offline against any judge model the registry resolves.
+ * Unlike the per-invocation rubric metrics, this one grades the conversation
+ * as a whole. It flattens every turn into one transcript, runs the judge once
+ * on the last invocation with that transcript as context, and reports the
+ * first N-1 invocations {@link EvalStatus.NOT_EVALUATED}.
  */
 @experimental
 export class RubricBasedMultiTurnTrajectoryEvaluator extends RubricBasedEvaluator {
   /** The type of the invocation rubrics this metric grades. */
   static readonly RUBRIC_TYPE = 'TRAJECTORY_QUALITY';
 
-  private dialogueHistory: DialogueHistory = {
-    dialogue: '',
-    instructions: '',
-    tools: '',
-  };
+  /** The conversation transcript the judge reads. */
+  private formattedDialogue = '';
+
+  /** The system instructions of every agent in the conversation. */
+  private formattedInstructions = '';
+
+  /** The tool declarations of every agent in the conversation. */
+  private formattedTools = '';
 
   constructor(evalMetric: EvalMetric, judgeModel?: BaseLlm) {
     super({
@@ -166,51 +289,62 @@ export class RubricBasedMultiTurnTrajectoryEvaluator extends RubricBasedEvaluato
   }
 
   /**
-   * Grades the conversation as a whole, with one judge call on its last turn.
+   * Grades the conversation with a single judge run on its last turn.
+   *
+   * adk-python takes a conversation scenario here and forwards it to the
+   * base class. `LlmAsJudge` does not accept one in adk-js, so this override
+   * omits the parameter.
    *
    * @throws {InputValidationError} When the two lists have different lengths,
-   *   when two rubrics share an id, or when no rubric applies to the last
-   *   invocation.
+   *   when two rubrics share an id, or when no rubric applies.
    */
   override async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
   ): Promise<EvaluationResult> {
-    logger.debug(
-      `Grading ${actualInvocations.length} invocations as one conversation.`,
-    );
     validateInvocationLengths(actualInvocations, expectedInvocations);
     if (actualInvocations.length === 0) {
       return emptyEvaluationResult();
     }
-    this.dialogueHistory = assembleDialogueHistory(actualInvocations);
+    logger.debug(
+      `Grading a conversation of ${actualInvocations.length} invocations.`,
+    );
+
+    this.formattedDialogue = formatDialogue(actualInvocations);
+    this.formattedInstructions = formatInstructions(actualInvocations);
+    this.formattedTools = formatToolDefinitions(actualInvocations);
+
+    const lastIndex = actualInvocations.length - 1;
+    const lastExpected = expectedInvocations?.[lastIndex];
+    const lastTurnResult = await super.evaluateInvocations(
+      [actualInvocations[lastIndex]],
+      lastExpected === undefined ? undefined : [lastExpected],
+    );
 
     const perInvocationResults: PerInvocationResult[] = actualInvocations
-      .slice(0, -1)
-      .map((actualInvocation, index) => ({
-        actualInvocation,
+      .slice(0, lastIndex)
+      .map((actual, index) => ({
+        actualInvocation: actual,
         expectedInvocation: expectedInvocations?.[index],
         evalStatus: EvalStatus.NOT_EVALUATED,
       }));
 
-    const lastActual = actualInvocations[actualInvocations.length - 1];
-    const lastExpected = expectedInvocations?.at(-1);
-    const lastTurnResult = await super.evaluateInvocations(
-      [lastActual],
-      lastExpected === undefined ? undefined : [lastExpected],
+    // The delegation returns no per-invocation result when the criterion asks
+    // for no judge sample at all (`numSamples: 0`). The last turn keeps its
+    // entry regardless, so the result holds one entry per invocation.
+    perInvocationResults.push(
+      ...(lastTurnResult.perInvocationResults.length > 0
+        ? lastTurnResult.perInvocationResults
+        : [
+            {
+              actualInvocation: actualInvocations[lastIndex],
+              expectedInvocation: lastExpected,
+              score: lastTurnResult.overallScore,
+              evalStatus: lastTurnResult.overallEvalStatus,
+              rubricScores: lastTurnResult.overallRubricScores,
+            },
+          ]),
     );
-
-    if (lastTurnResult.perInvocationResults.length > 0) {
-      perInvocationResults.push(...lastTurnResult.perInvocationResults);
-    } else {
-      perInvocationResults.push({
-        actualInvocation: lastActual,
-        expectedInvocation: lastExpected,
-        score: lastTurnResult.overallScore,
-        evalStatus: lastTurnResult.overallEvalStatus,
-        rubricScores: lastTurnResult.overallRubricScores,
-      });
-    }
 
     return {
       overallScore: lastTurnResult.overallScore,
@@ -221,31 +355,29 @@ export class RubricBasedMultiTurnTrajectoryEvaluator extends RubricBasedEvaluato
   }
 
   /**
-   * Returns the prompt that grades the conversation.
+   * Returns the prompt that grades the whole conversation.
    *
    * adk-python takes the expected invocation here and ignores it, so this
-   * override omits the parameter. Called before any
-   * {@link RubricBasedMultiTurnTrajectoryEvaluator.evaluateInvocations}, it
-   * renders an empty transcript rather than throwing.
+   * override omits the parameter.
    *
    * @throws {InputValidationError} When two rubrics share an id, or no rubric
-   *   applies to the invocation.
+   *   applies to the conversation.
    */
   override formatAutoRaterPrompt(actual: Invocation): string {
     this.createEffectiveRubricsList(actual.rubrics);
-    const promptRubrics = this.getEffectiveRubricsList().map((rubric) => ({
+    const rubrics = this.getEffectiveRubricsList().map((rubric) => ({
       id: rubric.rubricId,
       property: rubric.rubricContent.textProperty,
-      ...(rubric.type ? {type: rubric.type} : {}),
+      ...(rubric.type === undefined ? {} : {type: rubric.type}),
     }));
 
     return formatPromptTemplate(
       RUBRIC_BASED_MULTI_TURN_TRAJECTORY_QUALITY_V1_PROMPT,
       {
-        agent_instructions: this.dialogueHistory.instructions,
-        agent_tool_definitions: this.dialogueHistory.tools,
-        user_agent_dialogue: this.dialogueHistory.dialogue,
-        properties: JSON.stringify(promptRubrics, null, JSON_INDENT),
+        agent_instructions: this.formattedInstructions,
+        agent_tool_definitions: this.formattedTools,
+        user_agent_dialogue: this.formattedDialogue,
+        properties: JSON.stringify(rubrics, null, JSON_INDENT),
       },
     );
   }

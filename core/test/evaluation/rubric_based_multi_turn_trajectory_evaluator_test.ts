@@ -9,6 +9,12 @@
  * `tests/unittests/evaluation/test_rubric_based_multi_turn_trajectory_evaluator.py`.
  * Each `it()` keeps the Python test name, so the two suites stay greppable
  * against each other.
+ *
+ * The Python suite reaches into `_formatted_dialogue` and friends. Reading a
+ * private field is not allowed here, so each test drives
+ * `evaluateInvocations` with a {@link FakeJudgeLlm} and asserts on the prompt
+ * the metric actually sent. That also proves the transcript reached the
+ * model, not merely that a field was set.
  */
 
 import {
@@ -20,9 +26,8 @@ import {
   PrebuiltMetrics,
   Rubric,
   RubricBasedMultiTurnTrajectoryEvaluator,
-  assembleDialogueHistory,
 } from '@google/adk';
-import {Tool} from '@google/genai';
+import {Content, Part, Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {FakeJudgeLlm} from './fake_judge_llm.js';
 
@@ -39,64 +44,79 @@ const RUBRICS: Rubric[] = [
   },
 ];
 
-function createEvaluator(judge: FakeJudgeLlm): {
+function createEvalMetric(rubrics: Rubric[]): EvalMetric {
+  return {
+    metricName: PrebuiltMetrics.RUBRIC_BASED_MULTI_TURN_TRAJECTORY_QUALITY_V1,
+    threshold: 0.5,
+    criterion: {threshold: 0.5, rubrics, judgeModelOptions: {numSamples: 3}},
+  };
+}
+
+/**
+ * Returns an evaluator paired with the judge it grades through, so a test can
+ * read the prompt the metric sent.
+ */
+function createEvaluator(rubrics: Rubric[] = RUBRICS): {
   evaluator: RubricBasedMultiTurnTrajectoryEvaluator;
   judge: FakeJudgeLlm;
 } {
-  const evalMetric: EvalMetric = {
-    metricName: PrebuiltMetrics.RUBRIC_BASED_MULTI_TURN_TRAJECTORY_QUALITY_V1,
-    threshold: 0.5,
-    criterion: {
-      threshold: 0.5,
-      rubrics: RUBRICS,
-      judgeModelOptions: {numSamples: 3},
-    },
-  };
+  const judge = new FakeJudgeLlm([{silent: true}]);
   return {
-    evaluator: new RubricBasedMultiTurnTrajectoryEvaluator(evalMetric, judge),
+    evaluator: new RubricBasedMultiTurnTrajectoryEvaluator(
+      createEvalMetric(rubrics),
+      judge,
+    ),
     judge,
   };
 }
 
-function createInvocation(options: {
-  userText: string;
+interface InvocationOptions {
+  userText?: string;
+  userParts?: Part[];
   agentText?: string;
-  invocationId?: string;
   rubrics?: Rubric[];
   appDetails?: AppDetails;
   intermediateData?: InvocationEvents;
-}): Invocation {
+}
+
+function createInvocation(options: InvocationOptions): Invocation {
+  const userContent: Content = {
+    parts: options.userParts ?? [{text: options.userText ?? ''}],
+  };
   return {
-    invocationId: options.invocationId ?? '',
-    userContent: {parts: [{text: options.userText}]},
-    finalResponse: options.agentText
-      ? {parts: [{text: options.agentText}]}
-      : undefined,
+    userContent,
+    finalResponse:
+      options.agentText === undefined
+        ? undefined
+        : {parts: [{text: options.agentText}]},
     rubrics: options.rubrics,
     appDetails: options.appDetails,
     intermediateData: options.intermediateData,
   };
 }
 
-/** The prompt the metric sent the judge on its first call. */
-function firstPrompt(judge: FakeJudgeLlm): string {
-  return judge.requests[0]?.contents?.[0]?.parts?.[0]?.text ?? '';
+/** Returns the prompt the metric sent to the judge on its first call. */
+function sentPrompt(judge: FakeJudgeLlm): string {
+  const text = judge.requests[0]?.contents[0]?.parts?.[0]?.text;
+  if (text === undefined) {
+    expect.fail('The metric sent no prompt to the judge.');
+  }
+  return text;
 }
 
-describe('format_auto_rater_prompt', () => {
+describe('RubricBasedMultiTurnTrajectoryEvaluator', () => {
   it('test_basic_dialogue_and_rubrics_in_prompt', async () => {
-    const {evaluator, judge} = createEvaluator(
-      new FakeJudgeLlm([{silent: true}]),
-    );
-    const invocation = createInvocation({
-      userText: 'What is the balance?',
-      agentText: 'Your balance is $100.',
-      rubrics: RUBRICS,
-    });
+    const {evaluator, judge} = createEvaluator();
 
-    await evaluator.evaluateInvocations([invocation]);
+    await evaluator.evaluateInvocations([
+      createInvocation({
+        userText: 'What is the balance?',
+        agentText: 'Your balance is $100.',
+        rubrics: RUBRICS,
+      }),
+    ]);
 
-    const prompt = firstPrompt(judge);
+    const prompt = sentPrompt(judge);
     expect(prompt).toContain('USER TURN 1: What is the balance?');
     expect(prompt).toContain('The agent uses the correct tool.');
     expect(prompt).toContain('The agent fulfills the user intent.');
@@ -105,9 +125,7 @@ describe('format_auto_rater_prompt', () => {
   });
 
   it('test_prompt_includes_agent_instructions_and_tools', async () => {
-    const {evaluator, judge} = createEvaluator(
-      new FakeJudgeLlm([{silent: true}]),
-    );
+    const {evaluator, judge} = createEvaluator();
     const tool: Tool = {
       functionDeclarations: [
         {
@@ -116,80 +134,79 @@ describe('format_auto_rater_prompt', () => {
         },
       ],
     };
-    const invocation = createInvocation({
-      userText: 'Transfer funds',
-      rubrics: RUBRICS,
-      appDetails: {
-        agentDetails: {
-          banking_agent: {
-            name: 'banking_agent',
-            instructions: 'You are a banking assistant.',
-            toolDeclarations: [tool],
+
+    await evaluator.evaluateInvocations([
+      createInvocation({
+        userText: 'Transfer funds',
+        rubrics: RUBRICS,
+        appDetails: {
+          agentDetails: {
+            banking_agent: {
+              name: 'banking_agent',
+              instructions: 'You are a banking assistant.',
+              toolDeclarations: [tool],
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
 
-    await evaluator.evaluateInvocations([invocation]);
-
-    const prompt = firstPrompt(judge);
+    const prompt = sentPrompt(judge);
     expect(prompt).toContain('You are a banking assistant.');
     expect(prompt).toContain('transfer_funds');
   });
-});
 
-describe('dialogue assembly', () => {
   it('test_empty_conversation_returns_not_evaluated', async () => {
-    const {evaluator} = createEvaluator(new FakeJudgeLlm([{silent: true}]));
+    const {evaluator, judge} = createEvaluator();
 
     const result = await evaluator.evaluateInvocations([]);
 
     expect(result.overallScore).toBeUndefined();
     expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
     expect(result.perInvocationResults).toEqual([]);
+    expect(judge.requests).toHaveLength(0);
   });
 
-  it('test_single_turn_user_and_agent', () => {
-    const invocations = [
+  it('test_single_turn_user_and_agent', async () => {
+    const {evaluator, judge} = createEvaluator();
+
+    await evaluator.evaluateInvocations([
       createInvocation({
         userText: 'Hello',
         agentText: 'Hi there!',
-        invocationId: 'agent1',
         rubrics: RUBRICS,
       }),
-    ];
+    ]);
 
-    const {dialogue} = assembleDialogueHistory(invocations);
-
-    expect(dialogue).toContain('USER TURN 1: Hello');
-    expect(dialogue).toContain('AGENT (agent) TURN 1: Hi there!');
+    const prompt = sentPrompt(judge);
+    expect(prompt).toContain('USER TURN 1: Hello');
+    expect(prompt).toContain('AGENT (agent) TURN 1: Hi there!');
   });
 
-  it('test_multi_turn_dialogue', () => {
-    const invocations = [
+  it('test_multi_turn_dialogue', async () => {
+    const {evaluator, judge} = createEvaluator();
+
+    await evaluator.evaluateInvocations([
       createInvocation({
         userText: 'Check my balance',
         agentText: 'Your balance is $100.',
-        invocationId: 'agent1',
         rubrics: RUBRICS,
       }),
       createInvocation({
         userText: 'Transfer $50',
         agentText: 'Transfer complete.',
-        invocationId: 'agent1',
-        rubrics: RUBRICS,
       }),
-    ];
+    ]);
 
-    const {dialogue} = assembleDialogueHistory(invocations);
-
-    expect(dialogue).toContain('USER TURN 1: Check my balance');
-    expect(dialogue).toContain('AGENT (agent) TURN 1: Your balance is $100.');
-    expect(dialogue).toContain('USER TURN 2: Transfer $50');
-    expect(dialogue).toContain('AGENT (agent) TURN 2: Transfer complete.');
+    const prompt = sentPrompt(judge);
+    expect(prompt).toContain('USER TURN 1: Check my balance');
+    expect(prompt).toContain('AGENT (agent) TURN 1: Your balance is $100.');
+    expect(prompt).toContain('USER TURN 2: Transfer $50');
+    expect(prompt).toContain('AGENT (agent) TURN 2: Transfer complete.');
   });
 
-  it('test_intermediate_events_with_function_calls', () => {
+  it('test_intermediate_events_with_function_calls', async () => {
+    const {evaluator, judge} = createEvaluator();
     const intermediateData: InvocationEvents = {
       invocationEvents: [
         {
@@ -215,24 +232,35 @@ describe('dialogue assembly', () => {
         },
       ],
     };
-    const invocations = [
+
+    await evaluator.evaluateInvocations([
       createInvocation({
         userText: 'What is my balance?',
         agentText: 'Your balance is $100.',
-        invocationId: 'banking_agent',
         rubrics: RUBRICS,
         intermediateData,
       }),
-    ];
+    ]);
 
-    const {dialogue} = assembleDialogueHistory(invocations);
-
-    expect(dialogue).toContain('get_balance');
-    expect(dialogue).toContain('"account_id": "123"');
-    expect(dialogue).toContain('"balance": 100');
+    const prompt = sentPrompt(judge);
+    expect(prompt).toContain('get_balance');
+    // The reference asserts `"account_id": "123"`. Python's `json.dumps` puts
+    // a space after the colon and `JSON.stringify` does not, so this port
+    // asserts the form it emits.
+    expect(prompt).toContain('"account_id":"123"');
+    expect(prompt).toContain('"balance":100');
+    expect(prompt).toContain(
+      'AGENT (banking_agent) TURN 1 (tool call):' +
+        ' get_balance({"account_id":"123"})',
+    );
+    expect(prompt).toContain(
+      'AGENT (banking_agent) TURN 1 (tool output):' +
+        ' get_balance -> {"balance":100}',
+    );
   });
 
-  it('test_app_details_instructions_and_tools', () => {
+  it('test_app_details_instructions_and_tools', async () => {
+    const {evaluator, judge} = createEvaluator();
     const tool: Tool = {
       functionDeclarations: [
         {
@@ -241,11 +269,11 @@ describe('dialogue assembly', () => {
         },
       ],
     };
-    const invocations = [
+
+    await evaluator.evaluateInvocations([
       createInvocation({
         userText: 'Transfer $50',
         agentText: 'Done.',
-        invocationId: 'banking_agent',
         rubrics: RUBRICS,
         appDetails: {
           agentDetails: {
@@ -257,28 +285,34 @@ describe('dialogue assembly', () => {
           },
         },
       }),
-    ];
+    ]);
 
-    const {instructions, tools} = assembleDialogueHistory(invocations);
-
-    expect(instructions).toContain('You are a banking assistant.');
-    expect(tools).toContain('transfer_funds');
-    expect(tools).toContain('Transfer money between accounts.');
+    const prompt = sentPrompt(judge);
+    expect(prompt).toContain(
+      'Agent banking_agent Instructions:\nYou are a banking assistant.',
+    );
+    expect(prompt).toContain(
+      'Agent: banking_agent\n- transfer_funds: Transfer money between' +
+        ' accounts.',
+    );
   });
 
-  it('test_invocation_without_user_content', () => {
-    const invocations: Invocation[] = [
-      {
-        invocationId: 'agent1',
-        userContent: {parts: []},
-        finalResponse: {parts: [{text: 'Agent response.'}]},
+  it('test_invocation_without_user_content', async () => {
+    const {evaluator, judge} = createEvaluator();
+
+    await evaluator.evaluateInvocations([
+      createInvocation({
+        userParts: [],
+        agentText: 'Agent response.',
         rubrics: RUBRICS,
-      },
-    ];
+      }),
+    ]);
 
-    const {dialogue} = assembleDialogueHistory(invocations);
-
-    expect(dialogue).not.toContain('USER TURN');
-    expect(dialogue).toContain('AGENT (agent) TURN 1: Agent response.');
+    const prompt = sentPrompt(judge);
+    expect(prompt).toContain(
+      '<conversation_history>\nAGENT (agent) TURN 1: Agent response.\n' +
+        '</conversation_history>',
+    );
+    expect(prompt).not.toContain('USER TURN');
   });
 });
