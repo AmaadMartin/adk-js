@@ -132,3 +132,8 @@ export class LLMRegistry {
 /** Registers default LLM factories, e.g. for Gemini models. */
 LLMRegistry.register(Gemini);
 LLMRegistry.register(ApigeeLlm);
+// OCIGenAILlm is not registered here. Its SDK (oci-common,
+// oci-generativeaiinference) reaches Node built-ins, and this module is
+// evaluated by the browser entry through common.ts. It is registered from the
+// Node entry point (index.ts) instead, so the web bundle stays Node-free; see
+// https://github.com/google/adk-js/pull/614.
