@@ -357,6 +357,7 @@ export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {randomUUID} from './utils/env_aware_utils.js';
+export {toJsonSafe} from './utils/json_utils.js';
 export {
   LogLevel,
   getLogger,
