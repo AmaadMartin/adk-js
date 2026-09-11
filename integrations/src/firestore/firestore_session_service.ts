@@ -89,6 +89,17 @@ interface FirestoreRuntime {
   serverTimestamp: () => unknown;
 }
 
+/**
+ * Returns the client to use: the caller's, or a new one built from the
+ * ambient project and credentials.
+ */
+export function resolveClient(
+  injected: FirestoreClient | undefined,
+  firestore: {Firestore: new () => FirestoreClient},
+): FirestoreClient {
+  return injected ?? new firestore.Firestore();
+}
+
 /** Serializes appends against one session. */
 function lockKey({appName, userId, id}: Session): string {
   return `${appName}\u0000${userId}\u0000${id}`;
@@ -181,7 +192,7 @@ export class FirestoreSessionService extends BaseSessionService {
       FIRESTORE_PEER,
       () => import('@google-cloud/firestore'),
     ).then((firestore) => ({
-      client: this.injectedClient ?? new firestore.Firestore(),
+      client: resolveClient(this.injectedClient, firestore),
       serverTimestamp: () => firestore.FieldValue.serverTimestamp(),
     }));
     return this.runtime;
