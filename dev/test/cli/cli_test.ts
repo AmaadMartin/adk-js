@@ -64,6 +64,15 @@ function isCleanCommanderExit(error: unknown): boolean {
   );
 }
 
+/**
+ * The options the mocked AdkApiServer constructor was called with. `vi.mocked`
+ * keeps the real constructor's parameter type, so a missing or misspelled
+ * server option is a compile error rather than a silent `undefined`.
+ */
+function serverOptions() {
+  return vi.mocked(AdkApiServer).mock.calls[0][0];
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -209,7 +218,7 @@ describe('CLI Entrypoint', () => {
     it('leaves the trigger options undefined when the flags are absent', async () => {
       await parse(['web']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = serverOptions();
       expect(args.triggerSources).toBeUndefined();
       expect(args.triggerOidcAudience).toBeUndefined();
       expect(args.triggerOidcServiceAccounts).toBeUndefined();
@@ -218,7 +227,7 @@ describe('CLI Entrypoint', () => {
     it('should split --trigger_sources on commas', async () => {
       await parse(['web', '--trigger_sources', 'pubsub, eventarc,']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = serverOptions();
       expect(args.triggerSources).toEqual(['pubsub', 'eventarc']);
     });
 
@@ -233,7 +242,7 @@ describe('CLI Entrypoint', () => {
         'a@project.iam, b@project.iam',
       ]);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = serverOptions();
       expect(args.triggerOidcAudience).toBe('https://svc.example.run.app');
       expect(args.triggerOidcServiceAccounts).toEqual([
         'a@project.iam',
@@ -271,7 +280,7 @@ describe('CLI Entrypoint', () => {
     it('leaves the trigger options undefined when the flags are absent', async () => {
       await parse(['api_server']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = serverOptions();
       expect(args.triggerSources).toBeUndefined();
       expect(args.triggerOidcAudience).toBeUndefined();
       expect(args.triggerOidcServiceAccounts).toBeUndefined();
@@ -280,7 +289,7 @@ describe('CLI Entrypoint', () => {
     it('should split --trigger_sources on commas', async () => {
       await parse(['api_server', '--trigger_sources', 'pubsub,eventarc']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = serverOptions();
       expect(args.triggerSources).toEqual(['pubsub', 'eventarc']);
     });
 
@@ -295,7 +304,7 @@ describe('CLI Entrypoint', () => {
         'a@project.iam',
       ]);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = serverOptions();
       expect(args.triggerOidcAudience).toBe('https://svc.example.run.app');
       expect(args.triggerOidcServiceAccounts).toEqual(['a@project.iam']);
     });
