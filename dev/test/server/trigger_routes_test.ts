@@ -297,7 +297,7 @@ describe('TestTriggerOidcVerification', () => {
     expect(verifyIdToken).not.toHaveBeenCalled();
   });
 
-  it('accepts a lowercase scheme and extra separating spaces', async () => {
+  it('accepts a lowercase scheme, and trims the token it extracts', async () => {
     const tokens: string[] = [];
     vi.spyOn(OAuth2Client.prototype, 'verifyIdToken').mockImplementation(
       (options) => {
@@ -308,7 +308,9 @@ describe('TestTriggerOidcVerification', () => {
     const {url} = await startOidcServer();
 
     const response = await post(url, PUBSUB_PATH, PUBSUB_PAYLOAD, {
-      Authorization: 'bearer   abc.def.ghi',
+      // The tab is inside the token the regex captures, so only trimming
+      // removes it. The reference's `token.strip()` does the same.
+      Authorization: 'bearer  \tabc.def.ghi',
     });
 
     expect(response.status).toBe(200);
@@ -1290,6 +1292,22 @@ describe('TestUnknownTriggerSources', () => {
       calls: [['test']],
     });
     expect(unknown.status).toBe(404);
+  });
+
+  it('warns about every unknown source once, in a stable order', async () => {
+    const serverLog = new RecordingLogger();
+
+    await startTriggerServer({
+      triggerSources: ['zeta', 'alpha', 'pubsub', 'alpha'],
+      logger: serverLog,
+    });
+
+    expect(
+      serverLog.lines.filter((line) => line.includes('Unknown trigger source')),
+    ).toEqual([
+      'Unknown trigger source(s) ignored: alpha, zeta. ' +
+        'Valid sources: pubsub, eventarc',
+    ]);
   });
 
   it('test_all_unknown_sources_results_in_no_endpoints', async () => {
