@@ -26,3 +26,8 @@ export class StaleSessionError extends Error {
     this.name = 'StaleSessionError';
   }
 }
+
+/** Type guard for {@link StaleSessionError}. */
+export function isStaleSessionError(e: unknown): e is StaleSessionError {
+  return e instanceof Error && e.name === 'StaleSessionError';
+}
