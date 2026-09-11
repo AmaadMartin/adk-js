@@ -17,6 +17,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   InvocationContext,
+  ListSessionsResponse,
   LlmAgent,
   node,
   Runner,
@@ -32,6 +33,7 @@ import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
+import {EVAL_SESSION_ID_PREFIX} from '../../src/server/eval_sessions.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {version} from '../../src/version.js';
 
@@ -463,6 +465,65 @@ describe('AdkWebServer', () => {
           sessionId: 'sessionId',
         }),
       ).toBeUndefined();
+    });
+  });
+
+  describe('Eval sessions in the session listing', () => {
+    /** Creates one session per id, so the listing holds them all. */
+    async function createSessions(...sessionIds: string[]): Promise<void> {
+      for (const sessionId of sessionIds) {
+        await sessionService.createSession({
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId,
+        });
+      }
+    }
+
+    async function listSessionIds(): Promise<string[]> {
+      const response = await client.get<ListSessionsResponse>(
+        '/apps/testApp/users/testUser/sessions',
+      );
+
+      expect(response.status).toBe(200);
+      return (response.data?.sessions ?? []).map((session) => session.id);
+    }
+
+    it('hides a session the evaluation runner created', async () => {
+      await createSessions(`${EVAL_SESSION_ID_PREFIX}run1`);
+
+      expect(await listSessionIds()).toEqual([]);
+    });
+
+    it('still lists the sessions a user created', async () => {
+      await createSessions('mine', `${EVAL_SESSION_ID_PREFIX}run1`, 'yours');
+
+      expect((await listSessionIds()).sort()).toEqual(['mine', 'yours']);
+    });
+
+    it('still serves an evaluation session asked for by id', async () => {
+      const sessionId = `${EVAL_SESSION_ID_PREFIX}run1`;
+      await createSessions(sessionId);
+
+      const response = await client.get<Session>(
+        `/apps/testApp/users/testUser/sessions/${sessionId}`,
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data?.id).toBe(sessionId);
+    });
+
+    it('keeps the paginated envelope the session service returned', async () => {
+      await createSessions('mine', `${EVAL_SESSION_ID_PREFIX}run1`);
+
+      const response = await client.get<ListSessionsResponse>(
+        '/apps/testApp/users/testUser/sessions',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data?.page).toBe(1);
+      expect(response.data?.totalItems).toBe(2);
+      expect(response.data?.totalPages).toBe(1);
     });
   });
 
