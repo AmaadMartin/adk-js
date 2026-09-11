@@ -54,6 +54,19 @@ const stdioParams = {
   serverParams: {command: 'test'},
 } as unknown as MCPConnectionParams;
 
+const timedStdioParams: MCPConnectionParams = {
+  type: 'StdioConnectionParams',
+  serverParams: {command: 'test'},
+  timeout: 12,
+};
+
+/** A client whose only usable method is the one under assertion. */
+function mockClientOnce(methods: Partial<Client>): void {
+  vi.mocked(Client).mockImplementationOnce(
+    () => ({connect: noop(), close: noop(), ...methods}) as Client,
+  );
+}
+
 describe('MCPToolset', () => {
   it('discovers tools without prefix', async () => {
     const toolset = new MCPToolset(stdioParams);
@@ -219,7 +232,10 @@ describe('MCPToolset', () => {
       const toolset = new MCPToolset(stdioParams);
       const contents = await toolset.readResource('res1');
 
-      expect(readResource).toHaveBeenCalledWith({uri: 'file:///res1'});
+      expect(readResource).toHaveBeenCalledWith(
+        {uri: 'file:///res1'},
+        {timeout: 5000},
+      );
       expect(contents).toEqual([{uri: 'file:///res1', text: 'hello'}]);
     });
 
@@ -331,6 +347,59 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+
+  /**
+   * Every request the toolset issues carries the session manager's resolved
+   * timeout. Without it a stdio server that starts but never answers holds the
+   * turn open for the MCP SDK's own 60s default.
+   */
+  describe('request timeout', () => {
+    it('passes the default stdio timeout to listTools', async () => {
+      const listTools = vi.fn().mockResolvedValue({tools: []});
+      mockClientOnce({listTools});
+
+      await new MCPToolset(stdioParams).getTools();
+
+      expect(listTools).toHaveBeenCalledWith(undefined, {timeout: 5000});
+    });
+
+    it('passes the default stdio timeout to the listResources behind getResourceInfo', async () => {
+      const listResources = vi.fn().mockResolvedValue({
+        resources: [{uri: 'file:///res1', name: 'res1'}],
+      });
+      mockClientOnce({listResources});
+
+      await new MCPToolset(stdioParams).getResourceInfo('res1');
+
+      expect(listResources).toHaveBeenCalledWith(undefined, {timeout: 5000});
+    });
+
+    it('passes a configured stdio timeout to listResources', async () => {
+      const listResources = vi.fn().mockResolvedValue({resources: []});
+      mockClientOnce({listResources});
+
+      await new MCPToolset(timedStdioParams).listResources();
+
+      expect(listResources).toHaveBeenCalledWith(undefined, {timeout: 12000});
+    });
+
+    it('passes a configured stdio timeout to readResource', async () => {
+      const readResource = vi.fn().mockResolvedValue({contents: []});
+      mockClientOnce({
+        listResources: vi.fn().mockResolvedValue({
+          resources: [{uri: 'file:///res1', name: 'res1'}],
+        }),
+      });
+      mockClientOnce({readResource});
+
+      await new MCPToolset(timedStdioParams).readResource('res1');
+
+      expect(readResource).toHaveBeenCalledWith(
+        {uri: 'file:///res1'},
+        {timeout: 12000},
+      );
     });
   });
 });

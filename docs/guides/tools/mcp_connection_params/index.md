@@ -1,7 +1,7 @@
 # MCP connection parameters
 
 Configure how `MCPToolset` connects to an MCP server: which transport it uses,
-how long it waits for the handshake, and whether it terminates the server-side
+how long it waits for a reply, and whether it terminates the server-side
 session when it disconnects. Reach for these when the defaults cost you — a
 remote server that is slow to answer, or a long-lived session you must not
 destroy.
@@ -19,9 +19,12 @@ session again. There are two shapes, discriminated by `type`:
 The session is short-lived. `getTools()` opens one, lists the tools, and closes
 it; every `MCPTool` call does the same. Two fields control that lifecycle:
 
-- `timeout` bounds the `initialize` handshake, in **seconds**. Leave it unset and
-  the MCP SDK's own 60 second request timeout applies. Set it when you would
-  rather fail fast than block a tool call on an unreachable server.
+- `timeout` bounds every request on the session, in **seconds**. That includes
+  the `initialize` handshake, `tools/list`, the resource reads, and each
+  `tools/call`. Stdio defaults to 5 seconds, matching adk-python; streamable
+  HTTP has no default, so the MCP SDK's own 60 second request timeout applies.
+  Set it when you would rather fail fast than block a tool call on a server
+  that does not answer.
 - `terminateOnClose` decides whether closing a streamable HTTP session also sends
   the MCP `DELETE` that ends the server-side session. It defaults to `true`, so
   the server can release the session immediately instead of waiting for its own
@@ -49,7 +52,8 @@ A connection that exceeds the budget rejects with
 `Failed to create MCP session: ...`, with the underlying MCP error attached as
 `cause`.
 
-The same field works for a local server over stdio:
+A local server over stdio takes the same field, and already has a 5 second
+default. Raise it when your server is slow to start or slow to answer a call:
 
 ```ts
 import {MCPToolset} from '@google/adk';
@@ -57,12 +61,13 @@ import {MCPToolset} from '@google/adk';
 const toolset = new MCPToolset({
   type: 'StdioConnectionParams',
   serverParams: {command: process.execPath, args: ['./my_mcp_server.mjs']},
-  timeout: 5,
+  timeout: 30,
 });
 ```
 
-`timeout: 0` is not "no limit": it is a zero-length budget, and the handshake
-fails immediately. Omit the field to get the SDK default.
+`timeout: 0` is not "no limit": it is a zero-length budget, and every request
+fails immediately. Omitting the field gives you 5 seconds over stdio, and the
+SDK default over streamable HTTP.
 
 ## Keeping the server session alive
 

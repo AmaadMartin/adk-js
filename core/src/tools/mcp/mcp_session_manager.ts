@@ -25,6 +25,17 @@ const MCP_SDK: OptionalPeer = {
 };
 
 /**
+ * Seconds a stdio session allows each request when the caller sets no timeout.
+ *
+ * A stdio server that starts but never answers -- a command that is not an MCP
+ * server, or one that is misconfigured -- leaves every request waiting for a
+ * reply that never arrives, and the MCP SDK's own default is a full minute.
+ * Five seconds matches adk-python's `StdioConnectionParams.timeout` default.
+ * See https://github.com/google/adk-python/issues/643.
+ */
+const DEFAULT_STDIO_TIMEOUT_SECONDS = 5;
+
+/**
  * Tears a server-side session down before its client is closed. Only a
  * streamable HTTP session has one; a stdio session has nothing to release.
  */
@@ -44,9 +55,10 @@ export interface StdioConnectionParams {
   type: 'StdioConnectionParams';
   serverParams: StdioServerParameters;
   /**
-   * Seconds to wait for the MCP server to complete the `initialize` handshake.
-   * When unset, the MCP SDK's own 60s request timeout applies. `0` is a
-   * zero-length budget, not "no limit".
+   * Seconds to wait for a reply to each request on the session, including the
+   * `initialize` handshake. Defaults to 5, matching adk-python's
+   * `StdioConnectionParams.timeout`. `0` is a zero-length budget, not
+   * "no limit".
    */
   timeout?: number;
 }
@@ -71,9 +83,9 @@ export interface StreamableHTTPConnectionParams {
    */
   header?: Record<string, unknown>;
   /**
-   * Seconds to wait for the MCP server to complete the `initialize` handshake.
-   * When unset, the MCP SDK's own 60s request timeout applies. `0` is a
-   * zero-length budget, not "no limit".
+   * Seconds to wait for a reply to each request on the session, including the
+   * `initialize` handshake. When unset, the MCP SDK's own 60s request timeout
+   * applies. `0` is a zero-length budget, not "no limit".
    */
   timeout?: number;
   /**
@@ -101,6 +113,21 @@ export type MCPConnectionParams =
   | StreamableHTTPConnectionParams;
 
 /**
+ * Milliseconds to allow each request on a session, or `undefined` to leave the
+ * MCP SDK's own request timeout in place. The params carry seconds;
+ * `RequestOptions.timeout` is milliseconds.
+ */
+function resolveRequestTimeoutMs(
+  params: MCPConnectionParams,
+): number | undefined {
+  const seconds =
+    params.type === 'StdioConnectionParams'
+      ? (params.timeout ?? DEFAULT_STDIO_TIMEOUT_SECONDS)
+      : params.timeout;
+  return seconds === undefined ? undefined : seconds * 1000;
+}
+
+/**
  * Manages Model Context Protocol (MCP) client sessions.
  *
  * This class is responsible for establishing and managing connections to MCP
@@ -123,9 +150,17 @@ export class MCPSessionManager {
     Client,
     SessionTerminator | undefined
   >();
+  /**
+   * Options callers must pass with every request they issue on a session from
+   * this manager. A `timeout` of `undefined` leaves the MCP SDK's own request
+   * timeout in place, which is what a streamable HTTP connection gets when it
+   * configures no timeout.
+   */
+  readonly requestOptions: {timeout: number | undefined};
 
   constructor(connectionParams: MCPConnectionParams) {
     this.connectionParams = connectionParams;
+    this.requestOptions = {timeout: resolveRequestTimeoutMs(connectionParams)};
   }
 
   async createSession(): Promise<Client> {
@@ -135,11 +170,6 @@ export class MCPSessionManager {
     );
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
     let terminate: SessionTerminator | undefined;
-    // The params carry seconds; `RequestOptions.timeout` is milliseconds.
-    // Undefined leaves the SDK's own request timeout in force.
-    const {timeout} = this.connectionParams;
-    const requestOptions =
-      timeout === undefined ? undefined : {timeout: timeout * 1000};
 
     try {
       switch (this.connectionParams.type) {
@@ -152,7 +182,7 @@ export class MCPSessionManager {
             this.connectionParams.serverParams,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport, requestOptions);
+          await client.connect(transport, this.requestOptions);
           break;
         }
         case 'StreamableHTTPConnectionParams': {
@@ -176,7 +206,7 @@ export class MCPSessionManager {
             options,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport, requestOptions);
+          await client.connect(transport, this.requestOptions);
           if (this.connectionParams.terminateOnClose ?? true) {
             terminate = async () => {
               // `terminateSession()` reports through `onerror` as well as
