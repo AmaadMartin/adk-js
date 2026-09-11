@@ -17,6 +17,7 @@ import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import {RunConfig, StreamingMode} from '../agents/run_config.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
+import {isSessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {createNewEventId, Event} from '../events/event.js';
 import {
@@ -430,12 +431,14 @@ export class EvalLiveSession {
     const {runner, session} = this;
     return new InvocationContext({
       artifactService: runner.artifactService
-        ? new ScopedArtifactService(
-            runner.artifactService,
-            runner.appName,
-            session.userId,
-            session.id,
-          )
+        ? isSessionArtifactService(runner.artifactService)
+          ? runner.artifactService
+          : new ScopedArtifactService(
+              runner.artifactService,
+              runner.appName,
+              session.userId,
+              session.id,
+            )
         : undefined,
       sessionService: runner.sessionService,
       memoryService: runner.memoryService,
