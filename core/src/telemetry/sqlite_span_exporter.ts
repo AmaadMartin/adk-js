@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {mkdir} from 'node:fs/promises';
+import {dirname} from 'node:path';
+
 import {MikroORM} from '@mikro-orm/core';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
 import {ReadableSpan, SpanExporter} from '@opentelemetry/sdk-trace-base';
@@ -11,7 +14,7 @@ import {ReadableSpan, SpanExporter} from '@opentelemetry/sdk-trace-base';
 import {ensureDatabaseCreated} from '../sessions/db/operations.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
-import {StorageSpan} from './db/schema.js';
+import {StorageSpan, storageSpanSchema} from './db/schema.js';
 import {
   compareByStartTime,
   toReadableSpan,
@@ -178,14 +181,22 @@ export class SqliteSpanExporter implements SpanExporter {
       {packageName: '@mikro-orm/sqlite', feature: 'SqliteSpanExporter'},
       () => import('@mikro-orm/sqlite'),
     );
-    // `connect: false` keeps the connection out of `init`, which would
-    // otherwise open the file and leak it by throwing before returning a
-    // handle to close. Windows then refuses to delete the file.
-    const orm = await MikroORM.init({
+    // Create the parent directory before opening the file. The @mikro-orm/sqlite
+    // v7 driver opens the database through better-sqlite3, which does not create
+    // missing directories and fails the connection instead. `:memory:` has no
+    // parent directory to create.
+    if (this.dbPath !== ':memory:') {
+      await mkdir(dirname(this.dbPath), {recursive: true});
+    }
+    // The synchronous `new MikroORM(...)` constructor keeps the connection out
+    // of construction, which `MikroORM.init` would otherwise open eagerly and
+    // leak by throwing before returning a handle to close. Windows then refuses
+    // to delete the file. MikroORM v7 dropped the `connect: false` init option,
+    // so the constructor is now the way to defer the connection.
+    const orm = new MikroORM({
       dbName: this.dbPath,
       driver: SqliteDriver,
-      entities: [StorageSpan],
-      connect: false,
+      entities: [storageSpanSchema],
     });
     try {
       await orm.connect();

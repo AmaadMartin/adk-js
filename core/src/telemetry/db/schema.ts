@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BigIntType, Entity, Index, PrimaryKey, Property} from '@mikro-orm/core';
+import {BigIntType, EntitySchema} from '@mikro-orm/core';
 
 /**
  * An epoch-nanosecond column, stored as a SQL `bigint` and read as a string.
@@ -37,42 +37,52 @@ class UnixNanoType extends BigIntType<'string'> {
  * nanoseconds exceed `Number.MAX_SAFE_INTEGER`, so a `number` mapping would
  * silently round them. See {@link UnixNanoType}.
  */
-@Index({name: 'spans_session_id_idx', properties: ['sessionId']})
-@Index({name: 'spans_trace_id_idx', properties: ['traceId']})
-@Entity({tableName: 'spans'})
+// The entity below is a plain class paired with an `EntitySchema`, rather than
+// a decorated class. MikroORM v7 moved the decorators into
+// `@mikro-orm/decorators`, whose legacy entry pulls in `reflect-metadata`;
+// declaring the mapping separately keeps both off the dependency list while
+// leaving the class usable as a value (`em.find(StorageSpan, ...)`) and as a
+// type (`InstanceType<...>`). This matches `sessions/db/schema.ts`.
 export class StorageSpan {
-  @PrimaryKey({type: 'string', fieldName: 'span_id'})
   spanId!: string;
-
-  @Property({type: 'string', fieldName: 'trace_id'})
   traceId!: string;
-
-  @Property({type: 'string', fieldName: 'parent_span_id', nullable: true})
   parentSpanId?: string;
-
-  @Property({type: 'string'})
   name!: string;
-
-  @Property({
-    type: new UnixNanoType(),
-    fieldName: 'start_time_unix_nano',
-    nullable: true,
-  })
   startTimeUnixNano?: string;
-
-  @Property({
-    type: new UnixNanoType(),
-    fieldName: 'end_time_unix_nano',
-    nullable: true,
-  })
   endTimeUnixNano?: string;
-
-  @Property({type: 'string', fieldName: 'session_id', nullable: true})
   sessionId?: string;
-
-  @Property({type: 'string', fieldName: 'invocation_id', nullable: true})
   invocationId?: string;
-
-  @Property({type: 'text', fieldName: 'attributes_json', nullable: true})
   attributesJson?: string;
 }
+
+export const storageSpanSchema = new EntitySchema<StorageSpan>({
+  class: StorageSpan,
+  tableName: 'spans',
+  indexes: [
+    {name: 'spans_session_id_idx', properties: ['sessionId']},
+    {name: 'spans_trace_id_idx', properties: ['traceId']},
+  ],
+  properties: {
+    spanId: {type: 'string', fieldName: 'span_id', primary: true},
+    traceId: {type: 'string', fieldName: 'trace_id'},
+    parentSpanId: {type: 'string', fieldName: 'parent_span_id', nullable: true},
+    name: {type: 'string'},
+    startTimeUnixNano: {
+      type: new UnixNanoType(),
+      fieldName: 'start_time_unix_nano',
+      nullable: true,
+    },
+    endTimeUnixNano: {
+      type: new UnixNanoType(),
+      fieldName: 'end_time_unix_nano',
+      nullable: true,
+    },
+    sessionId: {type: 'string', fieldName: 'session_id', nullable: true},
+    invocationId: {type: 'string', fieldName: 'invocation_id', nullable: true},
+    attributesJson: {
+      type: 'text',
+      fieldName: 'attributes_json',
+      nullable: true,
+    },
+  },
+});
