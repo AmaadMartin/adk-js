@@ -7,19 +7,52 @@
 import {mkdir} from 'node:fs/promises';
 import {dirname} from 'node:path';
 
-import {MikroORM} from '@mikro-orm/core';
+import type {MikroORM as MikroORMClass} from '@mikro-orm/core';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
 import {ReadableSpan, SpanExporter} from '@opentelemetry/sdk-trace-base';
 
-import {ensureDatabaseCreated} from '../sessions/db/operations.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
-import {StorageSpan, storageSpanSchema} from './db/schema.js';
 import {
   compareByStartTime,
   toReadableSpan,
   toStorageSpanData,
 } from './db/span_mapper.js';
+
+type SchemaModule = typeof import('./db/schema.js');
+type OperationsModule = typeof import('../sessions/db/operations.js');
+
+let MikroORM: typeof MikroORMClass;
+let StorageSpan: SchemaModule['StorageSpan'];
+let storageSpanSchema: SchemaModule['storageSpanSchema'];
+let ensureDatabaseCreated: OperationsModule['ensureDatabaseCreated'];
+
+let mikroOrmLoad: Promise<void> | undefined;
+
+/**
+ * Resolves (and memoizes) MikroORM plus the ADK database modules.
+ *
+ * These stay off the static import graph so that `@mikro-orm/core` is not
+ * evaluated when an agent imports `@google/adk` and never persists a span.
+ * A rejected promise stays cached, so a broken install keeps producing the
+ * same error instead of retrying module resolution on every call.
+ */
+function loadMikroOrm(): Promise<void> {
+  mikroOrmLoad ??= importMikroOrm();
+  return mikroOrmLoad;
+}
+
+async function importMikroOrm(): Promise<void> {
+  const [core, schema, operations] = await Promise.all([
+    import('@mikro-orm/core'),
+    import('./db/schema.js'),
+    import('../sessions/db/operations.js'),
+  ]);
+
+  ({MikroORM} = core);
+  ({StorageSpan, storageSpanSchema} = schema);
+  ({ensureDatabaseCreated} = operations);
+}
 
 /** How long SQLite waits out a contended write, matching the reference. */
 const BUSY_TIMEOUT_MS = 30_000;
@@ -82,7 +115,7 @@ export interface SqliteSpanExporterOptions {
  */
 export class SqliteSpanExporter implements SpanExporter {
   private readonly dbPath: string;
-  private initPromise?: Promise<MikroORM>;
+  private initPromise?: Promise<MikroORMClass>;
 
   constructor(options: SqliteSpanExporterOptions) {
     this.dbPath = options.dbPath;
@@ -167,7 +200,7 @@ export class SqliteSpanExporter implements SpanExporter {
     await orm.em.fork().upsertMany(StorageSpan, spans.map(toStorageSpanData));
   }
 
-  private init(): Promise<MikroORM> {
+  private init(): Promise<MikroORMClass> {
     // A failed open is not memoized, so a later call retries it.
     this.initPromise ??= this.open().catch((error: unknown) => {
       this.initPromise = undefined;
@@ -176,7 +209,10 @@ export class SqliteSpanExporter implements SpanExporter {
     return this.initPromise;
   }
 
-  private async open(): Promise<MikroORM> {
+  private async open(): Promise<MikroORMClass> {
+    // Load MikroORM and the ADK database modules lazily, so importing
+    // `@google/adk` never evaluates `@mikro-orm/core`. See {@link loadMikroOrm}.
+    await loadMikroOrm();
     const {SqliteDriver} = await loadOptionalPeer(
       {packageName: '@mikro-orm/sqlite', feature: 'SqliteSpanExporter'},
       () => import('@mikro-orm/sqlite'),

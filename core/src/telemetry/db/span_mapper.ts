@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {EntityData} from '@mikro-orm/core';
+import type {EntityData} from '@mikro-orm/core';
 import {
   Attributes,
   AttributeValue,
@@ -19,7 +19,7 @@ import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 
 import {logger} from '../../utils/logger.js';
 import {version} from '../../version.js';
-import {StorageSpan} from './schema.js';
+import type {StorageSpan} from './schema.js';
 
 const SESSION_ID_ATTRIBUTE = 'gcp.vertex.agent.session_id';
 const INVOCATION_ID_ATTRIBUTE = 'gcp.vertex.agent.invocation_id';
