@@ -72,6 +72,14 @@ function build({
       'node:async_hooks': './src/utils/async_hooks_shim.ts',
       'node:crypto': './src/utils/crypto_shim.ts',
     };
+    // The OCI provider is registered in the shared model registry, so the web
+    // bundle reaches `oci_genai_llm.ts`. It only ever loads the OCI SDK through
+    // a runtime `import()`, and that SDK is a Node-only optional dependency that
+    // pulls in Node built-ins (`path`, `assert`, `stream`, ...) esbuild cannot
+    // bundle for a browser. Keep those packages external so the dynamic import
+    // stays a runtime import; a browser that never instantiates OciGenAiLlm
+    // never resolves them, matching the provider's install-on-demand contract.
+    buildOptions.external = ['oci-common', 'oci-generativeaiinference'];
   }
 
   // Prepend license header to the top of the file
