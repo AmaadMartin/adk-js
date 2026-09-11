@@ -20,6 +20,21 @@ export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 
 /**
+ * The built-in tool an agent calls to hand control to another agent.
+ *
+ * `AgentTransferLlmRequestProcessor` registers the tool under this name.
+ */
+export const TRANSFER_TO_AGENT_FUNCTION_CALL_NAME = 'transfer_to_agent';
+
+/**
+ * The built-in tool a sub-agent of a `SequentialAgent` calls to end its own
+ * turn, so the next agent in the sequence takes over.
+ *
+ * `SequentialAgent` registers the tool under this name.
+ */
+export const TASK_COMPLETED_FUNCTION_CALL_NAME = 'task_completed';
+
+/**
  * Names reserved for the framework's own control-plane calls.
  *
  * These are questions the framework asks — approve this, authenticate that,

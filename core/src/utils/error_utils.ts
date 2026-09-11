@@ -32,7 +32,7 @@ const MAX_HTTP_STATUS = 599;
  * not a non-null object. Used to safely inspect duck-typed error shapes without
  * resorting to `any`.
  */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : undefined;

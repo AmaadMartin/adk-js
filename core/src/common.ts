@@ -150,7 +150,10 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
@@ -206,10 +209,6 @@ export type {
 } from './memory/base_memory_service.js';
 export {InMemoryMemoryService} from './memory/in_memory_memory_service.js';
 export type {MemoryEntry} from './memory/memory_entry.js';
-export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.js';
-export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
-export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';
-export type {VertexAiRagMemoryServiceOptions} from './memory/vertex_ai_rag_memory_service.js';
 export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
@@ -322,8 +321,6 @@ export {
   LoadArtifactsTool,
 } from './tools/load_artifacts_tool.js';
 export {LOAD_MEMORY, LoadMemoryTool} from './tools/load_memory_tool.js';
-export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';
-export type {LoadWebPageOptions} from './tools/load_web_page.js';
 export {LongRunningFunctionTool} from './tools/long_running_tool.js';
 export {
   PRELOAD_MEMORY,
@@ -331,6 +328,14 @@ export {
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
+export {BaseRetrievalTool} from './tools/retrieval/base_retrieval_tool.js';
+export {LlamaIndexRetrieval} from './tools/retrieval/llama_index_retrieval.js';
+export type {
+  LlamaIndexNode,
+  LlamaIndexNodeWithScore,
+  LlamaIndexRetrievalParams,
+  LlamaIndexRetriever,
+} from './tools/retrieval/llama_index_retrieval.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
@@ -348,7 +353,12 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
-export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {
+  EVAL_CLIENT_LABEL,
+  getClientLabels,
+  runWithClientLabel,
+} from './utils/client_labels.js';
+export {mapConcurrent} from './utils/concurrency_utils.js';
 export {
   LogLevel,
   getLogger,
@@ -365,41 +375,17 @@ export type {TaskExecutable} from './utils/task.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
 export {version} from './version.js';
 
-export {GCPSkillRegistry} from './skills/gcp_skill_registry.js';
-export type {GCPSkillRegistryOptions} from './skills/gcp_skill_registry.js';
-export {
-  loadAllSkillsInDir,
-  loadSkillFromDir,
-  loadSkillFromZipBuffer,
-  validateSkillDir,
-} from './skills/loader.js';
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
-export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
-export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
-export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
-export type {
-  OperationEndpoint,
-  ParsedOperation,
-} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
-export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
-export type {ApiParameter} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
-export {ToolAuthHandler} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
-export type {AuthPreparationResult} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
-export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';
-export {
-  RestApiTool,
-  createRestApiTool,
-} from './tools/openapi_tool/rest_api_tool.js';
 
 // Workflow (parity port of google/adk-python `google/adk/workflow`). Named
 // explicitly (not `export *`) so the top-level surface stays intentional and

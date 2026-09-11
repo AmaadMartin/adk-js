@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import {FunctionResponse} from '@google/genai';
 
-import {LlmResponse} from '../models/llm_response.js';
-
+import {getFunctionCalls, LlmResponse} from '../models/llm_response.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
 import {createEventActions, EventActions} from './event_actions.js';
+
+// An event is an `LlmResponse`, so the reader lives with the response type
+// and is re-exported here for the callers that read it off an event.
+export {getFunctionCalls};
 
 /**
  * A unique symbol identifying ADK Event objects.
@@ -201,22 +204,6 @@ export function isFinalResponse(event: Event) {
     !event.partial &&
     !hasTrailingCodeExecutionResult(event)
   );
-}
-
-/**
- * Returns the function calls in the event.
- */
-export function getFunctionCalls(event: Event): FunctionCall[] {
-  const funcCalls = [];
-  if (event.content && event.content.parts) {
-    for (const part of event.content.parts) {
-      if (part.functionCall) {
-        funcCalls.push(part.functionCall);
-      }
-    }
-  }
-
-  return funcCalls;
 }
 
 export const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
