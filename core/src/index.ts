@@ -38,6 +38,10 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.js';
+export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
+export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';
+export type {VertexAiRagMemoryServiceOptions} from './memory/vertex_ai_rag_memory_service.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
@@ -45,16 +49,62 @@ export type {
   VertexAiCreateSessionRequest,
   VertexAiSessionServiceOptions,
 } from './sessions/vertex_ai_session_service.js';
+export {GCPSkillRegistry} from './skills/gcp_skill_registry.js';
+export type {GCPSkillRegistryOptions} from './skills/gcp_skill_registry.js';
 export {
   loadAllSkillsInDir,
   loadSkillFromDir,
+  loadSkillFromZipBuffer,
   validateSkillDir,
 } from './skills/loader.js';
+// `GoogleTool` and its credential plumbing depend on `google-auth-library`,
+// which imports Node built-ins. They are exported from this Node entry point
+// rather than the browser-safe `common.ts` barrel, in the same manner as
+// `agent_registry` and `telemetry/google_cloud` below.
+export {
+  authorizationRequiredMessage,
+  GoogleTool,
+  GoogleToolStatus,
+} from './tools/google_tool.js';
+export type {
+  GoogleToolErrorResponse,
+  GoogleToolExecuteContext,
+  GoogleToolExecuteFunction,
+  GoogleToolOptions,
+} from './tools/google_tool.js';
+export {
+  BaseGoogleCredentialsConfig,
+  GoogleCredentialsManager,
+} from './tools/google_tool_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/google_tool_credentials.js';
+export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';
+export type {LoadWebPageOptions} from './tools/load_web_page.js';
+export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
+export type {
+  OperationEndpoint,
+  ParsedOperation,
+} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
+export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
+export type {ApiParameter} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
+export {ToolAuthHandler} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
+export type {AuthPreparationResult} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
+export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';
+export {
+  createRestApiTool,
+  RestApiTool,
+} from './tools/openapi_tool/rest_api_tool.js';
+export {FilesRetrieval} from './tools/retrieval/files_retrieval.js';
+export type {
+  FilesRetrievalConstructorParams,
+  FilesRetrievalParams,
+} from './tools/retrieval/files_retrieval.js';
+export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
+export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';
