@@ -5,202 +5,376 @@
  */
 
 /**
- * Reference tests ported from `google/adk-python` at `main`:
- * `src/google/adk/cli/api_server.py` and
- * `tests/unittests/cli/test_fast_api.py`. Test names are kept verbatim so the
- * two suites can be compared by name.
+ * Ported from `google/adk-python`, `tests/unittests/cli/test_fast_api.py`, at
+ * commit a3bd1115. Each `it(...)` keeps the Python test name verbatim so a
+ * reviewer can find the case on both sides.
  */
 
 import {
   createEvent,
   Event,
+  InMemoryArtifactService,
+  InMemoryMemoryService,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
-  RunnableRoot,
+  Session,
 } from '@google/adk';
-import * as fs from 'node:fs/promises';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
-import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
+import {DEFAULT_APP_NAME_ENV_VAR} from '../../src/server/default_app_rewrite.js';
+import {ServerAgentLoader} from '../../src/utils/base_agent_loader.js';
 
-const APP_NAME = 'bq_app';
+const APP_NAME = 'test_app';
+const USER_ID = 'test_user';
+const SESSION_ID = 'test_session';
 
-const PLUGINS_YAML_CONTENT = `bigquery_agent_analytics:
-  project_id: test-project
-  dataset_id: test-dataset
-  table_id: test-table
-  dataset_location: US
-`;
-
-class SilentAgent extends LlmAgent {
+/** Reports the plugins the runner attached, so a test can assert on them. */
+class PluginReportingAgent extends LlmAgent {
   async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    const pluginNames = context.pluginManager
+      .listPlugins()
+      .map((plugin) => plugin.name);
     yield createEvent({
       invocationId: context.invocationId,
       author: this.name,
-      branch: context.branch,
-      content: {parts: [{text: 'done'}], role: 'model'},
+      content: {parts: [{text: JSON.stringify(pluginNames)}], role: 'model'},
     });
   }
 }
 
-/** Options each construction of the analytics plugin was given. */
-const constructedWith = vi.hoisted(() => [] as unknown[]);
-
-/** Invocations the analytics plugin's beforeRun callback observed. */
-const observedInvocations = vi.hoisted(() => [] as string[]);
-
-vi.mock('@google/adk', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@google/adk')>();
-  class FakeBigQueryAgentAnalyticsPlugin extends actual.BasePlugin {
-    constructor(options: unknown) {
-      super('bigquery_agent_analytics');
-      constructedWith.push(options);
-    }
-
-    override async beforeRunCallback(params: {
-      invocationContext: {invocationId: string};
-    }): Promise<undefined> {
-      observedInvocations.push(params.invocationContext.invocationId);
-      return undefined;
-    }
-  }
-  return {
-    ...actual,
-    BigQueryAgentAnalyticsPlugin: FakeBigQueryAgentAnalyticsPlugin,
-  };
+const REPORTING_AGENT = new PluginReportingAgent({
+  name: 'reporting_agent',
+  description: 'reports the plugins it runs under',
 });
 
-/** Serves one in-memory agent, so no agent file has to be compiled. */
-class StubAgentFile extends AgentFile {
-  constructor(private readonly root: RunnableRoot) {
-    super('<in-memory>');
-  }
-
-  override load(): Promise<RunnableRoot> {
-    return Promise.resolve(this.root);
-  }
+function loaderFor(appNames: string[]): ServerAgentLoader {
+  return {
+    listAgents: () => Promise.resolve(appNames),
+    loadAgent: () => Promise.resolve(REPORTING_AGENT),
+    getAgentFile: () =>
+      Promise.resolve({
+        load: () => Promise.resolve(REPORTING_AGENT),
+        async [Symbol.asyncDispose](): Promise<void> {
+          return;
+        },
+      }),
+  };
 }
 
-class StubAgentLoader extends AgentLoader {
-  private readonly file = new StubAgentFile(
-    new SilentAgent({name: 'silentAgent'}),
-  );
-
-  constructor(private readonly appName: string) {
-    super();
-  }
-
-  override listAgents(): Promise<string[]> {
-    return Promise.resolve([this.appName]);
-  }
-
-  override getAgentFile(): Promise<AgentFile> {
-    return Promise.resolve(this.file);
-  }
+interface RunResponse {
+  status: number;
+  body: unknown;
 }
 
-describe('api_server plugins.yaml parity', () => {
-  const originalCwd = process.cwd();
+async function post(
+  baseUrl: string,
+  url: string,
+  body: unknown,
+): Promise<RunResponse> {
+  const response = await fetch(`${baseUrl}${url}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  return {status: response.status, body: await response.json()};
+}
+
+/** Reads the body as JSON only when the server sent JSON, as a 404 does not. */
+async function get(baseUrl: string, url: string): Promise<RunResponse> {
+  const response = await fetch(`${baseUrl}${url}`, {redirect: 'manual'});
+  const isJson = response.headers
+    .get('content-type')
+    ?.includes('application/json');
+  return {
+    status: response.status,
+    body: isJson ? await response.json() : await response.text(),
+  };
+}
+
+/** Reads the plugin names the reporting agent put in its single event. */
+function pluginNamesFrom(body: unknown): string[] {
+  const events = body as Array<{content?: {parts?: Array<{text?: string}>}}>;
+  const text = events[0]?.content?.parts?.[0]?.text;
+  if (text === undefined) {
+    expect.fail(`No event text in ${JSON.stringify(body)}`);
+  }
+  return JSON.parse(text) as string[];
+}
+
+describe('api_server parity', () => {
   let agentsDir: string;
   let sessionService: InMemorySessionService;
-  let server: AdkApiServer;
+  let servers: AdkApiServer[];
 
-  beforeEach(async () => {
-    agentsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-parity-'));
-    await fs.mkdir(path.join(agentsDir, APP_NAME));
+  beforeEach(() => {
+    agentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-parity-agents-'));
     sessionService = new InMemorySessionService();
-    constructedWith.length = 0;
-    observedInvocations.length = 0;
+    servers = [];
+    delete process.env[DEFAULT_APP_NAME_ENV_VAR];
   });
 
   afterEach(async () => {
-    await server.stop();
-    process.chdir(originalCwd);
-    await fs.rm(agentsDir, {recursive: true, force: true});
+    for (const server of servers) {
+      await server.stop();
+    }
+    fs.rmSync(agentsDir, {recursive: true, force: true});
+    delete process.env[DEFAULT_APP_NAME_ENV_VAR];
   });
 
-  async function runOnce(): Promise<Response> {
-    await sessionService.createSession({
-      appName: APP_NAME,
-      userId: 'test_user',
-      sessionId: 'test_session',
+  async function startServer(
+    options: ConstructorParameters<typeof AdkApiServer>[0] = {},
+  ): Promise<AdkApiServer> {
+    const server = new AdkApiServer({
+      agentsDir,
+      agentLoader: loaderFor([APP_NAME]),
+      sessionService,
+      memoryService: new InMemoryMemoryService(),
+      artifactService: new InMemoryArtifactService(),
+      ...options,
     });
-    return fetch(`${server.url}/run`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        appName: APP_NAME,
-        userId: 'test_user',
-        sessionId: 'test_session',
-        newMessage: {parts: [{text: 'hello'}], role: 'user'},
-      }),
+    servers.push(server);
+    await server.start();
+    return server;
+  }
+
+  function createSessionFor(appName: string): Promise<Session> {
+    return sessionService.createSession({
+      appName,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      state: {},
     });
   }
 
-  it('test_agent_with_bigquery_analytics_plugin', async () => {
-    await fs.writeFile(
-      path.join(agentsDir, APP_NAME, 'plugins.yaml'),
-      PLUGINS_YAML_CONTENT,
-    );
-    server = new AdkApiServer({
-      agentsDir,
-      agentLoader: new StubAgentLoader(APP_NAME),
-      sessionService,
-    });
-    await server.start();
+  function writePluginsYaml(appName: string, contents: string): void {
+    fs.mkdirSync(path.join(agentsDir, appName), {recursive: true});
+    fs.writeFileSync(path.join(agentsDir, appName, 'plugins.yaml'), contents);
+  }
 
-    const response = await runOnce();
+  function runPayload(appName?: string): Record<string, unknown> {
+    return {
+      ...(appName ? {appName} : {}),
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    };
+  }
+
+  it('test_agent_with_bigquery_analytics_plugin', async () => {
+    writePluginsYaml(
+      APP_NAME,
+      [
+        'bigquery_agent_analytics:',
+        '  project_id: test-project',
+        '  dataset_id: test-dataset',
+        '  table_id: test-table',
+        '  dataset_location: US',
+      ].join('\n'),
+    );
+    const server = await startServer();
+    await createSessionFor(APP_NAME);
+
+    const response = await post(server.url, '/run', runPayload(APP_NAME));
 
     expect(response.status).toBe(200);
-    expect(constructedWith).toEqual([
-      {
-        projectId: 'test-project',
-        datasetId: 'test-dataset',
-        tableId: 'test-table',
-        location: 'US',
-      },
+    expect(pluginNamesFrom(response.body)).toEqual([
+      'bigquery_agent_analytics',
     ]);
-    expect(observedInvocations).toHaveLength(1);
+  });
+
+  it('attaches no analytics plugin when plugins.yaml is incomplete', async () => {
+    writePluginsYaml(
+      APP_NAME,
+      ['bigquery_agent_analytics:', '  project_id: test-project'].join('\n'),
+    );
+    const server = await startServer();
+    await createSessionFor(APP_NAME);
+
+    const response = await post(server.url, '/run', runPayload(APP_NAME));
+
+    expect(pluginNamesFrom(response.body)).toEqual([]);
   });
 
   it('attaches no plugin when the app has no plugins.yaml', async () => {
-    server = new AdkApiServer({
-      agentsDir,
-      agentLoader: new StubAgentLoader(APP_NAME),
-      sessionService,
-    });
-    await server.start();
+    const server = await startServer();
+    await createSessionFor(APP_NAME);
 
-    const response = await runOnce();
+    const response = await post(server.url, '/run', runPayload(APP_NAME));
 
     expect(response.status).toBe(200);
-    expect(constructedWith).toEqual([]);
+    expect(pluginNamesFrom(response.body)).toEqual([]);
   });
 
   // Without an agentsDir there is no directory the app came from, so the
   // server must not fall back to the working directory and read whatever
   // plugins.yaml happens to sit there.
   it('does not read a plugins.yaml under the working directory', async () => {
-    await fs.writeFile(
-      path.join(agentsDir, APP_NAME, 'plugins.yaml'),
-      PLUGINS_YAML_CONTENT,
+    writePluginsYaml(
+      APP_NAME,
+      [
+        'bigquery_agent_analytics:',
+        '  project_id: test-project',
+        '  dataset_id: test-dataset',
+        '  table_id: test-table',
+        '  dataset_location: US',
+      ].join('\n'),
     );
+    const originalCwd = process.cwd();
     process.chdir(agentsDir);
-    server = new AdkApiServer({
-      agentLoader: new StubAgentLoader(APP_NAME),
-      sessionService,
-    });
-    await server.start();
+    try {
+      const server = new AdkApiServer({
+        agentLoader: loaderFor([APP_NAME]),
+        sessionService,
+        memoryService: new InMemoryMemoryService(),
+        artifactService: new InMemoryArtifactService(),
+      });
+      servers.push(server);
+      await server.start();
+      await createSessionFor(APP_NAME);
 
-    const response = await runOnce();
+      const response = await post(server.url, '/run', runPayload(APP_NAME));
+
+      expect(response.status).toBe(200);
+      expect(pluginNamesFrom(response.body)).toEqual([]);
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it('test_default_app_name_middleware_and_resolution', async () => {
+    process.env[DEFAULT_APP_NAME_ENV_VAR] = APP_NAME;
+    const server = await startServer();
+    await createSessionFor(APP_NAME);
+
+    const session = await get(
+      server.url,
+      `/users/${USER_ID}/sessions/${SESSION_ID}`,
+    );
+
+    expect(session.status).toBe(200);
+    expect((session.body as {id: string}).id).toBe(SESSION_ID);
+  });
+
+  it('test_default_app_name_not_set_raises_error', async () => {
+    const server = await startServer();
+    await createSessionFor(APP_NAME);
+
+    const session = await get(
+      server.url,
+      `/users/${USER_ID}/sessions/${SESSION_ID}`,
+    );
+
+    expect(session.status).toBe(404);
+  });
+
+  it('serves the dev UI logo config when the logo is configured', async () => {
+    const server = await startServer({
+      serveDebugUI: true,
+      webAssetsDir: path.join(agentsDir, 'browser'),
+      logoText: 'Acme',
+      logoImageUrl: 'https://acme.example/logo.png',
+    });
+
+    const response = await get(server.url, '/dev-ui/config');
 
     expect(response.status).toBe(200);
-    expect(constructedWith).toEqual([]);
+    expect(response.body).toEqual({
+      logo_text: 'Acme',
+      logo_image_url: 'https://acme.example/logo.png',
+    });
+  });
+
+  it('reports both logo fields as null when no logo is configured', async () => {
+    const server = await startServer({
+      serveDebugUI: true,
+      webAssetsDir: path.join(agentsDir, 'browser'),
+    });
+
+    const response = await get(server.url, '/dev-ui/config');
+
+    expect(response.body).toEqual({logo_text: null, logo_image_url: null});
+  });
+
+  it('does not serve the dev UI logo config from the API server', async () => {
+    const server = await startServer({serveDebugUI: false});
+
+    const response = await fetch(`${server.url}/dev-ui/config`);
+
+    expect(response.status).toBe(404);
+  });
+
+  it('rejects a logo with only one of its two values', () => {
+    expect(() => new AdkApiServer({agentsDir, logoText: 'Acme'})).toThrow(
+      'Both --logo_text and --logo_image_url must be defined',
+    );
+  });
+
+  it('attaches the plugins named by extraPlugins', async () => {
+    const pluginModule = path
+      .join(__dirname, 'testdata', 'example_plugins.ts')
+      .replace(/\\/g, '/');
+    const server = await startServer({
+      extraPlugins: [`${pluginModule}#examplePluginInstance`],
+    });
+    await createSessionFor(APP_NAME);
+
+    const response = await post(server.url, '/run', runPayload(APP_NAME));
+
+    expect(pluginNamesFrom(response.body)).toEqual(['configured-name']);
+  });
+
+  it('keeps serving when an extra plugin cannot be loaded', async () => {
+    const server = await startServer({
+      extraPlugins: ['@acme/no-such-package#AuditPlugin'],
+    });
+    await createSessionFor(APP_NAME);
+
+    const response = await post(server.url, '/run', runPayload(APP_NAME));
+
+    expect(response.status).toBe(200);
+    expect(pluginNamesFrom(response.body)).toEqual([]);
+  });
+
+  describe('defaultLlmModel', () => {
+    /** An agent with no model of its own falls back to the process default. */
+    function modelOfAgentWithoutOne(): string {
+      return new LlmAgent({name: 'probe_agent'}).canonicalModel.model;
+    }
+
+    beforeEach(() => {
+      // Resolving a Gemini model name needs a key, and this test only reads
+      // back the name the server installed.
+      vi.stubEnv('GOOGLE_API_KEY', 'placeholder-api-key');
+    });
+
+    afterEach(() => {
+      LlmAgent.setDefaultModel(undefined);
+      vi.unstubAllEnvs();
+    });
+
+    it('serves an agent that sets no model of its own', async () => {
+      const server = await startServer({defaultLlmModel: 'gemini-2.5-flash'});
+      await createSessionFor(APP_NAME);
+
+      await post(server.url, '/run', runPayload(APP_NAME));
+
+      expect(modelOfAgentWithoutOne()).toBe('gemini-2.5-flash');
+    });
+
+    it('leaves the process default alone when the option is unset', async () => {
+      const server = await startServer();
+      await createSessionFor(APP_NAME);
+
+      await post(server.url, '/run', runPayload(APP_NAME));
+
+      expect(() => modelOfAgentWithoutOne()).toThrow('No model found');
+    });
   });
 });

@@ -1,90 +1,135 @@
-# Per-app plugins and the default model
+# Attaching plugins to the agents an API server serves
 
-`AdkApiServer` builds one `Runner` per app. Before it does, it reads the app's
-`plugins.yaml` and attaches the plugin that file declares. A separate option
-sets the model for agents that declare none. Reach for either when you serve
-several apps from one directory and want each one configured from disk.
+`AdkApiServer` can attach plugins to every agent it serves, without editing
+the agent. Reach for this when the plugin is an operator's concern rather than
+the agent author's: request logging, an audit trail, or the BigQuery analytics
+plugin. A separate `defaultLlmModel` option sets the model for agents that
+declare none.
 
 ## Introduction
 
-A plugin is attached to an app, not to the server. An app written in code lists
-its own plugins on its `App`, and the server passes those through untouched.
-`plugins.yaml` is for a plugin an operator wants to add without editing the
-app: the server reads `<agentsDir>/<appName>/plugins.yaml` once, when it builds
-that app's runner, and attaches the plugin after the app's own. The file format
-is shared with ADK Python, so its keys are snake_case. A server given no
-`agentsDir` has no directory to read from, and attaches nothing.
+A plugin normally reaches a `Runner` through the `App` an agent module
+exports, so the agent author decides what runs. That is the wrong owner for
+some plugins. An operator running a fleet of agents wants one audit plugin on
+all of them, and wants to turn analytics on for one app without a code change.
 
-Only one plugin is configurable this way today: the BigQuery agent analytics
-plugin, under the `bigquery_agent_analytics` key. The server does not import
-that plugin until an app asks for it. When the installed `@google/adk` does not
-export `BigQueryAgentAnalyticsPlugin`, the server logs a warning, attaches no
-plugin, and keeps serving the app.
+The server offers two ways in, and applies both when the runner for an app is
+first built:
 
-`defaultLlmModel` is unrelated to plugins. An `LlmAgent` that sets no `model`
-inherits one from an ancestor agent, and throws when no ancestor sets one
-either. This option gives that agent a model instead. It is process-wide, so it
-also reaches an agent bundled with its own copy of `@google/adk`.
+- `extraPlugins` names plugins on the command line. They apply to every app
+  the server serves.
+- A `plugins.yaml` file in an app's directory configures the BigQuery agent
+  analytics plugin for that app alone.
+
+Neither replaces what the app already declares. The plugins from both sources
+are appended to the app's own list, in that order.
 
 ## Get started
 
-Write the file next to the agent it configures:
+Name a plugin with a fully-qualified name, `<module specifier>#<export>`:
 
-```yaml
-# ./agents/echo/plugins.yaml
-bigquery_agent_analytics:
-  project_id: my-project
-  dataset_id: agent_analytics
-  table_id: agent_events
-  dataset_location: US
+```console
+$ adk api_server ./agents --extra_plugins ./plugins/audit.js#AuditPlugin
 ```
 
-Then start the server over that directory:
+The export may be a plugin instance or a plugin class. A class is constructed
+with the qualified name as its plugin name.
+
+```ts
+import {BasePlugin} from '@google/adk';
+
+export class AuditPlugin extends BasePlugin {}
+
+export const auditPlugin = new AuditPlugin('audit');
+```
+
+`./plugins/audit.js#AuditPlugin` names the class, and
+`./plugins/audit.js#auditPlugin` names the instance. Override the callbacks
+your plugin needs; `BasePlugin` defaults every one of them to doing nothing.
+
+The same option is available when you build the server yourself:
 
 ```ts
 import {AdkApiServer} from '@google/adk-devtools';
 
 const server = new AdkApiServer({
   agentsDir: './agents',
-  port: 8000,
-  defaultLlmModel: 'gemini-2.5-flash',
+  extraPlugins: ['./plugins/audit.js#AuditPlugin'],
 });
 
 await server.start();
 ```
 
-The `echo` app now runs with the analytics plugin attached, and any agent that
-declares no model uses `gemini-2.5-flash`. `--default_llm_model` is the same
-option on the command line:
+Pass several by separating them with commas:
+
+```console
+$ adk web ./agents --extra_plugins ./a.js#One,./b.js#Two
+```
+
+## What a qualified name may point at
+
+The specifier is a package name or a file path, and `#` separates the export
+from it. A name with no `#` reads the module's default export.
+
+Two specifiers are refused, because the name reaches this server from a
+command line or a configuration file rather than from your source: a Node
+built-in module, and a specifier carrying its own URL scheme such as `data:`.
+Loading a plugin runs the named module's top-level code, so trust the names as
+far as you trust where they came from.
+
+A name that cannot be loaded is reported at error level and skipped. The
+server still starts, and the remaining names still load. The same happens for
+a name that resolves to something that is neither a plugin nor a plugin class.
+
+## BigQuery analytics through plugins.yaml
+
+Put `plugins.yaml` beside the agent, in `<agentsDir>/<appName>/`:
+
+```yaml
+bigquery_agent_analytics:
+  project_id: my-project
+  dataset_id: my_dataset
+  dataset_location: us-central1
+  table_id: my_table
+```
+
+The keys are snake_case because adk-python reads the same file. A server given
+no `agentsDir` has no directory to read from, and attaches nothing. The server
+does not import the BigQuery plugin until an app asks for it; when the
+installed `@google/adk` does not export `BigQueryAgentAnalyticsPlugin`, the
+server logs a warning, attaches no plugin, and keeps serving the app.
+
+`project_id`, `dataset_id` and `dataset_location` are all required. The plugin
+is not attached when any of them is missing, so a half-written file turns
+analytics off rather than sending rows somewhere unintended. `table_id` is
+optional and the plugin defaults it.
+
+A file that is not valid YAML, or that does not parse to a mapping, is
+reported and the app runs without the plugin. adk-python lets that failure
+propagate and stop the runner from being built; adk-js keeps the agent
+serving.
+
+## When the plugins are resolved
+
+The server builds one `Runner` per app and caches it, so both sources are read
+once per app rather than once per request. Editing `plugins.yaml` while the
+server runs has no effect until the server restarts.
+
+## Setting the default model
+
+`defaultLlmModel` is unrelated to plugins. An `LlmAgent` that sets no `model`
+inherits one from an ancestor agent, and throws when no ancestor sets one
+either. This option gives that agent a model instead. It calls
+`LlmAgent.setDefaultModel` when the server starts, and is process-wide, so it
+also reaches an agent bundled with its own copy of `@google/adk`.
 
 ```console
 $ adk web ./agents --default_llm_model gemini-2.5-flash
 $ adk api_server ./agents --default_llm_model gemini-2.5-flash
 ```
 
-## What `plugins.yaml` must set
-
-`project_id`, `dataset_id` and `dataset_location` are all required. The server
-attaches no plugin when any of them is missing, and logs a debug line naming
-the ones it did not find. `table_id` is optional: leave it out and the plugin
-picks its own table name.
-
-Keys other than `bigquery_agent_analytics` are ignored. An absent file is not
-an error. A file that does not parse as YAML is logged as a warning and treated
-as absent, so one bad file does not stop the app from serving. ADK Python lets
-the parse error propagate instead, which fails the request with a 500.
-
-## Plugin order
-
-The runner receives the app's own plugins first, then the plugin from
-`plugins.yaml`. Order decides which plugin sees a callback first, and which one
-can short-circuit the others.
-
-## Setting the default model
-
-`defaultLlmModel` calls `LlmAgent.setDefaultModel` when the server starts. The
-value is a model name the LLM registry resolves. An agent that sets its own
-model, or inherits one from an ancestor, is unaffected:
+The same option is available when you build the server yourself. An agent that
+sets its own model, or inherits one from an ancestor, is unaffected:
 
 ```ts
 import {LlmAgent} from '@google/adk';
