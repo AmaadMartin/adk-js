@@ -57,6 +57,10 @@ export {
   loadSkillFromZipBuffer,
   validateSkillDir,
 } from './skills/loader.js';
+export {
+  SqliteSpanExporter,
+  type SqliteSpanExporterOptions,
+} from './telemetry/sqlite_span_exporter.js';
 export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';
 export type {LoadWebPageOptions} from './tools/load_web_page.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
@@ -79,10 +83,6 @@ export type {
   FilesRetrievalParams,
 } from './tools/retrieval/files_retrieval.js';
 export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
-export {
-  SqliteSpanExporter,
-  type SqliteSpanExporterOptions,
-} from './telemetry/sqlite_span_exporter.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
