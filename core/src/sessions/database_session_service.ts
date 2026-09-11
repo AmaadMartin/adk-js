@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  FilterQuery,
-  LockMode as LockModeEnum,
-  MikroORM as MikroORMClass,
-} from '@mikro-orm/core';
+import type {FilterQuery, MikroORM as MikroORMClass} from '@mikro-orm/core';
 import type {MikroORMOptions as MikroDBOptions} from './db/operations.js';
 
 import {Event} from '../events/event.js';
@@ -29,11 +25,11 @@ import {State} from './state.js';
 
 type SchemaModule = typeof import('./db/schema.js');
 type OperationsModule = typeof import('./db/operations.js');
+type DialectModule = typeof import('./db/dialect.js');
 type StorageEventEntity = InstanceType<SchemaModule['StorageEvent']>;
 type StorageSessionEntity = InstanceType<SchemaModule['StorageSession']>;
 
 let MikroORM: typeof MikroORMClass;
-let LockMode: typeof LockModeEnum;
 let ENTITIES: SchemaModule['ENTITIES'];
 let StorageAppState: SchemaModule['StorageAppState'];
 let StorageEvent: SchemaModule['StorageEvent'];
@@ -41,7 +37,9 @@ let StorageSession: SchemaModule['StorageSession'];
 let StorageUserState: SchemaModule['StorageUserState'];
 let ensureDatabaseCreated: OperationsModule['ensureDatabaseCreated'];
 let getConnectionOptionsFromUri: OperationsModule['getConnectionOptionsFromUri'];
+let getDatabaseBackend: OperationsModule['getDatabaseBackend'];
 let validateDatabaseSchemaVersion: OperationsModule['validateDatabaseSchemaVersion'];
+let sessionLockMode: DialectModule['sessionLockMode'];
 
 let mikroOrmLoad: Promise<void> | undefined;
 
@@ -59,20 +57,23 @@ function loadMikroOrm(): Promise<void> {
 }
 
 async function importMikroOrm(): Promise<void> {
-  const [core, schema, operations] = await Promise.all([
+  const [core, schema, operations, dialect] = await Promise.all([
     import('@mikro-orm/core'),
     import('./db/schema.js'),
     import('./db/operations.js'),
+    import('./db/dialect.js'),
   ]);
 
-  ({MikroORM, LockMode} = core);
+  ({MikroORM} = core);
   ({ENTITIES, StorageAppState, StorageEvent, StorageSession, StorageUserState} =
     schema);
   ({
     ensureDatabaseCreated,
     getConnectionOptionsFromUri,
+    getDatabaseBackend,
     validateDatabaseSchemaVersion,
   } = operations);
+  ({sessionLockMode} = dialect);
 }
 
 /**
@@ -114,7 +115,13 @@ export class DatabaseSessionService extends BaseSessionService {
         throw new Error('Driver is required when passing options object.');
       }
 
-      this.options = connectionStringOrOptions;
+      // Every backend adk-js supports drops the zone on a datetime column, so
+      // UTC is the default here as it is for a URI. A caller's value wins.
+      // `entities` is applied in `init`, once the schema module has loaded.
+      this.options = {
+        ...connectionStringOrOptions,
+        forceUtcTimezone: connectionStringOrOptions.forceUtcTimezone ?? true,
+      };
     }
   }
 
@@ -136,6 +143,26 @@ export class DatabaseSessionService extends BaseSessionService {
     await ensureDatabaseCreated(this.orm!);
     await validateDatabaseSchemaVersion(this.orm!);
     this.initialized = true;
+  }
+
+  /**
+   * Releases the database connections this service opened.
+   *
+   * The sqlite driver holds its file open until the pool closes, so a caller
+   * that has finished with a database has no other way to let go of it.
+   * Calling this before `init`, or twice, does nothing. A later `init` reopens
+   * the database.
+   */
+  async close(): Promise<void> {
+    this.initialized = false;
+    const orm = this.orm;
+    this.orm = undefined;
+    await orm?.close();
+  }
+
+  /** Closes the service, so that `await using` releases the database. */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
   }
 
   async createSession({
@@ -417,6 +444,8 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const trimmedEvent = trimTempDeltaState(event);
 
+    const lockMode = sessionLockMode(getDatabaseBackend(this.orm!));
+
     await em.transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
         StorageSession,
@@ -425,7 +454,7 @@ export class DatabaseSessionService extends BaseSessionService {
           userId: session.userId,
           id: session.id,
         },
-        {lockMode: LockMode.PESSIMISTIC_WRITE},
+        {lockMode},
       );
 
       if (!storageSession) {
