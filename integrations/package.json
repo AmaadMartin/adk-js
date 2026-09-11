@@ -46,5 +46,16 @@
   },
   "dependencies": {
     "@google/adk": "^2.0.0"
+  },
+  "peerDependencies": {
+    "@google-cloud/firestore": "^9.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@google-cloud/firestore": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@google-cloud/firestore": "^9.0.1"
   }
 }
