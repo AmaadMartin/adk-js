@@ -23,7 +23,7 @@ const TEST_CASES: TestCase[] = [
     model: 'gemini-2.5-pro',
     vertexEnv: 'true',
     expected: true,
-    why: 'the variant is Vertex AI and the model is Gemini 2.0+',
+    why: 'the variant is Vertex AI and the model is in the Gemini family',
   },
   {
     model: 'gemini-2.5-pro',
@@ -47,13 +47,13 @@ const TEST_CASES: TestCase[] = [
     model: 'gemini-2.5-flash',
     vertexEnv: 'true',
     expected: true,
-    why: 'the variant is Vertex AI and the model is Gemini 2.0+',
+    why: 'the variant is Vertex AI and the model is in the Gemini family',
   },
   {
     model: 'gemini-1.5-pro',
     vertexEnv: 'true',
-    expected: false,
-    why: 'Gemini 1.x is below the 2.0 floor',
+    expected: true,
+    why: 'the family test carries no version floor',
   },
   {
     model: 'gemini-1.5-pro',
@@ -77,13 +77,19 @@ const TEST_CASES: TestCase[] = [
     model: 'projects/p/locations/l/publishers/google/models/gemini-2.5-flash',
     vertexEnv: 'true',
     expected: true,
-    why: 'the version is read out of the path-based model name',
+    why: 'the model name is read out of the path-based form',
   },
   {
     model: 'gemini-flash-early-exp',
     vertexEnv: 'true',
-    expected: false,
-    why: 'Early Access Program names encode no numeric version, unlike the Python implementation',
+    expected: true,
+    why: 'an Early Access Program name encodes no version and still qualifies',
+  },
+  {
+    model: 'gemini-early-exp',
+    vertexEnv: 'true',
+    expected: true,
+    why: 'this is the Early Access Program name the reference test uses',
   },
 ];
 
@@ -100,4 +106,13 @@ describe('canUseOutputSchemaWithTools', () => {
       expect(canUseOutputSchemaWithTools(model)).toBe(expected);
     });
   }
+
+  it('follows a change of the variant environment variable', () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+    expect(canUseOutputSchemaWithTools('gemini-2.5-pro')).toBe(false);
+
+    vi.stubEnv(VERTEX_ENV_VAR, 'true');
+
+    expect(canUseOutputSchemaWithTools('gemini-2.5-pro')).toBe(true);
+  });
 });
