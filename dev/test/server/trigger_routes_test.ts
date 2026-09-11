@@ -13,6 +13,8 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  Logger,
+  LogLevel,
 } from '@google/adk';
 import express from 'express';
 import {LoginTicket, OAuth2Client, TokenPayload} from 'google-auth-library';
@@ -73,6 +75,28 @@ class TriggerTestAgent extends LlmAgent {
   }
 }
 
+/** Captures every line the server logs, so a test can assert on it. */
+class RecordingLogger implements Logger {
+  readonly lines: string[] = [];
+
+  log(_level: LogLevel, ...args: unknown[]): void {
+    this.lines.push(args.join(' '));
+  }
+  debug(...args: unknown[]): void {
+    this.lines.push(args.join(' '));
+  }
+  info(...args: unknown[]): void {
+    this.lines.push(args.join(' '));
+  }
+  warn(...args: unknown[]): void {
+    this.lines.push(args.join(' '));
+  }
+  error(...args: unknown[]): void {
+    this.lines.push(args.join(' '));
+  }
+  setLogLevel(_level: LogLevel): void {}
+}
+
 interface TriggerHarness {
   url: string;
   agent: TriggerTestAgent;
@@ -86,6 +110,7 @@ interface StartOptions {
   triggerAuthVerifier?: TriggerVerifier;
   /** Apps the loader can resolve. Anything else fails to load. */
   knownApps?: string[];
+  logger?: Logger;
 }
 
 const servers: AdkApiServer[] = [];
@@ -122,6 +147,7 @@ async function startTriggerServer(
     triggerOidcAudience: options.triggerOidcAudience,
     triggerOidcServiceAccounts: options.triggerOidcServiceAccounts,
     triggerAuthVerifier: options.triggerAuthVerifier,
+    logger: options.logger,
   });
   await server.start();
   servers.push(server);
@@ -378,6 +404,46 @@ describe('TestTriggerOidcVerification', () => {
     },
   );
 
+  it('never logs the bearer token or the OIDC claims', async () => {
+    // google-auth-library builds the raw token into "Wrong number of segments
+    // in token: <jwt>" and the decoded claims into "Token used too late, ...
+    // <payload>". Logging the message would write the caller's credential and
+    // principal to disk.
+    const token = 'synthetic-credential-value';
+    const claims = '{"email":"pusher@project.iam","sub":"1234567890"}';
+    vi.spyOn(OAuth2Client.prototype, 'verifyIdToken').mockRejectedValue(
+      new Error(
+        `Wrong number of segments in token: ${token}. Token used too late, ` +
+          claims,
+      ),
+    );
+    const serverLog = new RecordingLogger();
+    const verifierWarnings: string[] = [];
+    vi.spyOn(getLogger(), 'warn').mockImplementation((...args: unknown[]) => {
+      verifierWarnings.push(args.join(' '));
+    });
+
+    const {url} = await startTriggerServer({
+      triggerSources: ['pubsub'],
+      triggerOidcAudience: OIDC_AUDIENCE,
+      logger: serverLog,
+    });
+    const response = await post(url, PUBSUB_PATH, PUBSUB_PAYLOAD, {
+      Authorization: `Bearer ${token}`,
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe('OIDC token verification failed.');
+    const logged = [...verifierWarnings, ...serverLog.lines].join('\n');
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain('pusher@project.iam');
+    expect(logged).not.toContain('1234567890');
+    // The failure is still reported, by class name.
+    expect(verifierWarnings).toEqual([
+      'OIDC token verification failed (Error).',
+    ]);
+  });
+
   it('test_service_accounts_without_audience_raises_value_error', () => {
     expect(
       () =>
@@ -386,6 +452,41 @@ describe('TestTriggerOidcVerification', () => {
           triggerOidcServiceAccounts: ['allowed@project.iam'],
         }),
     ).toThrow(/triggerOidcServiceAccounts requires triggerOidcAudience/);
+  });
+
+  it('warns that a custom verifier makes the allowlist do nothing', async () => {
+    const serverLog = new RecordingLogger();
+
+    await startTriggerServer({
+      triggerSources: ['pubsub'],
+      triggerOidcAudience: OIDC_AUDIENCE,
+      triggerOidcServiceAccounts: ALLOWED_EMAILS,
+      triggerAuthVerifier: () => {},
+      logger: serverLog,
+    });
+
+    expect(
+      serverLog.lines.filter((line) =>
+        line.includes('triggerOidcServiceAccounts is ignored'),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('does not warn about the allowlist when it is actually enforced', async () => {
+    const serverLog = new RecordingLogger();
+
+    await startTriggerServer({
+      triggerSources: ['pubsub'],
+      triggerOidcAudience: OIDC_AUDIENCE,
+      triggerOidcServiceAccounts: ALLOWED_EMAILS,
+      logger: serverLog,
+    });
+
+    expect(
+      serverLog.lines.filter((line) =>
+        line.includes('triggerOidcServiceAccounts is ignored'),
+      ),
+    ).toEqual([]);
   });
 
   it('accepts service accounts alongside a custom verifier', () => {

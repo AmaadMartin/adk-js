@@ -34,7 +34,7 @@ import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 
 import {decodeBase64Utf8, parseJsonOrRaw} from '../utils/base64_utils.js';
-import {asRecord, errorMessage} from '../utils/error_utils.js';
+import {asRecord, errorMessage, errorName} from '../utils/error_utils.js';
 import {Semaphore} from '../utils/semaphore.js';
 
 const logger = getLogger();
@@ -346,8 +346,11 @@ export class GoogleOidcVerifier {
       if (isHttpError(error)) {
         throw error;
       }
-      // The token itself is never logged.
-      logger.warn(`OIDC token verification failed: ${errorMessage(error)}`);
+      // Only the error's class name is logged. google-auth-library builds the
+      // raw token into "Wrong number of segments in token: <jwt>" and the
+      // decoded claims into "Token used too late, ... <payload>", so logging
+      // the message would write the caller's credential and principal to disk.
+      logger.warn(`OIDC token verification failed (${errorName(error)}).`);
       throw new HttpError(
         UNAUTHORIZED_STATUS,
         'OIDC token verification failed.',

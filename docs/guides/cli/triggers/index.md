@@ -156,6 +156,13 @@ await server.start();
 The function may be synchronous or asynchronous. Anything it throws that is not
 an `HttpError` is treated as a server fault and answers 500.
 
+A custom verifier replaces the OIDC one, so `triggerOidcServiceAccounts` no
+longer restricts anything. The server warns at startup when both are set.
+
+Nothing about the token reaches the log. A verification failure is logged by
+its error class alone, because the underlying library builds the raw token and
+the decoded claims into its own messages.
+
 ## Responses
 
 | Condition                                                      | Status                      |
@@ -182,6 +189,8 @@ Four environment variables, read when the server is constructed:
 | `ADK_TRIGGER_RETRY_BASE_DELAY` | 1.0     | Backoff base delay, in seconds                              |
 | `ADK_TRIGGER_RETRY_MAX_DELAY`  | 30.0    | Backoff cap, in seconds                                     |
 
-A value that is not a number falls back to the default. The delay for attempt
-`n` is `min(base * 2**n, max)` plus up to 50% jitter. A failure that is not a
-rate limit is never retried.
+A value that is not a number falls back to the default.
+`ADK_TRIGGER_MAX_CONCURRENT` must also be a positive integer: the server
+refuses to start on anything else, rather than serving with a semaphore that
+admits nobody. The delay for attempt `n` is `min(base * 2**n, max)` plus up to
+50% jitter. A failure that is not a rate limit is never retried.
