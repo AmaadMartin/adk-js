@@ -177,7 +177,9 @@ export interface SessionRow {
 export function toSessionRow(
   data: Record<string, unknown>,
 ): SessionRow | undefined {
-  const {id, appName, userId} = data;
+  const id = data['id'];
+  const appName = data['appName'];
+  const userId = data['userId'];
   if (
     typeof id !== 'string' ||
     typeof appName !== 'string' ||

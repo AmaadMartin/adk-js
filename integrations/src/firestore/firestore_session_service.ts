@@ -96,8 +96,8 @@ export function resolveClient(
 }
 
 /** Serializes appends against one session. */
-function lockKey({appName, userId, id}: Session): string {
-  return `${appName}\u0000${userId}\u0000${id}`;
+function lockKey(session: Session): string {
+  return `${session.appName}\u0000${session.userId}\u0000${session.id}`;
 }
 
 /** Orders sessions by last update time, then user, then id. */
@@ -157,13 +157,14 @@ export class FirestoreSessionService extends BaseSessionService {
     return this.runtime;
   }
 
-  async createSession({
-    appName,
-    userId,
-    state,
-    sessionId,
-  }: CreateSessionRequest): Promise<Session> {
-    const {client, serverTimestamp} = await this.firestore();
+  async createSession(request: CreateSessionRequest): Promise<Session> {
+    const appName = request.appName;
+    const userId = request.userId;
+    const state = request.state;
+    const sessionId = request.sessionId;
+    const runtime = await this.firestore();
+    const client = runtime.client;
+    const serverTimestamp = runtime.serverTimestamp;
     const id = sessionId || randomUUID();
 
     // App and user state are written natively so that rich types survive; only
@@ -181,37 +182,40 @@ export class FirestoreSessionService extends BaseSessionService {
     const userRef = userStateRef(client, appName, userId);
     const now = serverTimestamp();
 
-    const [storedAppState, storedUserState] = await client.runTransaction(
-      async (transaction) => {
-        const [sessionSnapshot, appSnapshot, userSnapshot] = await Promise.all([
-          transaction.get(sessionRef),
-          transaction.get(appRef),
-          transaction.get(userRef),
-        ]);
-        if (sessionSnapshot.exists) {
-          throw new AlreadyExistsError(`Session ${id} already exists.`);
-        }
+    const stored = await client.runTransaction(async (transaction) => {
+      const snapshots = await Promise.all([
+        transaction.get(sessionRef),
+        transaction.get(appRef),
+        transaction.get(userRef),
+      ]);
+      const sessionSnapshot = snapshots[0];
+      const appSnapshot = snapshots[1];
+      const userSnapshot = snapshots[2];
+      if (sessionSnapshot.exists) {
+        throw new AlreadyExistsError(`Session ${id} already exists.`);
+      }
 
-        const appState = {...snapshotData(appSnapshot), ...delta.app};
-        const userState = {...snapshotData(userSnapshot), ...delta.user};
-        if (Object.keys(delta.app).length > 0) {
-          transaction.set(appRef, appState, {merge: true});
-        }
-        if (Object.keys(delta.user).length > 0) {
-          transaction.set(userRef, userState, {merge: true});
-        }
-        transaction.set(sessionRef, {
-          id,
-          appName,
-          userId,
-          state: JSON.stringify(sessionState),
-          createTime: now,
-          updateTime: now,
-          revision: 0,
-        });
-        return [appState, userState];
-      },
-    );
+      const appState = {...snapshotData(appSnapshot), ...delta.app};
+      const userState = {...snapshotData(userSnapshot), ...delta.user};
+      if (Object.keys(delta.app).length > 0) {
+        transaction.set(appRef, appState, {merge: true});
+      }
+      if (Object.keys(delta.user).length > 0) {
+        transaction.set(userRef, userState, {merge: true});
+      }
+      transaction.set(sessionRef, {
+        id,
+        appName,
+        userId,
+        state: JSON.stringify(sessionState),
+        createTime: now,
+        updateTime: now,
+        revision: 0,
+      });
+      return [appState, userState];
+    });
+    const storedAppState = stored[0];
+    const storedUserState = stored[1];
 
     const session = createSession({
       id,
@@ -225,13 +229,12 @@ export class FirestoreSessionService extends BaseSessionService {
     return session;
   }
 
-  async getSession({
-    appName,
-    userId,
-    sessionId,
-    config,
-  }: GetSessionRequest): Promise<Session | undefined> {
-    const {client} = await this.firestore();
+  async getSession(request: GetSessionRequest): Promise<Session | undefined> {
+    const appName = request.appName;
+    const userId = request.userId;
+    const sessionId = request.sessionId;
+    const config = request.config;
+    const client = (await this.firestore()).client;
     const sessionRef = sessionsRef(
       client,
       this.rootCollection,
@@ -248,11 +251,14 @@ export class FirestoreSessionService extends BaseSessionService {
       return undefined;
     }
 
-    const [events, appSnapshot, userSnapshot] = await Promise.all([
+    const results = await Promise.all([
       readEvents(sessionRef, config),
       appStateRef(client, appName).get(),
       userStateRef(client, appName, userId).get(),
     ]);
+    const events = results[0];
+    const appSnapshot = results[1];
+    const userSnapshot = results[2];
 
     const session = createSession({
       id: sessionId,
@@ -273,8 +279,10 @@ export class FirestoreSessionService extends BaseSessionService {
   async listSessions(
     request: ListSessionsRequest,
   ): Promise<ListSessionsResponse> {
-    const {appName, userId, order} = request;
-    const {client} = await this.firestore();
+    const appName = request.appName;
+    const userId = request.userId;
+    const order = request.order;
+    const client = (await this.firestore()).client;
 
     const query = userId
       ? sessionsRef(client, this.rootCollection, appName, userId).where(
@@ -286,10 +294,12 @@ export class FirestoreSessionService extends BaseSessionService {
           .collectionGroup(DEFAULT_SESSIONS_COLLECTION)
           .where('appName', '==', appName);
 
-    const [snapshot, appSnapshot] = await Promise.all([
+    const listResults = await Promise.all([
       query.get(),
       appStateRef(client, appName).get(),
     ]);
+    const snapshot = listResults[0];
+    const appSnapshot = listResults[1];
 
     const rows = snapshot.docs
       .map((doc) => toSessionRow(doc.data()))
@@ -356,12 +366,11 @@ export class FirestoreSessionService extends BaseSessionService {
     return states;
   }
 
-  async deleteSession({
-    appName,
-    userId,
-    sessionId,
-  }: DeleteSessionRequest): Promise<void> {
-    const {client} = await this.firestore();
+  async deleteSession(request: DeleteSessionRequest): Promise<void> {
+    const appName = request.appName;
+    const userId = request.userId;
+    const sessionId = request.sessionId;
+    const client = (await this.firestore()).client;
     const sessionRef = sessionsRef(
       client,
       this.rootCollection,
@@ -402,11 +411,15 @@ export class FirestoreSessionService extends BaseSessionService {
     await sessionRef.delete();
   }
 
-  async appendEvent({session, event}: AppendEventRequest): Promise<Event> {
+  async appendEvent(request: AppendEventRequest): Promise<Event> {
+    const session = request.session;
+    let event = request.event;
     if (event.partial) {
       return event;
     }
-    const {client, serverTimestamp} = await this.firestore();
+    const runtime = await this.firestore();
+    const client = runtime.client;
+    const serverTimestamp = runtime.serverTimestamp;
 
     // adk-js drops `temp:` keys entirely rather than keeping them readable for
     // the rest of the invocation; see `BaseSessionService.appendEvent`.
@@ -441,7 +454,7 @@ export class FirestoreSessionService extends BaseSessionService {
           throw new StaleSessionError();
         }
 
-        const [appSnapshot, userSnapshot] = await Promise.all([
+        const stateSnapshots = await Promise.all([
           Object.keys(delta.app).length > 0
             ? transaction.get(appRef)
             : undefined,
@@ -449,6 +462,8 @@ export class FirestoreSessionService extends BaseSessionService {
             ? transaction.get(userRef)
             : undefined,
         ]);
+        const appSnapshot = stateSnapshots[0];
+        const userSnapshot = stateSnapshots[1];
         if (appSnapshot) {
           transaction.set(
             appRef,
