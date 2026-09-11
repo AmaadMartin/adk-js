@@ -414,7 +414,7 @@ describe('SqliteSpanExporter', () => {
 
       expect(result.code).toBe(ExportResultCode.FAILED);
       expect(recorder.lines).toEqual([
-        'Failed to export spans to SQLite: NotNullConstraintViolationException (SQLITE_CONSTRAINT)',
+        'Failed to export spans to SQLite: NotNullConstraintViolationException (SQLITE_CONSTRAINT_NOTNULL)',
       ]);
       // OpenTelemetry stringifies every property it can reach on this error,
       // `cause` included, so none of them may carry the attributes.

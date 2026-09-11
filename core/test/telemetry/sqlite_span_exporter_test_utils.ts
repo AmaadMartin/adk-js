@@ -19,7 +19,7 @@ import {
 import {ExportResult} from '@opentelemetry/core';
 import {emptyResource} from '@opentelemetry/resources';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
-import {StorageSpan} from '../../src/telemetry/db/schema.js';
+import {storageSpanSchema} from '../../src/telemetry/db/schema.js';
 
 export const SESSION_ID_ATTRIBUTE = 'gcp.vertex.agent.session_id';
 export const INVOCATION_ID_ATTRIBUTE = 'gcp.vertex.agent.invocation_id';
@@ -111,7 +111,7 @@ export async function withDatabase<T>(
   const orm = await MikroORM.init({
     dbName: dbPath,
     driver: SqliteDriver,
-    entities: [StorageSpan],
+    entities: [storageSpanSchema],
   });
   try {
     return await use(orm);

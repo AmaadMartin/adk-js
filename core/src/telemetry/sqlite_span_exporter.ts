@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {mkdir} from 'node:fs/promises';
+import {dirname} from 'node:path';
+
 import {MikroORM} from '@mikro-orm/core';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
 import {ReadableSpan, SpanExporter} from '@opentelemetry/sdk-trace-base';
@@ -11,7 +14,7 @@ import {ReadableSpan, SpanExporter} from '@opentelemetry/sdk-trace-base';
 import {ensureDatabaseCreated} from '../sessions/db/operations.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
-import {StorageSpan} from './db/schema.js';
+import {StorageSpan, storageSpanSchema} from './db/schema.js';
 import {
   compareByStartTime,
   toReadableSpan,
@@ -178,14 +181,20 @@ export class SqliteSpanExporter implements SpanExporter {
       {packageName: '@mikro-orm/sqlite', feature: 'SqliteSpanExporter'},
       () => import('@mikro-orm/sqlite'),
     );
-    // `connect: false` keeps the connection out of `init`, which would
-    // otherwise open the file and leak it by throwing before returning a
-    // handle to close. Windows then refuses to delete the file.
+    // The v7 driver opens the file through better-sqlite3, which throws rather
+    // than create a missing parent directory. Create it first so a fresh path
+    // like `traces/run-1/spans.db` works on first use. `:memory:` has no path.
+    if (this.dbPath !== ':memory:') {
+      await mkdir(dirname(this.dbPath), {recursive: true});
+    }
+    // MikroORM v7 `init` loads metadata without opening the connection, so the
+    // file is opened only by the explicit `connect` below. A failure there is
+    // caught and the handle is closed, so the file is never leaked. Windows
+    // would otherwise refuse to delete a file left open by a throwing `init`.
     const orm = await MikroORM.init({
       dbName: this.dbPath,
       driver: SqliteDriver,
-      entities: [StorageSpan],
-      connect: false,
+      entities: [storageSpanSchema],
     });
     try {
       await orm.connect();
