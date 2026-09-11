@@ -131,10 +131,12 @@ exports.rootAgent = new NodeModulesAgent();`,
       expect(apps).toContain('standalone_app');
 
       const agentsAndApps = await loader.listAgents();
-      expect(agentsAndApps).toHaveLength(7);
+      expect(agentsAndApps).toHaveLength(9);
       expect(agentsAndApps).toContain('service_alpha');
       expect(agentsAndApps).toContain('service_beta');
       expect(agentsAndApps).toContain('service_helpers');
+      expect(agentsAndApps).toContain('service_nested');
+      expect(agentsAndApps).toContain('service_package_main');
       // Before a Workflow could be a root this was not an error, it was a
       // silence: the file exported nothing matching `isBaseAgent`, so the
       // directory simply did not show up.
@@ -184,6 +186,30 @@ exports.rootAgent = new NodeModulesAgent();`,
 
       expect(isBaseAgent(rootAgent)).toBe(true);
       expect(rootAgent.name).toBe('helpers_agent');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it(
+    'should load a directory agent from the file its package.json main names',
+    async () => {
+      const agentFile = await loader.getAgentFile('service_package_main');
+      const rootAgent = await agentFile.loadAgent();
+
+      expect(isBaseAgent(rootAgent)).toBe(true);
+      expect(rootAgent.name).toBe('package_main_agent');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it(
+    'should load a root agent republished under a nested agent export',
+    async () => {
+      const agentFile = await loader.getAgentFile('service_nested');
+      const rootAgent = await agentFile.loadAgent();
+
+      expect(isBaseAgent(rootAgent)).toBe(true);
+      expect(rootAgent.name).toBe('nested_export_agent');
     },
     TEST_EXECUTION_TIMEOUT,
   );

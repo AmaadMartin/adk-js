@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Agents
+
+- [Agent directory layouts](agents/agent_loader/index.md) - The folder and file layouts `AgentLoader` discovers, and the export shapes it accepts.
+
 ### Tools
 
 #### Retrieval
