@@ -109,6 +109,7 @@ describe('core/package.json subpath exports', () => {
     expect(subpaths.map(([subpath]) => subpath).sort()).toEqual([
       './a2a',
       './artifacts/gcs',
+      './integrations/redis',
       './sessions/database',
       './telemetry/gcp',
       './tools/mcp',
