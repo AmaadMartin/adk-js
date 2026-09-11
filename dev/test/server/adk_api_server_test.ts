@@ -24,7 +24,10 @@ import {
   Workflow,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import * as fs from 'node:fs';
 import * as http from 'node:http';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
@@ -969,12 +972,19 @@ describe('AdkWebServer', () => {
 
   describe('Debug UI', () => {
     it('should redirect to dev-ui when enabled', async () => {
+      // Serving the dev UI also writes `runtime-config.json` next to its
+      // assets, so the assets live in a temp directory here rather than in the
+      // source tree.
+      const webAssetsDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'adk-debug-ui-'),
+      );
       const debugServer = new AdkApiServer({
         agentLoader,
         sessionService,
         memoryService,
         artifactService,
         serveDebugUI: true,
+        webAssetsDir,
       });
       await debugServer.start();
       const debugClient = new HttpClient(debugServer.url);
@@ -982,6 +992,7 @@ describe('AdkWebServer', () => {
       const response = await debugClient.get('/');
       expect(response.status).toBe(302);
       await debugServer.stop();
+      fs.rmSync(webAssetsDir, {recursive: true, force: true});
     });
   });
 
