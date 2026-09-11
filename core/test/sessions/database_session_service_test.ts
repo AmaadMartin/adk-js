@@ -11,7 +11,7 @@ import {
   Event,
   State,
 } from '@google/adk';
-import {Options as MikroDBOptions, MikroORM} from '@mikro-orm/core';
+import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
@@ -820,7 +820,7 @@ describe('DatabaseSessionService additional options', () => {
   /** Reads the options a service hands to MikroORM, without opening a database. */
   async function captureInitOptions(
     service: DatabaseSessionService,
-  ): Promise<MikroDBOptions> {
+  ): Promise<NonNullable<Parameters<typeof MikroORM.init>[0]>> {
     const initSpy = vi
       .spyOn(MikroORM, 'init')
       .mockRejectedValue(new Error('halt'));
