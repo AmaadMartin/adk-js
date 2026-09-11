@@ -889,23 +889,22 @@ describe('DatabaseSessionService row-level locking gate', () => {
 });
 
 describe('dialectOf', () => {
-  it('normalizes the name knex gives the sqlite dialect', () => {
-    expect(dialectOf({getKnex: () => ({client: {dialect: 'sqlite3'}})})).toBe(
-      'sqlite',
-    );
+  it('names the sqlite backend from its platform', () => {
+    expect(dialectOf('SqlitePlatform')).toBe('sqlite');
   });
 
-  it('passes a dialect name through unchanged', () => {
-    expect(
-      dialectOf({getKnex: () => ({client: {dialect: 'postgresql'}})}),
-    ).toBe('postgresql');
+  it('names the postgres backend from its platform', () => {
+    expect(dialectOf('PostgreSqlPlatform')).toBe('postgresql');
   });
 
-  it('names no backend for a connection without a knex handle', () => {
-    expect(dialectOf({})).toBe('');
+  it('names the mysql, mariadb and mssql backends from their platforms', () => {
+    expect(dialectOf('MySqlPlatform')).toBe('mysql');
+    expect(dialectOf('MariaDbPlatform')).toBe('mariadb');
+    expect(dialectOf('MsSqlPlatform')).toBe('mssql');
   });
 
-  it('names no backend for a knex client naming no dialect', () => {
-    expect(dialectOf({getKnex: () => ({client: {}})})).toBe('');
+  it('names no backend for an unrecognized platform', () => {
+    expect(dialectOf('')).toBe('');
+    expect(dialectOf('OraclePlatform')).toBe('');
   });
 });

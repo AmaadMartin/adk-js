@@ -22,16 +22,22 @@ import {
  */
 export type MikroORMOptions = Partial<Options>;
 
-/** Backend name this module normalizes the sqlite dialect to. */
-const SQLITE_BACKEND = 'sqlite';
-
-/** Dialect name the sqlite driver reports through knex. */
-const SQLITE_KNEX_DIALECT = 'sqlite3';
-
-/** A driver connection that exposes the knex instance underneath it. */
-interface KnexBackedConnection {
-  getKnex(): {client?: {dialect?: unknown}};
-}
+/**
+ * Maps a MikroORM SQL platform class name to the backend name adk-python reads
+ * from `engine.dialect.name`.
+ *
+ * MikroORM v7 dropped knex for Kysely, so the backend is no longer read off a
+ * knex client; the platform the driver installs identifies it instead. The
+ * `postgres` URI alias resolves to the same `PostgreSqlPlatform`, so it needs
+ * no separate entry.
+ */
+const PLATFORM_BACKENDS: Readonly<Record<string, string>> = {
+  SqlitePlatform: 'sqlite',
+  MySqlPlatform: 'mysql',
+  MariaDbPlatform: 'mariadb',
+  PostgreSqlPlatform: 'postgresql',
+  MsSqlPlatform: 'mssql',
+};
 
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
@@ -340,30 +346,18 @@ function buildMySqlFamilyOptions(
   );
 }
 
-function isKnexBackedConnection(value: object): value is KnexBackedConnection {
-  return 'getKnex' in value && typeof value.getKnex === 'function';
-}
-
 /**
- * Returns the backend name a driver connection reports.
+ * Returns the backend name for a MikroORM platform class name.
  *
- * adk-python reads `engine.dialect.name`, which spells sqlite `sqlite`. knex
- * spells it `sqlite3`, so that one name is normalized.
+ * adk-python reads `engine.dialect.name`, which spells sqlite `sqlite` and
+ * PostgreSQL `postgresql`; this returns the same names from the platform a
+ * MikroORM driver installs.
  *
- * @param connection The driver connection to read the dialect from.
- * @returns The backend name, or an empty string for a connection exposing no
- *   knex handle and for one naming no dialect.
+ * @param platformName The platform class name, e.g. `SqlitePlatform`.
+ * @returns The backend name, or an empty string for an unrecognized platform.
  */
-export function dialectOf(connection: object): string {
-  if (!isKnexBackedConnection(connection)) {
-    return '';
-  }
-
-  const dialect = connection.getKnex().client?.dialect;
-  if (typeof dialect !== 'string') {
-    return '';
-  }
-  return dialect === SQLITE_KNEX_DIALECT ? SQLITE_BACKEND : dialect;
+export function dialectOf(platformName: string): string {
+  return PLATFORM_BACKENDS[platformName] ?? '';
 }
 
 /**
@@ -373,7 +367,7 @@ export function dialectOf(connection: object): string {
  * @returns The backend name, as {@link dialectOf} normalizes it.
  */
 export function getDatabaseBackend(orm: MikroORM): string {
-  return dialectOf(orm.em.getConnection());
+  return dialectOf(orm.em.getPlatform().constructor.name);
 }
 
 /**
