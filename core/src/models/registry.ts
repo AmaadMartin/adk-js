@@ -10,7 +10,6 @@ import {ApigeeLlm} from './apigee_llm.js';
 import {BaseLlm} from './base_llm.js';
 import {ChromeBuiltInLlm} from './chrome_prompt_llm.js';
 import {Gemini} from './google_llm.js';
-import {OCIGenAILlm} from './oci_genai_llm.js';
 
 /**
  * The constructor of a {@link BaseLlm} subclass, rather than an instance of
@@ -135,4 +134,8 @@ export class LLMRegistry {
 LLMRegistry.register(Gemini);
 LLMRegistry.register(ApigeeLlm);
 LLMRegistry.register(ChromeBuiltInLlm);
-LLMRegistry.register(OCIGenAILlm);
+// OCIGenAILlm is not registered here. Its SDK (oci-common,
+// oci-generativeaiinference) reaches Node built-ins, and this module is
+// evaluated by the browser entry through common.ts. It is registered from the
+// Node entry point (index.ts) instead, so the web bundle stays Node-free; see
+// https://github.com/google/adk-js/pull/614.
