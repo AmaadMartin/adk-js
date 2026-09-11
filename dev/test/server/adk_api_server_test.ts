@@ -7,6 +7,8 @@
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
   BaseArtifactService,
+  BaseLlm,
+  BaseLlmConnection,
   BaseMemoryService,
   BaseSessionService,
   createEvent,
@@ -18,6 +20,9 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  LLMRegistry,
+  LlmRequest,
+  LlmResponse,
   node,
   Runner,
   Session,
@@ -201,6 +206,19 @@ class TestAgent extends LlmAgent {
         role: 'model',
       },
     });
+  }
+}
+
+/** Registered so `defaultLlmModel` has a model name the registry resolves. */
+class ServerDefaultTestLlm extends BaseLlm {
+  static override readonly supportedModels = ['server-default-test-llm'];
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {}
+
+  connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('not used by these tests');
   }
 }
 
@@ -982,6 +1000,50 @@ describe('AdkWebServer', () => {
       const response = await debugClient.get('/');
       expect(response.status).toBe(302);
       await debugServer.stop();
+    });
+  });
+
+  describe('Default LLM model', () => {
+    let modelServer: AdkApiServer;
+
+    beforeEach(() => {
+      LLMRegistry.register(ServerDefaultTestLlm);
+    });
+
+    // The override is process-global, so a leak would decide the model for
+    // unrelated agents in the same worker.
+    afterEach(async () => {
+      LlmAgent.setDefaultModel(undefined);
+      await modelServer.stop();
+    });
+
+    it('resolves a model-less agent through the configured default', async () => {
+      modelServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        defaultLlmModel: 'server-default-test-llm',
+      });
+      await modelServer.start();
+
+      const agent = new LlmAgent({name: 'modelless_agent'});
+      expect(agent.canonicalModel).toBeInstanceOf(ServerDefaultTestLlm);
+    });
+
+    it('leaves the default alone when the option is absent', async () => {
+      modelServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await modelServer.start();
+
+      const agent = new LlmAgent({name: 'modelless_agent'});
+      expect(() => agent.canonicalModel).toThrow(
+        'No model found for modelless_agent.',
+      );
     });
   });
 
