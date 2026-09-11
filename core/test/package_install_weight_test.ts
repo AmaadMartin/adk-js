@@ -42,6 +42,7 @@ const pkg: CorePackageJson = JSON.parse(
  * that subsystem.
  */
 const OPTIONAL_SUBSYSTEM_PEERS = [
+  '@google-cloud/eventarc-publishing',
   '@google-cloud/opentelemetry-cloud-monitoring-exporter',
   '@google-cloud/opentelemetry-cloud-trace-exporter',
   '@google-cloud/storage',
@@ -72,6 +73,7 @@ describe('core/package.json install weight', () => {
   );
 
   it.each([
+    '@google-cloud/eventarc-publishing',
     '@google-cloud/opentelemetry-cloud-monitoring-exporter',
     '@google-cloud/opentelemetry-cloud-trace-exporter',
     '@google-cloud/storage',
