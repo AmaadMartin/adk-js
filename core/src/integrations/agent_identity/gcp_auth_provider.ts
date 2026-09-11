@@ -15,6 +15,7 @@ import {
   AgentIdentityCredentialsProvider,
   CredentialsProvider,
 } from './agent_identity_credentials_provider.js';
+import {IamConnectorCredentialsProvider} from './iam_connector_credentials_provider.js';
 
 /** The scheme `type` this provider is registered under. */
 export const GCP_AUTH_PROVIDER_SCHEME_TYPE = 'gcpAuthProviderScheme';
@@ -28,10 +29,7 @@ export interface GcpAuthProviderOptions {
   /** Serves auth provider resource names. Defaults to the Agent Identity one. */
   agentIdentityProvider?: CredentialsProvider;
 
-  /**
-   * Serves IAM connector resource names. There is no default: adk-js has no
-   * IAM Connector Credentials client yet.
-   */
+  /** Serves IAM connector resource names. Defaults to the connector one. */
   iamConnectorProvider?: CredentialsProvider;
 }
 
@@ -55,12 +53,13 @@ export class GcpAuthProvider implements BaseAuthProvider {
   ];
 
   private readonly agentIdentityProvider: CredentialsProvider;
-  private readonly iamConnectorProvider?: CredentialsProvider;
+  private readonly iamConnectorProvider: CredentialsProvider;
 
   constructor(options?: GcpAuthProviderOptions) {
     this.agentIdentityProvider =
       options?.agentIdentityProvider ?? new AgentIdentityCredentialsProvider();
-    this.iamConnectorProvider = options?.iamConnectorProvider;
+    this.iamConnectorProvider =
+      options?.iamConnectorProvider ?? new IamConnectorCredentialsProvider();
   }
 
   /**
@@ -69,8 +68,7 @@ export class GcpAuthProvider implements BaseAuthProvider {
    * @param authConfig The auth configuration carrying the scheme.
    * @param context The context of the current tool call.
    * @returns The credential the delegate produced.
-   * @throws Error If the scheme is not a `gcpAuthProviderScheme`, or if it
-   *     names an IAM connector and no connector delegate was supplied.
+   * @throws Error If the scheme is not a `gcpAuthProviderScheme`.
    */
   async getAuthCredential(
     authConfig: AuthConfig,
@@ -82,12 +80,6 @@ export class GcpAuthProvider implements BaseAuthProvider {
     }
 
     if (CONNECTOR_RESOURCE_NAME_PATTERN.test(authScheme.name)) {
-      if (!this.iamConnectorProvider) {
-        throw new Error(
-          'IAM Connector auth providers are not supported yet; pass an ' +
-            `iamConnectorProvider to handle '${authScheme.name}'.`,
-        );
-      }
       return this.iamConnectorProvider.getAuthCredential(authScheme, context);
     }
 

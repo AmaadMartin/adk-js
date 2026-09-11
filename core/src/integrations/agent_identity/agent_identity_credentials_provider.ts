@@ -5,31 +5,27 @@
  */
 
 import {Context} from '../../agents/context.js';
-import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../agents/framework_function_calls.js';
 import {
   AuthCredential,
   AuthCredentialTypes,
 } from '../../auth/auth_credential.js';
-import {getFunctionCalls, getFunctionResponses} from '../../events/event.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {GcpAuthProviderScheme} from '../agent_registry/types.js';
 import {
   AgentIdentityCredentialsClient,
   RestAgentIdentityCredentialsClient,
-  RetrieveCredentialsRequest,
   RetrieveCredentialsResponse,
-  RetrieveCredentialsSuccess,
 } from './agent_identity_credentials_client.js';
-
-/** How long to wait between polls while the service reports `pending`. */
-const NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS = 1000;
-
-/** How long to keep polling before giving up. */
-const NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS = 10000;
-
-/** The argument that carries the tool call a credential request belongs to. */
-const FUNCTION_CALL_ID_ARG = 'functionCallId';
+import {
+  CredentialsResourceNoun,
+  CredentialsServiceName,
+  baseRetrieveRequest,
+  constructAuthCredential,
+  isConsentCompleted,
+  pollUntil,
+  retrievalFailure,
+} from './credentials_utils.js';
 
 /**
  * A backend that turns a {@link GcpAuthProviderScheme} into a credential.
@@ -46,12 +42,8 @@ export interface CredentialsProvider {
 
 /** Options for {@link AgentIdentityCredentialsProvider}. */
 export interface AgentIdentityCredentialsProviderOptions {
-  /** A ready client to use, instead of the default REST client. */
+  /** A ready client to use, instead of the REST one built on first use. */
   client?: AgentIdentityCredentialsClient;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** True once the service has told us which of the four states applies. */
@@ -59,115 +51,6 @@ function isTerminalResponse(response: RetrieveCredentialsResponse): boolean {
   return Boolean(
     response.success ?? response.uriConsentRequired ?? response.consentRejected,
   );
-}
-
-function buildRetrieveRequest(
-  userId: string,
-  authScheme: GcpAuthProviderScheme,
-): RetrieveCredentialsRequest {
-  const request: RetrieveCredentialsRequest = {userId};
-  if (authScheme.scopes) {
-    request.scopes = authScheme.scopes;
-  }
-  if (authScheme.continueUri) {
-    request.continueUri = authScheme.continueUri;
-  }
-  return request;
-}
-
-function retrievalFailure(
-  userId: string,
-  providerName: string,
-  cause: unknown,
-): Error {
-  return new Error(
-    `Failed to retrieve credential for user '${userId}' on provider ` +
-      `'${providerName}'.`,
-    {cause},
-  );
-}
-
-/**
- * Builds an HTTP credential from the header/token pair the service returned.
- *
- * A header of `Authorization: Bearer` becomes a bearer credential. Any other
- * header name is sent verbatim, alongside `X-GOOG-API-KEY`.
- */
-export function constructAuthCredential(
-  success: RetrieveCredentialsSuccess,
-): AuthCredential {
-  const {header, token} = success;
-  if (!header || !token) {
-    throw new Error(
-      'Received either empty header or token from Agent Identity Credentials' +
-        ' service.',
-    );
-  }
-
-  const separator = header.indexOf(':');
-  const headerName = separator === -1 ? header : header.slice(0, separator);
-  const headerValue = separator === -1 ? '' : header.slice(separator + 1);
-  if (
-    headerName.trim().toLowerCase() === 'authorization' &&
-    headerValue.trim().toLowerCase().startsWith('bearer')
-  ) {
-    return {
-      authType: AuthCredentialTypes.HTTP,
-      http: {scheme: 'Bearer', credentials: {token}},
-    };
-  }
-
-  return {
-    authType: AuthCredentialTypes.HTTP,
-    http: {
-      // A custom header carries the token itself, so scheme and credentials
-      // stay empty.
-      scheme: '',
-      credentials: {},
-      additionalHeaders: {[header]: token, 'X-GOOG-API-KEY': token},
-    },
-  };
-}
-
-/**
- * True when the end user already answered the credential request that belongs
- * to this tool call.
- *
- * The provider uses it to tell a first consent prompt from a repeat one: a
- * second `uriConsentRequired` after the user answered means the consent did not
- * produce a credential.
- */
-export function isConsentCompleted(context: Context): boolean {
-  if (!context.functionCallId) {
-    return false;
-  }
-  const requestedFunctionCallIds = new Map<string, unknown>();
-  const answeredCallIds = new Set<string>();
-  for (const event of context.invocationContext.session.events) {
-    for (const call of getFunctionCalls(event)) {
-      if (call.name === REQUEST_CREDENTIAL_FUNCTION_CALL_NAME && call.id) {
-        requestedFunctionCallIds.set(
-          call.id,
-          call.args?.[FUNCTION_CALL_ID_ARG],
-        );
-      }
-    }
-    for (const response of getFunctionResponses(event)) {
-      if (
-        response.name === REQUEST_CREDENTIAL_FUNCTION_CALL_NAME &&
-        response.id
-      ) {
-        answeredCallIds.add(response.id);
-      }
-    }
-  }
-
-  for (const callId of answeredCallIds) {
-    if (requestedFunctionCallIds.get(callId) === context.functionCallId) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /**
@@ -207,11 +90,13 @@ export class AgentIdentityCredentialsProvider implements CredentialsProvider {
     let response: RetrieveCredentialsResponse;
     try {
       response = await this.retrieveCredentials(userId, authScheme);
-      if (response.pending) {
-        response = await this.pollCredentials(userId, authScheme);
-      }
     } catch (error: unknown) {
-      throw retrievalFailure(userId, authScheme.name, error);
+      throw retrievalFailure(
+        userId,
+        authScheme.name,
+        CredentialsResourceNoun.PROVIDER,
+        error,
+      );
     }
 
     if (response.consentRejected) {
@@ -219,8 +104,37 @@ export class AgentIdentityCredentialsProvider implements CredentialsProvider {
     }
 
     if (response.success) {
-      logger.debug('Auth credential obtained.');
-      return constructAuthCredential(response.success);
+      logger.debug('Auth credential obtained immediately.');
+      return constructAuthCredential(
+        response.success,
+        CredentialsServiceName.AGENT_IDENTITY,
+      );
+    }
+
+    if (response.pending) {
+      try {
+        response = await pollUntil(
+          () => this.retrieveCredentials(userId, authScheme),
+          isTerminalResponse,
+        );
+      } catch (error: unknown) {
+        throw retrievalFailure(
+          userId,
+          authScheme.name,
+          CredentialsResourceNoun.PROVIDER,
+          error,
+        );
+      }
+      if (response.consentRejected) {
+        throw new Error('Operation failed: User consent rejected.');
+      }
+      if (response.success) {
+        logger.debug('Auth credential obtained after polling.');
+        return constructAuthCredential(
+          response.success,
+          CredentialsServiceName.AGENT_IDENTITY,
+        );
+      }
     }
 
     if (response.uriConsentRequired) {
@@ -237,38 +151,19 @@ export class AgentIdentityCredentialsProvider implements CredentialsProvider {
     }
 
     throw new Error(
-      'Agent Identity Credentials service returned an unsupported state.',
+      `${CredentialsServiceName.AGENT_IDENTITY} service returned an ` +
+        'unsupported state.',
     );
-  }
-
-  private getClient(): AgentIdentityCredentialsClient {
-    // Built lazily, so constructing the provider does not resolve credentials.
-    this.client ??= new RestAgentIdentityCredentialsClient();
-    return this.client;
   }
 
   private retrieveCredentials(
     userId: string,
     authScheme: GcpAuthProviderScheme,
   ): Promise<RetrieveCredentialsResponse> {
-    return this.getClient().retrieveCredentials(
+    this.client ??= new RestAgentIdentityCredentialsClient();
+    return this.client.retrieveCredentials(
       authScheme.name,
-      buildRetrieveRequest(userId, authScheme),
+      baseRetrieveRequest(userId, authScheme),
     );
-  }
-
-  private async pollCredentials(
-    userId: string,
-    authScheme: GcpAuthProviderScheme,
-  ): Promise<RetrieveCredentialsResponse> {
-    const endTime = Date.now() + NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS;
-    while (Date.now() < endTime) {
-      const response = await this.retrieveCredentials(userId, authScheme);
-      if (isTerminalResponse(response)) {
-        return response;
-      }
-      await sleep(NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS);
-    }
-    throw new Error('Timeout waiting for credentials.');
   }
 }
