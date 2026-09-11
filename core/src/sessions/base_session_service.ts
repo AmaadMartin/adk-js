@@ -97,6 +97,56 @@ export interface ListSessionsResponse {
   totalPages: number;
 }
 
+/** The pagination half of a {@link ListSessionsResponse}. */
+export type PaginationMeta = Pick<
+  ListSessionsResponse,
+  'page' | 'limit' | 'totalItems' | 'totalPages'
+>;
+
+/**
+ * Applies the `limit`/`offset`/`page` contract to an ordered session list.
+ *
+ * Every session service reports the same pagination metadata, so they share
+ * this. Omitting `limit` returns a single page holding everything after
+ * `offset`. `page` takes precedence over `offset`, as
+ * {@link ListSessionsRequest} says.
+ *
+ * @param sessions The full ordered result set.
+ * @param request The request whose pagination fields to apply.
+ * @return The requested slice, and the metadata describing it.
+ */
+export function paginateSessions(
+  sessions: Session[],
+  {limit, offset, page}: ListSessionsRequest,
+): {sessions: Session[]; meta: PaginationMeta} {
+  const totalItems = sessions.length;
+
+  if (limit === undefined) {
+    return {
+      sessions: offset ? sessions.slice(offset) : sessions,
+      meta: {
+        page: 1,
+        limit: totalItems,
+        totalItems,
+        totalPages: totalItems === 0 ? 0 : 1,
+      },
+    };
+  }
+
+  const start = page !== undefined ? (page - 1) * limit : (offset ?? 0);
+  const effectivePage =
+    page ?? (limit === 0 ? 1 : Math.floor(start / limit) + 1);
+  return {
+    sessions: sessions.slice(start, start + limit),
+    meta: {
+      page: effectivePage,
+      limit,
+      totalItems,
+      totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
+    },
+  };
+}
+
 /**
  * Base class for session services.
  *
@@ -171,6 +221,9 @@ export abstract class BaseSessionService {
       return event;
     }
 
+    // Temp values have to reach the in-memory session before the delta is
+    // trimmed, so a later agent in the same invocation can read them.
+    applyTempDeltaState(session, event);
     event = trimTempDeltaState(event);
 
     this.updateSessionState({session, event});
@@ -248,6 +301,35 @@ export function trimTempDeltaState(event: Event): Event {
 }
 
 /**
+ * Applies the temporary state delta keys of an event to the in-memory session
+ * state.
+ *
+ * Temp state is ephemeral: it stays readable on `session.state` for the rest of
+ * the current invocation, and {@link trimTempDeltaState} keeps it out of the
+ * event that reaches storage. Call this before the trim, or there is nothing
+ * left to read.
+ */
+export function applyTempDeltaState(session: Session, event: Event): void {
+  if (!event.actions?.stateDelta) {
+    return;
+  }
+  for (const [key, value] of Object.entries(event.actions.stateDelta)) {
+    if (!key.startsWith(State.TEMP_PREFIX)) {
+      continue;
+    }
+    // Same rollback guard the committed keys get: a temp key written directly
+    // through a node's `ctx.state` must not be reverted by an older commit.
+    if (!shouldApplyDeltaWrite(session.state, event.actions.stateDelta, key)) {
+      continue;
+    }
+    // Plain assignment is safe: a `temp:`-prefixed key can never be the string
+    // `__proto__`, which is what `updateSessionState` needs `defineProperty`
+    // for.
+    session.state[key] = value;
+  }
+}
+
+/**
  * Removes temporary state keys from the state.
  *
  * The result is a null-prototype map. `state` comes straight off the request
@@ -268,6 +350,52 @@ export function trimTempState(
     }
   }
   return filteredState;
+}
+
+/**
+ * A state delta split by the scope each entry belongs to.
+ */
+export interface ScopedStateDelta {
+  /** App-scoped entries, with the `app:` prefix stripped. */
+  app: Record<string, unknown>;
+  /** User-scoped entries, with the `user:` prefix stripped. */
+  user: Record<string, unknown>;
+  /** Session-scoped entries. */
+  session: Record<string, unknown>;
+}
+
+/**
+ * Splits a state delta into its app-, user- and session-scoped parts.
+ *
+ * Each scope is stored separately by a persistent session service, so the
+ * `app:` and `user:` prefixes are stripped. `temp:` entries are dropped: they
+ * are never persisted.
+ *
+ * The three maps are null-prototype, because the keys can come straight off a
+ * request body. Assigning `__proto__` to a plain object literal reaches the
+ * inherited setter and re-parents the map instead of storing the entry.
+ */
+export function extractStateDelta(
+  state: Record<string, unknown>,
+): ScopedStateDelta {
+  const delta: ScopedStateDelta = {
+    app: Object.create(null),
+    user: Object.create(null),
+    session: Object.create(null),
+  };
+  for (const [key, value] of Object.entries(state)) {
+    if (key.startsWith(State.APP_PREFIX)) {
+      delta.app[key.slice(State.APP_PREFIX.length)] = value;
+    } else if (key.startsWith(State.USER_PREFIX)) {
+      delta.user[key.slice(State.USER_PREFIX.length)] = value;
+    } else if (!key.startsWith(State.TEMP_PREFIX)) {
+      delta.session[key] = value;
+    }
+  }
+  // The session bucket is a different object, so the write order recorded
+  // against the original has to come with it or the commit loses its ordering.
+  carryDeltaStamps(state, delta.session);
+  return delta;
 }
 
 /**
