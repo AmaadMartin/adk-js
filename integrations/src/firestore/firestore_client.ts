@@ -12,9 +12,10 @@
  * SDK's concrete classes so that it can be driven by an in-memory double: the
  * classes carry dozens of members and no test-constructible form, so a
  * stand-in could only satisfy them through an unchecked cast. A real
- * `Firestore` satisfies every member below, which
- * `integrations/test/firestore/firestore_client_test.ts` asserts against the
- * SDK's own types.
+ * `Firestore` satisfies every member below, which the `accepts a real
+ * Firestore client` case in
+ * `integrations/test/firestore/firestore_session_service_test.ts` asserts
+ * against the SDK's own type.
  */
 
 /** A document, as read or written. */

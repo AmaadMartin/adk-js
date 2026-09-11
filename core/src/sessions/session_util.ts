@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isJsonSafe, toJsonSafe} from '../utils/json_utils.js';
+import {toJsonSafe} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
+import {
+  ListSessionsRequest,
+  ListSessionsResponse,
+} from './base_session_service.js';
+import {Session} from './session.js';
 import {State} from './state.js';
 
 /**
@@ -65,12 +70,51 @@ export function extractStateDelta(
 export function makeJsonSafeState(
   state: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (!isJsonSafe(state)) {
+  const {record, lossy} = toJsonSafe(state);
+  if (lossy) {
     logger.warn(
       'Session state holds values that JSON cannot represent. They are ' +
         'persisted as their string form, so reading the session back returns ' +
         'the string rather than the original value.',
     );
   }
-  return toJsonSafe(state);
+  return record;
+}
+
+/**
+ * Applies a list request's pagination to sessions the caller has already
+ * ordered.
+ *
+ * A backend that cannot page in the store — an in-memory map, a Firestore
+ * collection-group query with no cheap count — reads the whole match set and
+ * slices it here. When no `limit` is asked for, the response reports one page
+ * holding everything, or no pages at all when there is nothing to report.
+ */
+export function paginateSessions(
+  sessions: Session[],
+  {limit, offset, page}: ListSessionsRequest,
+): ListSessionsResponse {
+  const totalItems = sessions.length;
+  if (limit === undefined) {
+    return {
+      sessions: offset ? sessions.slice(offset) : sessions,
+      page: 1,
+      limit: totalItems,
+      totalItems,
+      totalPages: totalItems === 0 ? 0 : 1,
+    };
+  }
+
+  const effectiveOffset =
+    page !== undefined ? (page - 1) * limit : (offset ?? 0);
+  const effectivePage =
+    page ?? (limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1);
+
+  return {
+    sessions: sessions.slice(effectiveOffset, effectiveOffset + limit),
+    page: effectivePage,
+    limit,
+    totalItems,
+    totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
+  };
 }
