@@ -85,10 +85,14 @@ export class OperationParser {
     }
 
     const mediaTypeObject = content[firstMimeType];
-    const schema = mediaTypeObject.schema;
+    // A media type may omit `schema`, which describes an unconstrained payload
+    // rather than the absence of one. adk-python reads it as an empty schema
+    // and still advertises a `body` argument for it.
+    const schema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject =
+      mediaTypeObject.schema ?? {};
     const description = requestBody.description || '';
 
-    if (schema && !('$ref' in schema)) {
+    if (!('$ref' in schema)) {
       if (schema.type === 'object') {
         const properties = schema.properties || {};
         if (Object.keys(properties).length > 0) {
@@ -147,11 +151,12 @@ export class OperationParser {
     if (min20x) {
       const response = responses[min20x];
       if (!('$ref' in response) && response.content) {
-        const firstMimeType = Object.keys(response.content)[0];
-        if (firstMimeType) {
-          const schema = response.content[firstMimeType].schema;
+        // Some media types omit a schema; keep scanning until one declares it.
+        for (const mediaType of Object.values(response.content)) {
+          const schema = mediaType.schema;
           if (schema && !('$ref' in schema)) {
             returnSchema = schema;
+            break;
           }
         }
       }
@@ -189,6 +194,17 @@ export class OperationParser {
   }
 
   /**
+   * Gets the return value parsed from the lowest 2xx response.
+   *
+   * @returns The return parameter, whose schema is empty when no media type of
+   *   that response declares one.
+   */
+  @experimental
+  public getReturnValue(): ApiParameter | undefined {
+    return this.returnValue;
+  }
+
+  /**
    * Generates a JSON schema representing the arguments of the tool function call.
    *
    * @returns A JSON Schema object.
@@ -208,7 +224,7 @@ export class OperationParser {
     return {
       type: 'object',
       properties,
-      required: required.length > 0 ? required : undefined,
+      required,
       title: `${this.operation.operationId || 'unnamed'}_Arguments`,
     };
   }
