@@ -24,6 +24,7 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {safeJsonSerialize} from '../utils/json_utils.js';
 import {version} from '../version.js';
 
 const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
@@ -43,20 +44,6 @@ const ADK_NODE_STATUS = 'adk.node.status';
 const ADK_NODE_INTERRUPT_COUNT = 'adk.node.interrupt_count';
 
 export const tracer = trace.getTracer('gcp.vertex.agent', version);
-
-/**
- * Convert any JavaScript object to a JSON-serializable string.
- *
- * @param obj The object to serialize.
- * @returns The JSON-serialized object string or '<not serializable>' if the object cannot be serialized.
- */
-function safeJsonSerialize(obj: unknown): string {
-  try {
-    return JSON.stringify(obj);
-  } catch (_e: unknown) {
-    return '<not serializable>';
-  }
-}
 
 export interface TraceAgentInvocationParams {
   agent: BaseAgent;

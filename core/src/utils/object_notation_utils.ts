@@ -37,7 +37,8 @@ const toCamelCaseKey = (key: string) =>
     letter.toUpperCase(),
   );
 
-const toSnakeCaseKey = (key: string) =>
+/** Converts one `camelCase` key to `snake_case`. */
+export const toSnakeCaseKey = (key: string) =>
   key.replace(/[A-Z]/g, (g) => '_' + g.toLowerCase());
 
 function toNotation(
