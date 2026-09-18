@@ -150,7 +150,10 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
@@ -369,7 +372,12 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
-export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {
+  EVAL_CLIENT_LABEL,
+  getClientLabels,
+  runWithClientLabel,
+} from './utils/client_labels.js';
+export {mapConcurrent} from './utils/concurrency_utils.js';
 export {
   LogLevel,
   getLogger,
