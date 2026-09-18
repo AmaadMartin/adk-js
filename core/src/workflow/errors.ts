@@ -10,6 +10,8 @@
  * Ported from `google/adk-python` `workflow/_errors.py`.
  */
 
+import {errorDetails, errorStatusCode} from '../utils/error_utils.js';
+
 /**
  * Internal: raised when a dynamic node interrupts (HITL).
  *
@@ -18,6 +20,15 @@
  * interrupt IDs from the parent's ctx (set by `ctx.runNode()` before throwing).
  *
  * Internal to the framework — not part of the public API.
+ *
+ * @remarks
+ * The reference makes this a `BaseException`, so a node body's
+ * `except Exception` cannot swallow a pause. TypeScript has no exception
+ * hierarchy, so a node body's `catch` does catch this error. The scheduler
+ * copies the child's interrupt ids onto the caller's context before this is
+ * thrown, so the runner still records the caller as waiting even when its body
+ * swallows the throw. A node body that catches broadly should re-throw this
+ * error.
  */
 export class NodeInterruptedError extends Error {
   constructor(message = 'Node interrupted (awaiting resume input).') {
@@ -72,12 +83,18 @@ export function isNodeTimeoutError(e: unknown): e is NodeTimeoutError {
 /**
  * Raised when a dynamic node fails.
  *
- * Caught by the parent node's NodeRunner to propagate the error.
+ * Caught by the parent node's NodeRunner to propagate the error. The wrapped
+ * error's status and detail text are copied onto the wrapper, because they are
+ * otherwise lost as the failure propagates up the execution stack.
  * Internal to the framework — not part of the public API.
  */
 export class DynamicNodeFailError extends Error {
   readonly error: Error;
   readonly errorNodePath: string;
+  /** The wrapped error's status, when it carries one. */
+  readonly statusCode?: string | number;
+  /** The wrapped error's detail text or response body, when it carries one. */
+  readonly details?: string;
 
   /**
    * @param options.message Human-readable failure message.
@@ -89,6 +106,8 @@ export class DynamicNodeFailError extends Error {
     this.name = 'DynamicNodeFailError';
     this.error = options.error;
     this.errorNodePath = options.errorNodePath;
+    this.statusCode = errorStatusCode(options.error);
+    this.details = errorDetails(options.error);
     Object.setPrototypeOf(this, DynamicNodeFailError.prototype);
   }
 }
