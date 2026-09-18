@@ -10,7 +10,7 @@ import {Schema} from '@google/genai';
  * Keys of a genai `Schema` that carry a count/length bound. The genai (OpenAPI)
  * encoding sends these as strings; JSON Schema requires numbers.
  */
-const NUMERIC_STRING_KEYS = [
+export const NUMERIC_STRING_KEYS = [
   'minItems',
   'maxItems',
   'minLength',
