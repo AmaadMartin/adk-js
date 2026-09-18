@@ -57,6 +57,26 @@ export {
   loadSkillFromZipBuffer,
   validateSkillDir,
 } from './skills/loader.js';
+// `GoogleTool` and its credential plumbing depend on `google-auth-library`,
+// which imports Node built-ins. They are exported from this Node entry point
+// rather than the browser-safe `common.ts` barrel, in the same manner as
+// `agent_registry` and `telemetry/google_cloud` below.
+export {
+  authorizationRequiredMessage,
+  GoogleTool,
+  GoogleToolStatus,
+} from './tools/google_tool.js';
+export type {
+  GoogleToolErrorResponse,
+  GoogleToolExecuteContext,
+  GoogleToolExecuteFunction,
+  GoogleToolOptions,
+} from './tools/google_tool.js';
+export {
+  BaseGoogleCredentialsConfig,
+  GoogleCredentialsManager,
+} from './tools/google_tool_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/google_tool_credentials.js';
 export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';
 export type {LoadWebPageOptions} from './tools/load_web_page.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
