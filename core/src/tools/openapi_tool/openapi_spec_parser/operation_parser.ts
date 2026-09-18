@@ -6,6 +6,12 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
+import {
+  ApiParameter as CommonApiParameter,
+  PydocHelper,
+  toSnakeCase,
+  TypeHintHelper,
+} from '../common/common.js';
 
 export interface ApiParameter {
   originalName: string;
@@ -27,26 +33,46 @@ export class OperationParser {
   private params: ApiParameter[] = [];
   private returnValue?: ApiParameter;
   private preservePropertyNames: boolean;
+  private readonly operation: OpenAPIV3.OperationObject;
 
   constructor(
-    private readonly operation: OpenAPIV3.OperationObject,
-    options: {preservePropertyNames?: boolean} = {},
+    operation: OpenAPIV3.OperationObject | Record<string, unknown> | string,
+    options: {preservePropertyNames?: boolean; shouldParse?: boolean} = {},
   ) {
+    if (typeof operation === 'string') {
+      this.operation = JSON.parse(operation) as OpenAPIV3.OperationObject;
+    } else {
+      this.operation = operation as OpenAPIV3.OperationObject;
+    }
     this.preservePropertyNames = options.preservePropertyNames ?? false;
-    this.processOperationParameters();
-    this.processRequestBody();
-    this.processReturnValue();
-    this.dedupeParamNames();
+    if (options.shouldParse !== false) {
+      this.processOperationParameters();
+      this.processRequestBody();
+      this.processReturnValue();
+      this.dedupeParamNames();
+    }
+  }
+
+  /**
+   * Loads a pre-parsed OperationParser from an operation, parameters list, and optional return value.
+   */
+  @experimental
+  public static load(
+    operation: OpenAPIV3.OperationObject | Record<string, unknown> | string,
+    params: ApiParameter[],
+    returnValue?: ApiParameter,
+  ): OperationParser {
+    const parser = new OperationParser(operation, {shouldParse: false});
+    parser.params = params;
+    parser.returnValue = returnValue;
+    return parser;
   }
 
   private getParamName(originalName: string): string {
-    if (this.preservePropertyNames) {
+    if (this.preservePropertyNames || /^[a-z0-9_]+$/.test(originalName)) {
       return originalName;
     }
-    // Simple snake_case conversion
-    return originalName
-      .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
-      .replace(/^_/, '');
+    return toSnakeCase(originalName);
   }
 
   private processOperationParameters() {
@@ -192,6 +218,99 @@ export class OperationParser {
     return this.params;
   }
 
+  public get_parameters(): ApiParameter[] {
+    return this.getParameters();
+  }
+
+  /**
+   * Gets the parsed return value parameter for the operation.
+   */
+  @experimental
+  public getReturnValue(): ApiParameter | undefined {
+    return this.returnValue;
+  }
+
+  public get_return_value(): ApiParameter | undefined {
+    return this.getReturnValue();
+  }
+
+  /**
+   * Returns the return type hint string (e.g. 'str', 'int', 'Dict[str, Any]', 'Any').
+   */
+  @experimental
+  public getReturnTypeHint(): string {
+    return TypeHintHelper.getTypeHint(this.returnValue?.paramSchema);
+  }
+
+  public get_return_type_hint(): string {
+    return this.getReturnTypeHint();
+  }
+
+  /**
+   * Returns the return type value string.
+   */
+  @experimental
+  public getReturnTypeValue(): string {
+    return TypeHintHelper.getTypeValue(this.returnValue?.paramSchema);
+  }
+
+  public get_return_type_value(): string {
+    return this.getReturnTypeValue();
+  }
+
+  /**
+   * Returns the name of the first security scheme configured on this operation, or empty string.
+   */
+  @experimental
+  public getAuthSchemeName(): string {
+    if (this.operation.security && this.operation.security.length > 0) {
+      return Object.keys(this.operation.security[0])[0] || '';
+    }
+    return '';
+  }
+
+  public get_auth_scheme_name(): string {
+    return this.getAuthSchemeName();
+  }
+
+  /**
+   * Generates a PyDoc string describing the operation, its arguments, and return value.
+   */
+  @experimental
+  public getPydocString(): string {
+    const docDesc = this.getDescription();
+    const argDocs = this.params.map((p) =>
+      PydocHelper.generateParamDoc(
+        new CommonApiParameter({
+          originalName: p.originalName,
+          paramLocation: p.paramLocation,
+          paramSchema: p.paramSchema,
+          description: p.description,
+          pyName: p.name,
+          required: p.required,
+        }),
+      ),
+    );
+    const returnDoc = PydocHelper.generateReturnDoc(
+      (this.operation.responses || {}) as Record<
+        string,
+        OpenAPIV3.ResponseObject
+      >,
+    );
+    let fullDoc = docDesc;
+    if (argDocs.length > 0) {
+      fullDoc += `\n\nArgs:\n  ${argDocs.join('\n  ')}`;
+    }
+    if (returnDoc) {
+      fullDoc += `\n\n${returnDoc}`;
+    }
+    return fullDoc.trim();
+  }
+
+  public get_pydoc_string(): string {
+    return this.getPydocString();
+  }
+
   /**
    * Generates a JSON schema representing the arguments of the tool function call.
    *
@@ -217,6 +336,10 @@ export class OperationParser {
     };
   }
 
+  public get_json_schema(): Record<string, unknown> {
+    return this.getJsonSchema();
+  }
+
   /**
    * Gets a valid tool function name derived from the operation's operationId.
    *
@@ -232,6 +355,10 @@ export class OperationParser {
     return this.getParamName(operationId).substring(0, 60);
   }
 
+  public get_function_name(): string {
+    return this.getFunctionName();
+  }
+
   /**
    * Gets the description of the tool, derived from the operation's description or summary.
    *
@@ -240,5 +367,9 @@ export class OperationParser {
   @experimental
   public getDescription(): string {
     return this.operation.description || this.operation.summary || '';
+  }
+
+  public get_description(): string {
+    return this.getDescription();
   }
 }

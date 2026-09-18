@@ -32,6 +32,8 @@ export interface ParsedOperation {
   parameters: ApiParameter[];
   returnValue?: ApiParameter;
   authScheme?: OpenAPIV3.SecuritySchemeObject;
+  authCredential?: unknown;
+  additionalContext?: unknown;
 }
 
 @experimental
@@ -92,14 +94,14 @@ function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
       seenRefs.add(refString);
 
       if (resolvedCache.has(refString)) {
-        return resolvedCache.get(refString);
+        return JSON.parse(JSON.stringify(resolvedCache.get(refString)));
       }
 
       let resolvedValue = resolveRef(refString, currentDoc);
       if (resolvedValue !== undefined) {
         resolvedValue = recursiveResolve(resolvedValue, currentDoc, seenRefs);
         resolvedCache.set(refString, resolvedValue);
-        return resolvedValue;
+        return JSON.parse(JSON.stringify(resolvedValue));
       } else {
         return obj;
       }
