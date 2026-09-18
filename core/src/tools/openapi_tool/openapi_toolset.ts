@@ -21,28 +21,42 @@ export class OpenAPIToolset extends BaseToolset {
   constructor(
     options: {
       specDict?: OpenAPIV3.Document;
+      spec_dict?: OpenAPIV3.Document;
       specStr?: string;
-      specType?: 'json' | 'yaml';
+      spec_str?: string;
+      specType?: 'json' | 'yaml' | string;
+      spec_str_type?: 'json' | 'yaml' | string;
       toolFilter?: ToolPredicate | string[];
       prefix?: string;
       preservePropertyNames?: boolean;
       authScheme?: OpenAPIV3.SecuritySchemeObject;
+      auth_scheme?: OpenAPIV3.SecuritySchemeObject;
       authCredential?: AuthCredential;
+      auth_credential?: AuthCredential;
       credentialKey?: string;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
     } = {},
   ) {
     super(options.toolFilter || [], options.prefix);
 
-    let spec = options.specDict;
-    if (!spec && options.specStr) {
+    const specDict = options.specDict ?? options.spec_dict;
+    const specStr = options.specStr ?? options.spec_str;
+    const specType = options.specType ?? options.spec_str_type;
+    const authScheme = options.authScheme ?? options.auth_scheme;
+    const authCredential = options.authCredential ?? options.auth_credential;
+
+    let spec = specDict;
+    if (!spec && specStr) {
+      if (specType && specType !== 'json' && specType !== 'yaml') {
+        throw new Error(`Unsupported spec type: ${specType}`);
+      }
       if (
-        options.specType === 'yaml' ||
-        (!options.specType && options.specStr.trim().startsWith('---'))
+        specType === 'yaml' ||
+        (!specType && specStr.trim().startsWith('---'))
       ) {
-        spec = yaml.load(options.specStr) as OpenAPIV3.Document;
+        spec = yaml.load(specStr) as OpenAPIV3.Document;
       } else {
-        spec = JSON.parse(options.specStr) as OpenAPIV3.Document;
+        spec = JSON.parse(specStr) as OpenAPIV3.Document;
       }
     }
 
@@ -80,13 +94,28 @@ export class OpenAPIToolset extends BaseToolset {
     }
 
     // Apply global auth overrides if provided
-    if (options.authScheme || options.authCredential) {
+    if (authScheme || authCredential) {
       for (const tool of this.tools) {
-        if (options.authScheme) tool.configureAuthScheme(options.authScheme);
-        if (options.authCredential)
-          tool.configureAuthCredential(options.authCredential);
+        if (authScheme) tool.configureAuthScheme(authScheme);
+        if (authCredential) tool.configureAuthCredential(authCredential);
       }
     }
+  }
+
+  /**
+   * Retrieves a specific RestApiTool by its name.
+   */
+  @experimental
+  getTool(toolName: string): RestApiTool | undefined {
+    return this.tools.find((t) => t.name === toolName);
+  }
+
+  /**
+   * Snake_case alias for {@link getTool}.
+   */
+  @experimental
+  get_tool(toolName: string): RestApiTool | undefined {
+    return this.getTool(toolName);
   }
 
   @experimental
@@ -100,6 +129,14 @@ export class OpenAPIToolset extends BaseToolset {
       }
       return true;
     });
+  }
+
+  /**
+   * Synchronous/compatible helper for retrieving all parsed RestApiTool instances.
+   */
+  @experimental
+  get_tools(): RestApiTool[] {
+    return [...this.tools];
   }
 
   @experimental
