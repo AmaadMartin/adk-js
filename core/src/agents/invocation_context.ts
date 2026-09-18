@@ -6,6 +6,7 @@
 
 import {Content} from '@google/genai';
 
+import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
@@ -64,6 +65,7 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  resumabilityConfig?: ResumabilityConfig;
 }
 
 /**
@@ -268,6 +270,11 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * The resumability config that applies to every agent under this invocation.
+   */
+  readonly resumabilityConfig?: ResumabilityConfig;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -301,6 +308,7 @@ export class InvocationContext {
         .invocationCostManager ?? new InvocationCostManager();
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
+    this.resumabilityConfig = params.resumabilityConfig;
   }
 
   /**

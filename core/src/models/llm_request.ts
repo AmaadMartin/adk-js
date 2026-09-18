@@ -51,6 +51,14 @@ export interface LlmRequest {
    * The interaction ID from the previous turn, if any.
    */
   previousInteractionId?: string;
+
+  /**
+   * Instructions contributed by tools while the request is being built.
+   * {@link finalizeDynamicInstructions} resolves them into the system
+   * instruction once every tool has processed the request, so a tool does not
+   * have to know where instructions ultimately go. Internal request state.
+   */
+  dynamicInstructions?: string[];
 }
 
 /**
@@ -70,6 +78,19 @@ export function appendInstructions(
   } else {
     llmRequest.config.systemInstruction = newInstructions;
   }
+}
+
+/**
+ * Resolves the accumulated dynamic instructions into the system instruction
+ * and clears them, so a second call adds nothing.
+ */
+export function finalizeDynamicInstructions(llmRequest: LlmRequest): void {
+  const instructions = llmRequest.dynamicInstructions;
+  if (!instructions?.length) {
+    return;
+  }
+  appendInstructions(llmRequest, [instructions.join('\n\n')]);
+  instructions.length = 0;
 }
 
 /**
