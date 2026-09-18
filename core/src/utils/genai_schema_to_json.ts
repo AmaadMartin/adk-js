@@ -10,14 +10,14 @@ import {Schema} from '@google/genai';
  * Keys of a genai `Schema` that carry a count/length bound. The genai (OpenAPI)
  * encoding sends these as strings; JSON Schema requires numbers.
  */
-const NUMERIC_STRING_KEYS = [
+export const NUMERIC_STRING_KEYS: ReadonlySet<string> = new Set([
   'minItems',
   'maxItems',
   'minLength',
   'maxLength',
   'minProperties',
   'maxProperties',
-] as const;
+] satisfies readonly (keyof Schema)[]);
 
 /**
  * Keys that exist only in the genai/OpenAPI dialect and have no JSON Schema
@@ -94,11 +94,7 @@ export function genaiSchemaToJsonSchema(
         }
         break;
       default:
-        out[key] = NUMERIC_STRING_KEYS.includes(
-          key as (typeof NUMERIC_STRING_KEYS)[number],
-        )
-          ? Number(value)
-          : value;
+        out[key] = NUMERIC_STRING_KEYS.has(key) ? Number(value) : value;
     }
   }
 
