@@ -38,6 +38,13 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {
+  CloudTtsLlm,
+  // CloudTtsClient is named by CloudTtsLlmParams.client, so typedoc requires
+  // it here; nothing else in this module is public API.
+  type CloudTtsClient,
+  type CloudTtsLlmParams,
+} from './evaluation/simulation/cloud_tts_llm.js';
 export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.js';
 export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
 export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';
