@@ -474,6 +474,15 @@ export type {
   WorkflowConfig,
 } from './workflow/index.js';
 
+// `Capabilities` keeps its upstream name inside the module, but this barrel is
+// flat: Cloud Storage cannot claim an identifier that another settings port
+// will also want.
+export {
+  Capabilities as GcsCapabilities,
+  createGcsToolSettings,
+} from './integrations/gcs/settings.js';
+export type {GcsToolSettings} from './integrations/gcs/settings.js';
+
 export {App, isApp, validateAppName} from './apps/app.js';
 export type {AppOptions} from './apps/app.js';
 export * from './artifacts/base_artifact_service.js';
