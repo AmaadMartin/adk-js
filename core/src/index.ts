@@ -87,6 +87,10 @@ export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+export {
+  CloudRunSandboxCodeExecutor,
+  type CloudRunSandboxCodeExecutorOptions,
+} from './integrations/cloud_run/cloud_run_sandbox_code_executor.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
