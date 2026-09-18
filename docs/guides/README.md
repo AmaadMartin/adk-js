@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Telemetry
+
+- [Request-driven metric export](telemetry/agent_engine_metric_exporter/index.md) - Exporting metrics from the request lifecycle on a runtime that throttles CPU between requests.
+
 ### Tools
 
 #### Retrieval
