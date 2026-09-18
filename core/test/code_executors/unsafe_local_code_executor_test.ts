@@ -92,6 +92,24 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toBe('');
   });
 
+  it.each([
+    {code: 'process.exitCode = 0;', exitCode: 0},
+    {code: 'process.exitCode = 7;', exitCode: 7},
+  ])('reports the exit status $exitCode', async ({code, exitCode}) => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code,
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.exitCode).toBe(exitCode);
+  });
+
   it('times out even when the script leaves a child holding the pipes open', async () => {
     // An interpreter that forks rather than exec's its work leaves a survivor
     // that keeps stdout/stderr open after the kill. 'close' waits on those
