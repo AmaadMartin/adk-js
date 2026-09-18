@@ -80,6 +80,10 @@ export type {
 } from './tools/retrieval/files_retrieval.js';
 export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {
+  SqliteSpanExporter,
+  type SqliteSpanExporterOptions,
+} from './telemetry/sqlite_span_exporter.js';
+export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
