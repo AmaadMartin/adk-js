@@ -16,6 +16,9 @@
     // through node_modules.
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
+      // `nodenext` does not resolve a directory to its `index`, so a subpath
+      // export needs its own entry, exactly as `@google/adk` has one above.
+      "@google/adk/tools/spanner": ["./core/src/tools/spanner/index.ts"],
       "@google/adk/*": ["./core/src/*"],
       "@google/adk-integrations": ["./integrations/src/index.ts"],
       "@google/adk-integrations/*": ["./integrations/src/*"]
