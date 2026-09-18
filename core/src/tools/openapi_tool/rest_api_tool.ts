@@ -16,7 +16,10 @@ import {
   ApiParameter,
   OperationParser,
 } from './openapi_spec_parser/operation_parser.js';
-import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
+import {
+  PENDING_AUTH_RESULT,
+  ToolAuthHandler,
+} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
@@ -87,10 +90,7 @@ export class RestApiTool extends BaseTool {
 
     const authResult = await authHandler.prepareAuthCredentials();
     if (authResult.state === 'pending') {
-      return {
-        pending: true,
-        message: 'Needs your authorization to access your data.',
-      };
+      return PENDING_AUTH_RESULT;
     }
 
     const credential = authResult.authCredential;

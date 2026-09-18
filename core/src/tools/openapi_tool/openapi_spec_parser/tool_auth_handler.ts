@@ -7,7 +7,9 @@
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
+import {OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -16,18 +18,41 @@ export interface AuthPreparationResult {
   authCredential?: AuthCredential;
 }
 
+/**
+ * What a tool returns while it waits for the end user to authorize it.
+ *
+ * Every tool that resolves credentials through {@link ToolAuthHandler} returns
+ * this same value, so a client only has to recognise one shape. It is frozen
+ * because it is shared between them.
+ */
+export const PENDING_AUTH_RESULT = Object.freeze({
+  pending: true,
+  message: 'Needs your authorization to access your data.',
+});
+
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
-  getCredentialKey(authScheme?: OpenAPIV3.SecuritySchemeObject): string {
-    const schemeName = authScheme?.type || 'default';
-    return `${schemeName}_existing_exchanged_credential`;
+  /**
+   * Names the session-state slot a credential is cached in.
+   *
+   * `credentialKey` namespaces the slot, so two tools sharing a scheme type
+   * but authenticating against different servers do not read each other's
+   * token. A caller that supplies none keeps the scheme-type slot.
+   */
+  getCredentialKey(
+    authScheme?: OpenAPIV3.SecuritySchemeObject,
+    credentialKey?: string,
+  ): string {
+    const namespace = credentialKey ?? authScheme?.type ?? 'default';
+    return `${namespace}_existing_exchanged_credential`;
   }
 
   getCredential(
     authScheme?: OpenAPIV3.SecuritySchemeObject,
+    credentialKey?: string,
   ): AuthCredential | undefined {
-    const key = this.getCredentialKey(authScheme);
+    const key = this.getCredentialKey(authScheme, credentialKey);
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
     // bracket access would bypass its value/delta store and always miss.
@@ -41,6 +66,33 @@ class ToolContextCredentialStore {
     // exchanged credential would be re-created on every tool invocation.
     this.context.state.set(key, credential);
   }
+}
+
+/**
+ * Decides whether the end user must authorize before `credential` is usable.
+ *
+ * An OAuth2 or OpenID Connect credential that holds only a client id and
+ * secret cannot be exchanged: every grant except client credentials needs the
+ * user to authorize first and hand back an authorization code. Sending such a
+ * credential to the exchanger fails, so the client is asked for consent
+ * instead.
+ *
+ * @param authScheme The scheme the tool authenticates with.
+ * @param credential The best credential available so far.
+ * @return True when the client must collect an authorization from the user.
+ */
+function needsUserConsent(
+  authScheme: OpenAPIV3.SecuritySchemeObject,
+  credential: AuthCredential,
+): boolean {
+  if (authScheme.type !== 'oauth2' && authScheme.type !== 'openIdConnect') {
+    return false;
+  }
+  const {accessToken, authCode, authResponseUri} = credential.oauth2 ?? {};
+  if (accessToken || authCode || authResponseUri) {
+    return false;
+  }
+  return determineGrantType(authScheme) !== OAuthGrantType.CLIENT_CREDENTIALS;
 }
 
 @experimental
@@ -74,7 +126,10 @@ export class ToolAuthHandler {
     }
 
     const store = new ToolContextCredentialStore(this.context);
-    const existingCredential = store.getCredential(this.authScheme);
+    const existingCredential = store.getCredential(
+      this.authScheme,
+      this.credentialKey,
+    );
 
     if (existingCredential) {
       return {state: 'done', authCredential: existingCredential};
@@ -94,8 +149,8 @@ export class ToolAuthHandler {
     const authResponseCredential = this.context.getAuthResponse(authConfig);
     const credential = authResponseCredential ?? this.authCredential;
 
-    if (!credential) {
-      // No credential to work with, so ask the client for one.
+    if (!credential || needsUserConsent(this.authScheme, credential)) {
+      // Nothing usable yet, so ask the client to collect a credential.
       this.context.requestCredential(authConfig);
 
       return {state: 'pending'};
@@ -113,7 +168,7 @@ export class ToolAuthHandler {
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
     if (authResponseCredential || result.wasExchanged) {
-      const key = store.getCredentialKey(this.authScheme);
+      const key = store.getCredentialKey(this.authScheme, this.credentialKey);
       store.storeCredential(key, result.credential);
     }
 
