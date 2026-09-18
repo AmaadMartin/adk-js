@@ -6,8 +6,12 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -43,6 +47,19 @@ class ToolContextCredentialStore {
   }
 }
 
+/**
+ * Whether the credential still needs a token obtained outside this tool call.
+ * An OAuth2/OIDC credential that holds no access token authenticates nothing,
+ * however it came to be cached.
+ */
+function externalExchangeRequired(credential: AuthCredential): boolean {
+  return (
+    (credential.authType === AuthCredentialTypes.OAUTH2 ||
+      credential.authType === AuthCredentialTypes.OPEN_ID_CONNECT) &&
+    !credential.oauth2?.accessToken
+  );
+}
+
 @experimental
 export class ToolAuthHandler {
   constructor(
@@ -67,6 +84,28 @@ export class ToolAuthHandler {
     );
   }
 
+  private async getExistingCredential(
+    store: ToolContextCredentialStore,
+  ): Promise<AuthCredential | undefined> {
+    const existing = store.getCredential(this.authScheme);
+    if (!existing?.oauth2) {
+      return existing;
+    }
+
+    const refresher = new OAuth2CredentialRefresher();
+    if (!(await refresher.isRefreshNeeded(existing))) {
+      return existing;
+    }
+
+    const refreshed = await refresher.refresh(existing, this.authScheme);
+    // Write the new tokens back: providers that rotate the refresh token on
+    // each refresh invalidate the previous one, so a stale cached copy could
+    // never be refreshed again.
+    store.storeCredential(store.getCredentialKey(this.authScheme), refreshed);
+
+    return refreshed;
+  }
+
   @experimental
   public async prepareAuthCredentials(): Promise<AuthPreparationResult> {
     if (!this.authScheme) {
@@ -74,9 +113,9 @@ export class ToolAuthHandler {
     }
 
     const store = new ToolContextCredentialStore(this.context);
-    const existingCredential = store.getCredential(this.authScheme);
+    const existingCredential = await this.getExistingCredential(store);
 
-    if (existingCredential) {
+    if (existingCredential && !externalExchangeRequired(existingCredential)) {
       return {state: 'done', authCredential: existingCredential};
     }
 
