@@ -24,6 +24,12 @@ export interface ScheduleDynamicNodeOptions {
   overrideBranch?: string;
   /** Explicit isolation-scope override. */
   overrideIsolationScope?: string;
+  /**
+   * Cancellation signal for this child run, overriding the one it would
+   * inherit. Carries `ctx.runNode`'s `abortSignal` option through the
+   * scheduler.
+   */
+  abortSignal?: AbortSignal;
 }
 
 /**
