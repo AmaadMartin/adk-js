@@ -55,6 +55,7 @@ import {
   getAllowedRequestHosts,
   isDnsRebindingRequest,
 } from './dns_rebinding_guard.js';
+import {withoutEvalSessions} from './eval_sessions.js';
 import {
   createOriginCheckMiddleware,
   parseAllowedOrigins,
@@ -629,7 +630,7 @@ export class AdkApiServer {
             userId,
           });
 
-          res.json(sessions);
+          res.json(withoutEvalSessions(sessions));
         } catch (e: unknown) {
           const error = `Failed to list sessions: ${e}`;
 
