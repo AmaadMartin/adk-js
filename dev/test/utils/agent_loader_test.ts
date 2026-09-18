@@ -27,6 +27,7 @@ import {
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
@@ -147,9 +148,29 @@ const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
 
+const appMultipleExportsContent = `
+import {App, BaseAgent} from '@google/adk';
+
+class FakeAgentForApp extends BaseAgent {
+  constructor(name) {
+    super({name});
+  }
+}
+
+export const firstApp = new App({
+  name: 'test_app_multi_1',
+  rootAgent: new FakeAgentForApp('agent_for_app_1'),
+});
+export const secondApp = new App({
+  name: 'test_app_multi_2',
+  rootAgent: new FakeAgentForApp('agent_for_app_2'),
+});
+`;
+
 describe('AgentLoader', () => {
   let tempAgentsDir: string;
   let tempLoaderDir: string;
+  let setSourceMapsEnabledSpy: Mock;
 
   const compiledPath = (fileName: string) => path.join(tempLoaderDir, fileName);
 
@@ -169,6 +190,9 @@ describe('AgentLoader', () => {
   });
 
   beforeEach(async () => {
+    setSourceMapsEnabledSpy = vi
+      .spyOn(process, 'setSourceMapsEnabled')
+      .mockImplementation(() => {}) as unknown as Mock;
     (fileUtils.createTempDir as Mock).mockImplementation(async () => {
       await fs.mkdir(tempLoaderDir, {recursive: true});
       return tempLoaderDir;
@@ -227,6 +251,7 @@ describe('AgentLoader', () => {
       // ignore
     }
 
+    setSourceMapsEnabledSpy.mockRestore();
     vi.clearAllMocks();
   });
 
@@ -341,6 +366,56 @@ describe('AgentLoader', () => {
       expect(buildOptions.bundle).toBe(false);
       expect(buildOptions).not.toHaveProperty('external');
       expect(buildOptions).not.toHaveProperty('packages');
+
+      await agentFile.dispose();
+    });
+
+    it('builds a readable, source-mapped bundle when minify is off', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledPath('agent2.cjs'), agent2CjsContentMocked);
+      });
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: true,
+        minify: false,
+      });
+      await agentFile.load();
+
+      // Minified identifiers and collapsed line numbers make every stack
+      // trace out of an agent useless, so the interactive commands ask for a
+      // debug build and get a map the deleted temp bundle cannot lose.
+      // cli_test.ts asserts run/web/api_server are the callers that do so.
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        minify: false,
+        sourcemap: 'inline',
+      });
+      expect(setSourceMapsEnabledSpy).toHaveBeenCalledWith(true);
+
+      await agentFile.dispose();
+    });
+
+    it('minifies and drops the source map by default (deployment bundles)', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledPath('agent2.cjs'), agent2CjsContentMocked);
+      });
+
+      // A debug build is ~3.5x larger, so a caller that does not ask for one
+      // keeps the small artifact.
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        minify: true,
+        sourcemap: false,
+      });
+      expect(setSourceMapsEnabledSpy).not.toHaveBeenCalled();
 
       await agentFile.dispose();
     });
@@ -524,15 +599,48 @@ describe('AgentLoader', () => {
         return Promise.resolve();
       });
 
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const agentFile = new AgentFile(agentPath);
       const agent = await agentFile.load();
 
       expect(agent.name).toEqual('agent1');
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Multiple agents found'),
+      expect(warnSpy).toHaveBeenCalledWith(
+        `Multiple agents found in ${compiledAgentPath}. Using the agent1 as a root agent.`,
       );
+      expect(consoleSpy).not.toHaveBeenCalled();
       await agentFile.dispose();
+      warnSpy.mockRestore();
+      consoleSpy.mockRestore();
+    });
+
+    it('warns through the logger when multiple apps are exported', async () => {
+      const appPath = path.join(tempAgentsDir, 'app_multiple.js');
+      await fs.writeFile(appPath, appMultipleExportsContent);
+
+      const compiledAppPath = compiledPath('app_multiple.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAppPath, appMultipleExportsContent);
+        return Promise.resolve();
+      });
+
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const agentFile = new AgentFile(appPath);
+      const loaded = await agentFile.load();
+
+      expect(isApp(loaded)).toBe(true);
+      expect((loaded as App).name).toBe('test_app_multi_1');
+      expect(warnSpy).toHaveBeenCalledWith(
+        `Multiple apps found in ${compiledAppPath}. Using the test_app_multi_1 as a root app.`,
+      );
+      expect(consoleSpy).not.toHaveBeenCalled();
+      await agentFile.dispose();
+      warnSpy.mockRestore();
       consoleSpy.mockRestore();
     });
 
@@ -870,6 +978,24 @@ describe('AgentLoader', () => {
       await loader.preloadAgents();
 
       expect(spy).not.toHaveBeenCalled();
+      await loader.disposeAll();
+    });
+
+    it('shares one preload pass between concurrent callers', async () => {
+      // `agentsAlreadyPreloaded` is only set once the pass finishes, so
+      // callers that overlap it used to each start their own full pass and
+      // bundle every agent again. `adk web` does exactly this: several routes
+      // list agents, and requests arrive concurrently.
+      const loader = new AgentLoader(tempAgentsDir);
+
+      await Promise.all([
+        loader.listAgents(),
+        loader.listApps(),
+        loader.getAgentFile('agent1'),
+      ]);
+
+      // Three agents in the fixture, so three builds - not nine.
+      expect((esbuild.build as Mock).mock.calls).toHaveLength(3);
       await loader.disposeAll();
     });
 

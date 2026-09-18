@@ -78,17 +78,21 @@ export class OperationParser {
     }
 
     const content = requestBody.content || {};
-    // Process first mime type only, similar to python
+    // Process the first mime type only.
     const firstMimeType = Object.keys(content)[0];
     if (!firstMimeType) {
       return;
     }
 
     const mediaTypeObject = content[firstMimeType];
-    const schema = mediaTypeObject.schema;
+    // A media type may omit `schema`, which describes an unconstrained payload
+    // rather than the absence of one. adk-python reads it as an empty schema
+    // and still advertises a `body` argument for it.
+    const schema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject =
+      mediaTypeObject.schema ?? {};
     const description = requestBody.description || '';
 
-    if (schema && !('$ref' in schema)) {
+    if (!('$ref' in schema)) {
       if (schema.type === 'object') {
         const properties = schema.properties || {};
         if (Object.keys(properties).length > 0) {
@@ -208,7 +212,7 @@ export class OperationParser {
     return {
       type: 'object',
       properties,
-      required: required.length > 0 ? required : undefined,
+      required,
       title: `${this.operation.operationId || 'unnamed'}_Arguments`,
     };
   }
