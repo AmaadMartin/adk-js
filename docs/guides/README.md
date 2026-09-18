@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Agents
+
+- [RemoteA2AAgent converters and interceptors](agents/remote_a2a_agent/index.md) - Replacing the A2A response conversion, and intercepting the card fetch and the message send.
+
 ### Tools
 
 #### Retrieval
