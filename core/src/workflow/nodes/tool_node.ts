@@ -8,6 +8,7 @@ import type {FunctionCall} from '@google/genai';
 import {handleFunctionCallList} from '../../agents/functions.js';
 import {Event, getFunctionResponses} from '../../events/event.js';
 import {BaseTool} from '../../tools/base_tool.js';
+import {contentToText} from '../../utils/content_utils.js';
 import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 
@@ -100,7 +101,7 @@ function coerceToolArgs(input: unknown): Record<string, unknown> {
   let args: unknown = input;
 
   if (isContent(args)) {
-    args = extractText(args);
+    args = contentToText(args);
   }
 
   if (typeof args === 'string') {
@@ -126,10 +127,6 @@ function coerceToolArgs(input: unknown): Record<string, unknown> {
     );
   }
   return args as Record<string, unknown>;
-}
-
-function extractText(content: {parts?: Array<{text?: string}>}): string {
-  return (content.parts ?? []).map((p) => p.text ?? '').join('');
 }
 
 // The builder that turns a BaseTool into a ToolNode is wired into the static

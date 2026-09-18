@@ -81,6 +81,7 @@ describe('FunctionNode auth gate', () => {
   it('interrupts with a credential request when none is available', async () => {
     const node = new FunctionNode('needsAuth', () => 'ran', {
       authConfig: apiKeyConfig(),
+      rerunOnResume: true,
     });
     const {events, output} = await driveNode(node, 'x');
 
@@ -94,6 +95,7 @@ describe('FunctionNode auth gate', () => {
   it('proceeds when the credential is supplied via resumeInputs', async () => {
     const node = new FunctionNode('needsAuth', () => 'ran', {
       authConfig: apiKeyConfig(),
+      rerunOnResume: true,
     });
     const channel = new AsyncQueue<Event>();
     const root = new NodeContext({
