@@ -303,7 +303,7 @@ export class AdkApiServer {
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
-        res.redirect('/dev-ui');
+        res.redirect('/dev-ui/');
       });
       app.use(
         '/dev-ui',
