@@ -13,6 +13,8 @@ import {
   AdkMetadataKeys,
   getA2AEventMetadata,
   getAdkEventMetadata,
+  getInvocationMetadata,
+  NEW_A2A_ADK_INTEGRATION_EXTENSION,
 } from '../../src/a2a/metadata_converter_utils.js';
 
 describe('metadata_converter_utils', () => {
@@ -188,6 +190,29 @@ describe('metadata_converter_utils', () => {
         [A2AMetadataKeys.TRANSFER_TO_AGENT]: undefined,
         [A2AMetadataKeys.IS_LONG_RUNNING]: false,
       });
+    });
+  });
+
+  describe('getInvocationMetadata', () => {
+    it('carries the session keys and the integration extension flag', () => {
+      expect(
+        getInvocationMetadata({
+          appName: 'my-app',
+          userId: 'user-id',
+          sessionId: 'session-id',
+        }),
+      ).toEqual({
+        [A2AMetadataKeys.APP_NAME]: 'my-app',
+        [A2AMetadataKeys.USER_ID]: 'user-id',
+        [A2AMetadataKeys.SESSION_ID]: 'session-id',
+        [NEW_A2A_ADK_INTEGRATION_EXTENSION]: {adk_agent_executor_v2: true},
+      });
+    });
+
+    it('names the extension with the URL a Python peer declares', () => {
+      expect(NEW_A2A_ADK_INTEGRATION_EXTENSION).toBe(
+        'https://google.github.io/adk-docs/a2a/a2a-extension/',
+      );
     });
   });
 });

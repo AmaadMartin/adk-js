@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### A2A
+
+- [A2AAgentExecutor](a2a/agent_executor/index.md) - Serving an ADK agent over the Agent2Agent protocol, and the events it publishes.
+
 ### Tools
 
 #### Retrieval
