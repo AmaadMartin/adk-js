@@ -19,6 +19,21 @@ import {NodeContext} from '../../src/workflow/node_context.js';
 import {executeChildNode} from '../../src/workflow/node_runner.js';
 import {createIc, driveNode, FnNode} from './test_helpers.js';
 
+/**
+ * Closes `channel` and merges the state delta of every event on it, which is
+ * where the runner leaves a node's writes.
+ */
+async function drainedStateDelta(
+  channel: AsyncQueue<Event>,
+): Promise<Record<string, unknown>> {
+  channel.close();
+  const merged: Record<string, unknown> = {};
+  for await (const event of channel) {
+    Object.assign(merged, event.actions.stateDelta);
+  }
+  return merged;
+}
+
 // --- Tests ----------------------------------------------------------------
 
 describe('Phase 1 — node execution & the push/pull bridge', () => {
@@ -116,7 +131,9 @@ describe('Phase 1 — node execution & the push/pull bridge', () => {
       options: {useAsOutput: true},
     });
     expect(child.state.get('counter')).toBe(7);
-    expect(child.actions.stateDelta['counter']).toBe(7);
+    // The runner drains the node's pending delta onto the event that reports
+    // it, so the write is read there rather than off `ctx.actions`.
+    expect(await drainedStateDelta(channel)).toEqual({counter: 7});
   });
 
   it('retries a flaky node per retryConfig and then succeeds', async () => {
@@ -192,8 +209,9 @@ describe('Phase 1 — node execution & the push/pull bridge', () => {
 
     expect(child.output).toBe('ok');
     // The failed first attempt's write must not survive into the committed
-    // delta — only the successful attempt's write remains.
-    expect(child.actions.stateDelta).toEqual({'attempt-2': 2});
+    // delta — only the successful attempt's write remains. Read off the
+    // emitted events, which is where the runner now drains the delta to.
+    expect(await drainedStateDelta(channel)).toEqual({'attempt-2': 2});
   });
 
   it('enforces a per-node timeout with NodeTimeoutError', async () => {
