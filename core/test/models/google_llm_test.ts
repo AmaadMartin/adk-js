@@ -13,6 +13,8 @@ import {
   version,
 } from '@google/adk';
 import {
+  Content,
+  GenerateContentConfig,
   GenerateContentResponse,
   GoogleGenAI,
   HttpOptions,
@@ -459,6 +461,95 @@ describe('GoogleLlm', () => {
       abortController.abort();
 
       await expect(generator.next()).rejects.toThrow('Aborted');
+    });
+  });
+
+  describe('backend-specific request sanitisation', () => {
+    const createRequest = (): LlmRequest => ({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              fileData: {
+                fileUri: 'gs://bucket/file.pdf',
+                mimeType: 'application/pdf',
+                displayName: 'My Test PDF',
+              },
+            },
+            {
+              inlineData: {
+                data: 'c29tZV9ieXRlcw==',
+                mimeType: 'image/png',
+                displayName: 'My Test Image',
+              },
+            },
+          ],
+        },
+      ],
+      config: {labels: {key: 'value'}},
+      liveConnectConfig: {},
+      toolsDict: {},
+    });
+
+    /**
+     * Streams one turn through `llm` and returns the parts and config that
+     * reached the `generateContentStream` boundary.
+     */
+    const streamAndCapture = async (
+      llm: TestGemini,
+    ): Promise<{parts: Part[]; config: GenerateContentConfig}> => {
+      let sentContents: Content[] | undefined;
+      let sentConfig: GenerateContentConfig | undefined;
+
+      llm.apiClient.models.generateContentStream = vi
+        .fn()
+        .mockImplementation(
+          async (params: {
+            contents: Content[];
+            config?: GenerateContentConfig;
+          }) => {
+            sentContents = params.contents;
+            sentConfig = params.config;
+            return [{candidates: [{content: {parts: [{text: 'ok'}]}}]}];
+          },
+        );
+
+      const generator = llm.generateContentAsync(createRequest(), true);
+      await generator.next();
+
+      const parts = sentContents?.[0]?.parts;
+      if (!parts || !sentConfig) {
+        expect.fail('generateContentStream did not receive the request');
+      }
+      return {parts, config: sentConfig};
+    };
+
+    it('clears fileData and inlineData displayName and config.labels on the Gemini API backend', async () => {
+      const {parts, config} = await streamAndCapture(
+        new TestGemini({apiKey: 'test-key'}),
+      );
+
+      expect(parts[0].fileData?.fileUri).toBe('gs://bucket/file.pdf');
+      expect(parts[0].fileData?.displayName).toBeUndefined();
+      expect(parts[1].inlineData?.mimeType).toBe('image/png');
+      expect(parts[1].inlineData?.displayName).toBeUndefined();
+      expect(config.labels).toBeUndefined();
+    });
+
+    it('preserves fileData and inlineData displayName and config.labels on the Vertex AI backend', async () => {
+      const {parts, config} = await streamAndCapture(
+        new TestGemini({
+          vertexai: true,
+          project: 'test-project',
+          location: 'us-central1',
+        }),
+      );
+
+      expect(parts[0].fileData?.displayName).toBe('My Test PDF');
+      expect(parts[1].inlineData?.displayName).toBe('My Test Image');
+      expect(config.labels).toEqual({key: 'value'});
     });
   });
 
