@@ -22,6 +22,7 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  LLMRegistry,
   LlmRequest,
   LlmResponse,
   LongRunningFunctionTool,
@@ -34,6 +35,7 @@ import {
 import {Content, Schema, Type} from '@google/genai';
 import {
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -1427,5 +1429,128 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+/**
+ * Budget (ms) for a test that re-evaluates the agent module graph. Well above
+ * the ~5s it costs on a developer machine, because CI adds v8 coverage
+ * instrumentation on slower runners.
+ */
+const MODULE_RELOAD_TIMEOUT_MS = 120_000;
+
+class DefaultTestLlm extends BaseLlm {
+  static override readonly supportedModels = ['default-test-llm'];
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {}
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+describe('LlmAgent default model', () => {
+  beforeAll(() => {
+    LLMRegistry.register(DefaultTestLlm);
+  });
+
+  // The override is process-global, so a leak would decide the model for
+  // unrelated agents in the same worker.
+  afterEach(() => {
+    LlmAgent.setDefaultModel(undefined);
+  });
+
+  it('throws when no model, no ancestor and no override', () => {
+    const agent = new LlmAgent({name: 'lonely_agent'});
+
+    expect(() => agent.canonicalModel).toThrow(
+      'No model found for lonely_agent.',
+    );
+  });
+
+  it('resolves an override given as a model name', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const agent = new LlmAgent({name: 'named_override_agent'});
+
+    expect(agent.canonicalModel).toBeInstanceOf(DefaultTestLlm);
+    expect(agent.canonicalModel.model).toBe('default-test-llm');
+  });
+
+  it('returns the exact instance an override was given as', () => {
+    const llm = new DefaultTestLlm({model: 'default-test-llm'});
+    LlmAgent.setDefaultModel(llm);
+    const agent = new LlmAgent({name: 'instance_override_agent'});
+
+    expect(agent.canonicalModel).toBe(llm);
+  });
+
+  it('ignores the override when the agent sets its own model', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const own = new MockLlm(null);
+    const agent = new LlmAgent({name: 'own_model_agent', model: own});
+
+    expect(agent.canonicalModel).toBe(own);
+  });
+
+  it('prefers an ancestor model over the override', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const leaf = new LlmAgent({name: 'leaf_agent'});
+    const parentModel = new MockLlm(null);
+    new LlmAgent({
+      name: 'parent_agent',
+      model: parentModel,
+      subAgents: [leaf],
+    });
+
+    expect(leaf.canonicalModel).toBe(parentModel);
+  });
+
+  it('falls through a model-less ancestor to the override', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const leaf = new LlmAgent({name: 'leaf_agent'});
+    new LlmAgent({name: 'parent_agent', subAgents: [leaf]});
+
+    expect(leaf.canonicalModel).toBeInstanceOf(DefaultTestLlm);
+  });
+
+  // An agent file is bundled with its own copy of `@google/adk`, so the class
+  // the CLI configures is not the class the agent uses. `resetModules` gives a
+  // second copy of the module graph to stand in for that one. Re-evaluating
+  // that graph costs seconds, so this test needs more than the default budget.
+  it(
+    'shares the override with a second copy of the module graph',
+    async () => {
+      const llm = new DefaultTestLlm({model: 'default-test-llm'});
+      LlmAgent.setDefaultModel(llm);
+
+      vi.resetModules();
+      const {LlmAgent: ReloadedLlmAgent} =
+        await import('../../src/agents/llm_agent.js');
+      expect(ReloadedLlmAgent).not.toBe(LlmAgent);
+
+      const agent = new ReloadedLlmAgent({name: 'bundled_agent'});
+      expect(agent.canonicalModel).toBe(llm);
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
+  it('rejects an empty model name', () => {
+    expect(() => LlmAgent.setDefaultModel('')).toThrow(
+      'Default model must be a non-empty string.',
+    );
+  });
+
+  it('throws again after the override is cleared', () => {
+    LlmAgent.setDefaultModel('default-test-llm');
+    const agent = new LlmAgent({name: 'cleared_agent'});
+    expect(agent.canonicalModel).toBeInstanceOf(DefaultTestLlm);
+
+    LlmAgent.setDefaultModel(undefined);
+
+    expect(() => agent.canonicalModel).toThrow(
+      'No model found for cleared_agent.',
+    );
   });
 });

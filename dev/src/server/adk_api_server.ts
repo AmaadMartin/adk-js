@@ -17,6 +17,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
+  LlmAgent,
   Logger,
   LogLevel,
   RunConfig,
@@ -59,6 +60,7 @@ import {
   createOriginCheckMiddleware,
   parseAllowedOrigins,
 } from './origin_check.js';
+import {loadBigQueryAnalyticsPlugin} from './plugins_config.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -107,6 +109,13 @@ interface ServerOptions {
   a2aAuthToken?: string;
   reloadAgents?: boolean;
   registerProcessors?: (tracerProvider: TracerProvider) => void;
+  /**
+   * Model used by an agent that declares none and has no ancestor that does.
+   * Applied process-wide through {@link LlmAgent.setDefaultModel} when the
+   * server starts, so it also reaches an agent bundled with its own copy of
+   * `@google/adk`.
+   */
+  defaultLlmModel?: string;
 }
 
 export class AdkApiServer {
@@ -153,6 +162,13 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
+  /**
+   * Directory an app's `plugins.yaml` is read from. Unset when the caller
+   * supplied its own `agentLoader` and no directory, in which case there is no
+   * path to read the file from and no plugin is attached.
+   */
+  private readonly agentsDir?: string;
+  private readonly defaultLlmModel?: string;
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -202,6 +218,8 @@ export class AdkApiServer {
     // to the authenticator, which rejects a token that is not usable.
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
+    this.agentsDir = options.agentsDir;
+    this.defaultLlmModel = options.defaultLlmModel;
     this.app = express();
   }
 
@@ -254,6 +272,10 @@ export class AdkApiServer {
 
   private async init() {
     const app = this.app;
+    if (this.defaultLlmModel) {
+      this.logger.info(`Overriding default model to ${this.defaultLlmModel}`);
+      LlmAgent.setDefaultModel(this.defaultLlmModel);
+    }
     await this.setupTelemetry();
 
     // Registered before any route (including /health, /, /version) so the
@@ -1238,10 +1260,20 @@ export class AdkApiServer {
     if (!(appName in this.runnerCache)) {
       const isAppInstance = isApp(agentOrApp);
       const agent = isAppInstance ? agentOrApp.rootAgent : agentOrApp;
+      // The runner concatenates the app's own plugins ahead of these, so the
+      // analytics plugin ends up last, as it does in adk-python.
+      const bigQueryPlugin = this.agentsDir
+        ? await loadBigQueryAnalyticsPlugin(
+            this.agentsDir,
+            appName,
+            this.logger,
+          )
+        : undefined;
       this.runnerCache[appName] = new Runner({
         app: isAppInstance ? agentOrApp : undefined,
         appName,
         agent,
+        plugins: bigQueryPlugin ? [bigQueryPlugin] : [],
         memoryService: this.memoryService,
         sessionService: this.sessionService,
         artifactService: this.artifactService,
