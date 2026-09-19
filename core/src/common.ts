@@ -395,6 +395,12 @@ export type {SkillRegistry} from './skills/skill_registry.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
+export {SkillErrorCode} from './tools/skill/skill_error_codes.js';
+export {
+  DEFAULT_SKILL_SYSTEM_INSTRUCTION,
+  buildSkillSystemInstruction,
+} from './tools/skill/skill_system_instruction.js';
+export type {SkillSystemInstructionOptions} from './tools/skill/skill_system_instruction.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
