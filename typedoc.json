@@ -10,5 +10,5 @@
   "plugin": ["typedoc-theme-fresh"],
   "theme": "fresh",
   "excludeExternals": true,
-  "intentionallyNotExported": ["RagApiClient"]
+  "intentionallyNotExported": []
 }
