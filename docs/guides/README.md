@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Models
+
+- [ConformanceTestGemini and the replay normalizers](models/conformance_replay/index.md) - Replaying a recorded model call, and verifying the request that asked for it.
+
 ### Tools
 
 #### Retrieval
