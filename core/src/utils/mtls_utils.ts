@@ -17,7 +17,7 @@
 
 import {execFile} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
-import type {ClientRequest, IncomingMessage} from 'node:http';
+import type {IncomingMessage} from 'node:http';
 import * as https from 'node:https';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
@@ -46,12 +46,6 @@ const PRIVATE_KEY_PATTERN =
 /** Matches the optional passphrase block of an encrypted private key. */
 const PASSPHRASE_PATTERN =
   /-----BEGIN PASSPHRASE-----([\s\S]+)-----END PASSPHRASE-----/;
-
-/**
- * Maximum size, in bytes, of a response body read by {@link getWithClientCert}.
- * Bounds the memory a misbehaving endpoint can make the caller allocate.
- */
-const MAX_RESPONSE_BODY_BYTES = 10 * 1024 * 1024;
 
 /** Value of the `GOOGLE_API_USE_MTLS_ENDPOINT` environment variable. */
 export enum MtlsEndpoint {
@@ -211,19 +205,8 @@ export async function loadDefaultClientCerts(): Promise<
   }
 }
 
-/** Builds the HTTPS agent that presents `certs` on every connection it makes. */
-export function createClientCertAgent(certs: MtlsClientCerts): https.Agent {
-  return new https.Agent(certs);
-}
-
-/**
- * Reads a response body as text.
- *
- * A body that grows past {@link MAX_RESPONSE_BODY_BYTES} destroys `request`,
- * which fails the request instead of resolving this promise.
- */
+/** Reads a response body as text. */
 export function collectResponseBody(
-  request: ClientRequest,
   response: IncomingMessage,
 ): Promise<HttpGetResult> {
   return new Promise((resolve) => {
@@ -231,13 +214,6 @@ export function collectResponseBody(
     response.setEncoding('utf8');
     response.on('data', (chunk: string) => {
       body += chunk;
-      if (body.length > MAX_RESPONSE_BODY_BYTES) {
-        request.destroy(
-          new Error(
-            `Response exceeded ${MAX_RESPONSE_BODY_BYTES} bytes and was abandoned`,
-          ),
-        );
-      }
     });
     response.on('end', () => {
       const status = response.statusCode ?? 0;
@@ -264,11 +240,11 @@ export function getWithClientCert(
       {
         method: 'GET',
         headers,
-        agent: createClientCertAgent(certs),
+        agent: new https.Agent(certs),
         timeout: timeoutMs,
       },
       (response) => {
-        collectResponseBody(request, response).then(resolve, reject);
+        collectResponseBody(response).then(resolve, reject);
       },
     );
     // A node:https timeout only emits the event; the socket stays open until
