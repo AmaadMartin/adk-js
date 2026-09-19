@@ -460,6 +460,7 @@ export type {
   NodeResult,
   NodeState,
   ParallelWorkerConfig,
+  ParameterBinding,
   PreparedRetryConfig,
   RequestInputParams,
   RetryConfig,
