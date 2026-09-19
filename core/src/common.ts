@@ -310,6 +310,11 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {
+  ExecuteTool,
+  ExecuteToolErrorCode,
+} from './tools/environment/execute_tool.js';
+export type {ExecuteToolOptions} from './tools/environment/execute_tool.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
@@ -354,6 +359,7 @@ export type {
 } from './tools/retrieval/llama_index_retrieval.js';
 export {
   IntentMismatchError,
+  REQUIRE_CONFIRMATION_MESSAGE,
   ToolConfirmation,
   isIntentMismatchError,
 } from './tools/tool_confirmation.js';
