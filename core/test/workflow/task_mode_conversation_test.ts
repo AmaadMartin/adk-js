@@ -11,7 +11,7 @@
  * running on with nothing.
  */
 
-import {Content} from '@google/genai';
+import {Content, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
 import {Event} from '../../src/events/event.js';
@@ -106,5 +106,74 @@ describe('task-mode agent node across turns', () => {
     const turn2 = await run('Ada');
     expect(downstreamRuns).toBe(1);
     expect(turn2.some((e) => e.output === 'hello Ada')).toBe(true);
+  }, 30000);
+});
+
+/**
+ * While a task-mode agent is still asking, the graph holds: no peer node is
+ * scheduled into a conversation that is mid-task. Mirrors adk-python's
+ * `Workflow._has_waiting_task_agent` gate (`workflow/_workflow.py` at
+ * `25f5214c`).
+ */
+describe('a waiting task agent holds the graph', () => {
+  it('leaves a peer node unscheduled until the task finishes', async () => {
+    const intake = new LlmAgent({
+      name: 'intake',
+      model: 'two-turn-2',
+      mode: 'task',
+      instruction: 'Collect the name.',
+      outputSchema: {
+        type: Type.OBJECT,
+        properties: {name: {type: Type.STRING}},
+      },
+    });
+    let peerRuns = 0;
+    const peer = node(
+      () => {
+        peerRuns++;
+      },
+      {name: 'peer'},
+    );
+    // One node at a time, so `intake` is already WAITING when the scheduler
+    // next looks at `peer`'s trigger.
+    const wf = new Workflow({
+      name: 'gated',
+      maxConcurrency: 1,
+      edges: [
+        ['START', intake],
+        ['START', peer],
+      ],
+    });
+
+    const runner = new InMemoryRunner({agent: wf, appName: 'app'});
+    const session = await runner.sessionService.createSession({
+      appName: 'app',
+      userId: 'u',
+    });
+    const run = async (text: string): Promise<Event[]> => {
+      const events: Event[] = [];
+      const message: Content = {role: 'user', parts: [{text}]};
+      for await (const event of runner.runAsync({
+        userId: 'u',
+        sessionId: session.id,
+        newMessage: message,
+      })) {
+        events.push(event);
+      }
+      return events;
+    };
+
+    const turn1 = await run('go');
+    expect(
+      turn1
+        .flatMap((e) => e.content?.parts ?? [])
+        .map((p) => p.text ?? '')
+        .join(' '),
+    ).toContain('What is your name?');
+    expect(peerRuns).toBe(0);
+
+    // The task finishes on the second turn, and the peer is free to run.
+    await run('Ada');
+    expect(peerRuns).toBe(1);
   }, 30000);
 });

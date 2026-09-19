@@ -262,6 +262,8 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
         error,
         errorNodePath: nodePath,
       });
+    } finally {
+      run.taskSettled = true;
     }
     this.recordResult(run, childCtx, node);
     return childCtx;
