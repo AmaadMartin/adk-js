@@ -79,12 +79,13 @@ export class SlackRunner {
   }
 
   private setupHandlers(): void {
-    this.slackApp.event('app_mention', async ({event, say}) => {
-      await this.handleMessage(event, say);
+    this.slackApp.event('app_mention', async (args) => {
+      await this.handleMessage(args.event, args.say);
     });
-    this.slackApp.event('message', async ({event, say}) => {
+    this.slackApp.event('message', async (args) => {
+      const event = args.event;
       if (event.subtype === undefined && shouldAnswerMessage(event)) {
-        await this.handleMessage(event, say);
+        await this.handleMessage(event, args.say);
       }
     });
   }
@@ -93,7 +94,9 @@ export class SlackRunner {
     event: SlackAgentEvent,
     say: SayFn,
   ): Promise<void> {
-    const {text, user: userId, channel} = event;
+    const text = event.text;
+    const userId = event.user;
+    const channel = event.channel;
     const threadTs = event.thread_ts ?? event.ts;
     if (!text || !userId) {
       return;
