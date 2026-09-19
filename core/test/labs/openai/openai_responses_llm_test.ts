@@ -179,8 +179,14 @@ describe('OpenAI Responses request building', () => {
       false,
     );
 
+    // Python asserts on kwargs, where `stop` and `foo` sit under `extra_body`
+    // because openai-python merges that request option into the JSON. The Node
+    // SDK has no such option, so the same wire body needs them at the top
+    // level. `openai_responses_wire_test.ts` pins the serialized request.
     expect(body['temperature']).toBe(0.9);
-    expect(body['extra_body']).toEqual({stop: ['STOP'], foo: 'bar'});
+    expect(body['stop']).toEqual(['STOP']);
+    expect(body['foo']).toBe('bar');
+    expect(body).not.toHaveProperty('extra_body');
   });
 });
 

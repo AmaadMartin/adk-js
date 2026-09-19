@@ -879,12 +879,6 @@ export function responseToLlmResponse(
   return llmResponse;
 }
 
-/** Returns the `extra_body` already on `body`, or an empty one. */
-function extraBodyOf(body: Record<string, unknown>): Record<string, unknown> {
-  const extraBody = body['extra_body'];
-  return isRecord(extraBody) ? extraBody : {};
-}
-
 /** Applies the per-request generation config to the request body. */
 function applyGenerateContentConfig(
   config: GenerateContentConfig,
@@ -900,7 +894,7 @@ function applyGenerateContentConfig(
     body['max_output_tokens'] = config.maxOutputTokens;
   }
   if (config.stopSequences?.length) {
-    body['extra_body'] = {...extraBodyOf(body), stop: config.stopSequences};
+    body['stop'] = config.stopSequences;
   }
   const text = responseTextConfig(config);
   if (text) {
@@ -936,24 +930,23 @@ function applyModelOptions(
 }
 
 /**
- * Applies the caller's escape-hatch arguments.
+ * Applies the caller's escape-hatch arguments, overriding computed fields.
  *
- * A top-level key overrides the computed one, but `extra_body` is merged so a
- * caller-supplied `extra_body` does not silently drop computed keys such as
- * the stop sequences.
+ * An `extra_body` entry is flattened into the body rather than sent as a
+ * field. It is a request *option* of the Python SDK, which merges it into the
+ * JSON; the Node SDK serializes the body verbatim, so a nested `extra_body`
+ * would reach the API as an undefined request argument. Flattening it puts the
+ * same keys on the wire as adk-python, and keeps the field name working for a
+ * caller porting a Python configuration.
  */
 function applyExtraRequestArgs(
   extraRequestArgs: Record<string, unknown> | undefined,
   body: Record<string, unknown>,
 ): void {
-  const {extra_body: overrides, ...topLevel} = {...extraRequestArgs};
-  const extraBody = {
-    ...extraBodyOf(body),
-    ...(isRecord(overrides) ? overrides : {}),
-  };
+  const {extra_body: extraBody, ...topLevel} = {...extraRequestArgs};
   Object.assign(body, topLevel);
-  if (Object.keys(extraBody).length > 0) {
-    body['extra_body'] = extraBody;
+  if (isRecord(extraBody)) {
+    Object.assign(body, extraBody);
   }
 }
 
