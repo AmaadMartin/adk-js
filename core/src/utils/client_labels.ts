@@ -13,6 +13,9 @@ const LANGUAGE_LABEL = 'gl-typescript';
 const AGENT_ENGINE_TELEMETRY_TAG = 'remote_reasoning_engine';
 const AGENT_ENGINE_TELEMETRY_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 
+const API_CLIENT_HEADER = 'x-goog-api-client';
+const USER_AGENT_HEADER = 'user-agent';
+
 const clientLabelLocalStorage = new AsyncLocalStorage<string>();
 
 const USER_AGENT_PATTERNS = [
@@ -82,4 +85,44 @@ export function getClientLabels(): string[] {
     labels.push(contextLabel);
   }
   return labels;
+}
+
+/**
+ * Returns the HTTP headers that identify a request as ADK traffic.
+ *
+ * Ported from adk-python `utils/_google_client_headers.py`.
+ */
+export function getTrackingHeaders(): Record<string, string> {
+  const headerValue = getClientLabels().join(' ');
+  return {
+    [API_CLIENT_HEADER]: headerValue,
+    [USER_AGENT_HEADER]: headerValue,
+  };
+}
+
+/**
+ * Merges the ADK tracking headers into `headers`.
+ *
+ * A caller's own label is kept and is not repeated when the tracking headers
+ * already carry it.
+ */
+export function mergeTrackingHeaders(
+  headers?: Record<string, string>,
+): Record<string, string> {
+  const merged: Record<string, string> = {...headers};
+  for (const [key, trackingValue] of Object.entries(getTrackingHeaders())) {
+    const callerValue = merged[key];
+    if (!callerValue) {
+      merged[key] = trackingValue;
+      continue;
+    }
+    const parts = trackingValue.split(' ');
+    for (const callerPart of callerValue.split(' ')) {
+      if (!parts.includes(callerPart)) {
+        parts.push(callerPart);
+      }
+    }
+    merged[key] = parts.join(' ');
+  }
+  return merged;
 }
