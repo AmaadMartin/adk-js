@@ -8,6 +8,11 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Models
+
+- [OCIGenAILlm](models/oci_genai/index.md) - Running an agent against a model
+  hosted on Oracle Cloud Infrastructure Generative AI.
+
 ### Tools
 
 #### Retrieval
