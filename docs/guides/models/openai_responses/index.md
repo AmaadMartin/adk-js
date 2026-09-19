@@ -76,9 +76,12 @@ The constructor takes the request fields ADK sends on every call:
 | `includeResponseMetadata` | Keep the raw payload on `customMetadata`. Defaults to `true`. |
 | `extraRequestArgs`        | Extra fields merged into every request body.                  |
 
-`extraRequestArgs` overrides a computed top-level field, but its `extra_body` is
-merged with the computed one rather than replacing it, so supplying an
-`extra_body` does not drop the stop sequences ADK put there.
+`extraRequestArgs` overrides a computed field of the same name. An `extra_body`
+entry inside it is flattened into the request body rather than sent as a field,
+because `extra_body` is a request option of the Python SDK and has no Node
+equivalent; the keys inside it reach the API exactly as they do from
+adk-python. `config.stopSequences` is sent as the top-level `stop` field for
+the same reason.
 
 For anything the constructor does not expose — organization, timeout, retries,
 custom headers, an OpenAI-compatible host — build the client yourself:
@@ -146,6 +149,11 @@ A `response.failed` or `error` event ends the stream with one response carrying
 | `connect()`                                        | Throws; the Responses API has no bidirectional live mode.                  |
 
 ## Known limits
+
+`responseSchema` accepts a Zod type, a genai `Schema`, or a plain JSON Schema.
+The dialect is told apart by the case of the `type` names: genai writes
+`OBJECT`, JSON Schema writes `object`. A schema that mixes the two in nested
+subschemas is converted as whichever dialect its top-level `type` names.
 
 A replayed thought part is dropped from the request. A Responses reasoning input
 item has to reference a reasoning item id from a real prior response, ADK thought
