@@ -278,6 +278,21 @@ export class Workflow extends BaseNode {
     }
     if (output !== undefined) {
       ctx.output = output;
+      // A value the entry passed straight back from a child was already
+      // emitted by that child; one the entry computed itself still needs an
+      // event. Runs record their output by value, so this compares values
+      // rather than tracking where the entry got it: for a primitive, an entry
+      // that independently computed a value some child also produced reads as
+      // passing that child's value back, and its event is suppressed. That
+      // value still reaches the stream on the child's event, and `ctx.output`
+      // is set either way, so what is lost is a duplicate, not the result.
+      if (
+        [...dynamicState.runs.values()].some((run) =>
+          Object.is(run.output, output),
+        )
+      ) {
+        ctx.outputEmitted = true;
+      }
     }
   }
 
@@ -634,6 +649,9 @@ export class Workflow extends BaseNode {
 
     if (terminalOutputs.length === 1) {
       ctx.output = terminalOutputs[0];
+      // The terminal node's own event already carried this value, so the
+      // runner's end-of-node flush must not emit it a second time.
+      ctx.outputEmitted = true;
     } else if (terminalOutputs.length > 1) {
       throw new Error(
         `Workflow ${this.name}: multiple terminal nodes produced output ` +
