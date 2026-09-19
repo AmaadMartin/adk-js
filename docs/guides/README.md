@@ -8,6 +8,11 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### CLI
+
+- [Agent test runner](cli/agent_test_runner/index.md) - Replaying a recorded
+  conversation against an agent, and rebuilding the recording.
+
 ### Tools
 
 #### Retrieval
