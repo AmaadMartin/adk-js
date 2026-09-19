@@ -43,8 +43,10 @@ import {
   makeFastForwardResult,
   reconstructNodeRuns,
   RehydratedNode,
+  replaySequence,
   resolvedInterruptResponses,
 } from './utils/rehydration_utils.js';
+import {ReplaySequenceBarrier} from './utils/replay_sequence_barrier.js';
 
 /**
  * A unique symbol branding {@link Workflow} instances.
@@ -118,6 +120,12 @@ class LoopState {
    * re-surfaces the recovered output instead of recording a fresh checkpoint.
    */
   readonly replayedNodes = new Set<string>();
+  /**
+   * Releases this turn's fast-forwarded completions in the order history
+   * recorded them. A fresh run recovers no sequence, so the barrier stays
+   * empty and never blocks.
+   */
+  sequenceBarrier = new ReplaySequenceBarrier([]);
   errorShutDown = false;
   /**
    * Workflow-scoped abort signal handed to each scheduled node so a failure can
@@ -244,10 +252,8 @@ export class Workflow extends BaseNode {
       ctx.session?.events ?? [],
       ctx.invocationId,
     );
-    const rehydrated = reconstructNodeRuns(
-      runEvents,
-      ctx.nodePath || undefined,
-    );
+    const parentPath = ctx.nodePath || undefined;
+    const rehydrated = reconstructNodeRuns(runEvents, parentPath);
     this.applyResumeInputs(ctx, runEvents);
 
     if (this.dynamicEntry) {
@@ -258,6 +264,9 @@ export class Workflow extends BaseNode {
     const loop = new LoopState();
     loop.rehydrated = rehydrated;
     loop.abortSignal = abortController.signal;
+    loop.sequenceBarrier = new ReplaySequenceBarrier(
+      replaySequence(runEvents, parentPath),
+    );
 
     this.seedStartTriggers(loop, ctx, nodeInput);
 
@@ -362,6 +371,9 @@ export class Workflow extends BaseNode {
 
       const result = await Promise.race(loop.pending.values());
       loop.pending.delete(result.name);
+      // Release whichever replayed completion the recording puts next. A fresh
+      // node advances nothing, because it is not in the sequence.
+      loop.sequenceBarrier.checkAndAdvance(result.name);
 
       if (result.error) {
         const nodeState = loop.nodes.get(result.name);
@@ -489,13 +501,10 @@ export class Workflow extends BaseNode {
     // is not consulted here. Python reaches its cached-result case first too.
     const prior = loop.rehydrated.get(nodeName)?.shift();
     if (prior && isFastForwardable(prior)) {
-      loop.replayedNodes.add(nodeName);
-      loop.pending.set(
+      queueReplayedCompletion(
+        loop,
         nodeName,
-        Promise.resolve({
-          name: nodeName,
-          childCtx: makeFastForwardResult(ctx, prior),
-        }),
+        makeFastForwardResult(ctx, prior),
       );
       return false;
     }
@@ -520,11 +529,7 @@ export class Workflow extends BaseNode {
           branch: prior.branch ?? ctx.branch,
           interruptIds: [],
         };
-        loop.replayedNodes.add(nodeName);
-        loop.pending.set(
-          nodeName,
-          Promise.resolve({name: nodeName, childCtx: resumeResult}),
-        );
+        queueReplayedCompletion(loop, nodeName, resumeResult);
         return false;
       }
     }
@@ -810,6 +815,9 @@ export class Workflow extends BaseNode {
     // their cleanup runs and events flush; failures are swallowed because the
     // workflow is already shutting down on error.
     abortController.abort();
+    // Replayed completions park on the barrier rather than on the signal, so
+    // release them too or awaiting them below never returns.
+    loop.sequenceBarrier.dispose();
     const outstanding = [...loop.pending.values()];
     loop.pending.clear();
     await Promise.allSettled(outstanding);
@@ -901,6 +909,28 @@ function childNodePath(ctx: NodeContext, nodeName: string): string {
 /** Whether `node` is an agent that runs as a multi-turn task. */
 function isTaskModeNode(node: BaseNode): boolean {
   return isLlmAgent(node) && node.mode === 'task';
+}
+
+/**
+ * Queues a completion the resumed run recovered instead of executing, held
+ * until the recorded sequence reaches it.
+ *
+ * A divergence rejects the wait. That is reported as this node failing its
+ * replay, so it takes the same path out of the loop as a node that threw.
+ */
+function queueReplayedCompletion(
+  loop: LoopState,
+  nodeName: string,
+  childCtx: NodeResult,
+): void {
+  loop.replayedNodes.add(nodeName);
+  loop.pending.set(
+    nodeName,
+    loop.sequenceBarrier.wait(nodeName).then(
+      () => ({name: nodeName, childCtx}),
+      (error) => ({name: nodeName, error}),
+    ),
+  );
 }
 
 /**

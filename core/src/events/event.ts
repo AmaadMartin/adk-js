@@ -63,6 +63,18 @@ export interface NodeInfo {
    * structured output.
    */
   messageAsOutput?: boolean;
+
+  /**
+   * Whether a workflow emitted this event to re-surface a node's already
+   * recorded output, rather than the node emitting it by running.
+   *
+   * A resumable stream records the output of a fast-forwarded node so the
+   * stream stays complete. That echo carries the node's path and its output,
+   * which makes it indistinguishable from the event the node originally
+   * emitted. Rehydration must not read it as the node running again, so it is
+   * marked here.
+   */
+  replayed?: boolean;
 }
 
 /**
