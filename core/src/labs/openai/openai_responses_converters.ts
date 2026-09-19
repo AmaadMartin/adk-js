@@ -22,6 +22,7 @@ import {
   GenerateContentConfig,
   GenerateContentResponseUsageMetadata,
   Part,
+  Schema,
 } from '@google/genai';
 
 import {extractSystemInstruction} from '../../models/interactions_utils.js';
@@ -29,7 +30,7 @@ import {LlmRequest} from '../../models/llm_request.js';
 import {LlmResponse} from '../../models/llm_response.js';
 import {genaiSchemaToJsonSchema} from '../../utils/genai_schema_to_json.js';
 import {logger} from '../../utils/logger.js';
-import {SchemaLike, toJsonSchema} from '../../utils/schema.js';
+import {toJsonSchema} from '../../utils/schema.js';
 import {isZodSchema} from '../../utils/simple_zod_to_json.js';
 
 import {
@@ -596,27 +597,52 @@ export function toolChoiceFromConfig(
 }
 
 /**
- * Returns true when `value` can be rendered by {@link toJsonSchema}.
+ * Returns true when a schema object is written in the genai dialect.
  *
- * `GenerateContentConfig.responseSchema` is declared `unknown` because it
- * accepts a Zod type or a genai `Schema`; both are objects, and
- * {@link toJsonSchema} dispatches between them. This rejects the non-object
- * values the declared type also admits.
+ * genai serializes a `Type` member as its uppercase enum name (`OBJECT`),
+ * where JSON Schema always uses the lowercase name. That is what tells the two
+ * apart, and it matters because `genaiSchemaToJsonSchema` recognises only the
+ * uppercase names: run a JSON Schema through it and the `type` is dropped,
+ * leaving a schema that constrains nothing.
  */
-function isSchemaLike(value: unknown): value is SchemaLike {
-  return isZodSchema(value) || isRecord(value);
+function isGenaiSchemaObject(schema: unknown): schema is Schema {
+  const type = isRecord(schema) ? schema['type'] : undefined;
+  return (
+    typeof type === 'string' &&
+    type === type.toUpperCase() &&
+    type !== type.toLowerCase()
+  );
 }
 
-/** Renders the configured output schema as plain JSON Schema. */
+/** Copies a plain JSON Schema and lowercases its type names in place. */
+function toPlainJsonSchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  const copy = structuredClone(schema);
+  lowercaseSchemaTypes(copy);
+  return copy;
+}
+
+/**
+ * Renders the configured output schema as plain JSON Schema.
+ *
+ * `responseSchema` is declared `unknown` because it accepts a Zod type, a
+ * genai `Schema`, or a plain JSON Schema. adk-python's `_schema_to_dict`
+ * accepts the same three shapes and lowercases the result whichever it got.
+ */
 function structuredOutputSchema(
   config: GenerateContentConfig,
 ): Record<string, unknown> | undefined {
+  const responseSchema = config.responseSchema;
   let schema: Record<string, unknown> | undefined;
-  if (isSchemaLike(config.responseSchema)) {
-    schema = toJsonSchema(config.responseSchema);
+  if (isZodSchema(responseSchema)) {
+    schema = toJsonSchema(responseSchema);
+  } else if (isGenaiSchemaObject(responseSchema)) {
+    schema = genaiSchemaToJsonSchema(responseSchema);
+  } else if (isRecord(responseSchema)) {
+    schema = toPlainJsonSchema(responseSchema);
   } else if (isRecord(config.responseJsonSchema)) {
-    schema = structuredClone(config.responseJsonSchema);
-    lowercaseSchemaTypes(schema);
+    schema = toPlainJsonSchema(config.responseJsonSchema);
   }
   return schema && Object.keys(schema).length > 0 ? schema : undefined;
 }

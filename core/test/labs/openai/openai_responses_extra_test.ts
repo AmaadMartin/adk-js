@@ -9,6 +9,7 @@
 
 import {FinishReason, FunctionCallingConfigMode, Type} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
 
 import {
   AzureOpenAIResponsesLlm as PublicAzureOpenAIResponsesLlm,
@@ -578,6 +579,59 @@ describe('Structured output', () => {
           additionalProperties: false,
           required: ['a'],
         },
+      },
+    });
+  });
+
+  it('keeps the type of a responseSchema already written as JSON Schema', () => {
+    // genaiSchemaToJsonSchema only knows the uppercase genai type names, so a
+    // lowercase schema has to take the plain-JSON-Schema path or lose `type`.
+    const text = responseTextConfig({
+      responseSchema: {type: 'object', properties: {a: {type: 'string'}}},
+    });
+
+    expect(text).toEqual({
+      format: {
+        type: 'json_schema',
+        name: 'schema',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: {a: {type: 'string'}},
+          additionalProperties: false,
+          required: ['a'],
+        },
+      },
+    });
+  });
+
+  it('lowercases the type of a responseSchema in the genai dialect', () => {
+    const text = responseTextConfig({
+      responseSchema: {type: Type.OBJECT, properties: {a: {type: Type.STRING}}},
+    });
+
+    expect(text?.format).toMatchObject({
+      schema: {
+        type: 'object',
+        properties: {a: {type: 'string'}},
+        additionalProperties: false,
+        required: ['a'],
+      },
+    });
+  });
+
+  it('renders a Zod responseSchema', () => {
+    const text = responseTextConfig({
+      responseSchema: z.object({answer: z.string()}),
+    });
+
+    expect(text?.format).toMatchObject({
+      type: 'json_schema',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {answer: {type: 'string'}},
+        required: ['answer'],
       },
     });
   });
