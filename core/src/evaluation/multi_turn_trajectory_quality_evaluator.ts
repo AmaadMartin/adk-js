@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ConversationScenario} from './conversation_scenarios.js';
 import {Invocation} from './eval_case.js';
 import {EvalMetric, getMetricThreshold} from './eval_metrics.js';
 import {EvaluationResult, Evaluator} from './evaluator.js';
@@ -66,12 +65,10 @@ export class MultiTurnTrajectoryQualityV1Evaluator implements Evaluator {
   evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
   ): Promise<EvaluationResult> {
     return this.facade.evaluateInvocations(
       actualInvocations,
       expectedInvocations,
-      conversationScenario,
     );
   }
 }

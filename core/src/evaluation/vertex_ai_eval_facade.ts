@@ -6,14 +6,12 @@
 
 import {Content, Tool} from '@google/genai';
 
-import {ConversationScenario} from './conversation_scenarios.js';
 import {Invocation} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
 import {
   emptyEvaluationResult,
   EvaluationResult,
   Evaluator,
-  getEvalStatus,
   PerInvocationResult,
   validateInvocationLengths,
 } from './evaluator.js';
@@ -176,9 +174,9 @@ function getAgentData(invocations: Invocation[]): VertexAgentData {
  * given, and the caller owns how that client is built and authenticated.
  */
 export class MultiTurnVertexAiEvalFacade implements Evaluator {
-  protected readonly threshold: number;
-  protected readonly metricName: string;
-  protected readonly client: VertexAiEvalClient;
+  private readonly threshold: number;
+  private readonly metricName: string;
+  private readonly client: VertexAiEvalClient;
 
   constructor(options: VertexAiEvalFacadeOptions) {
     this.threshold = options.threshold;
@@ -187,54 +185,54 @@ export class MultiTurnVertexAiEvalFacade implements Evaluator {
   }
 
   /**
-   * @param _conversationScenario Ignored: the service derives what it needs
-   *   from the turns themselves. The parameter is on the shared contract, so
-   *   the same caller drives a scenario-aware metric and this one.
    * @throws InputValidationError if the two lists have different lengths.
    */
   async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    _conversationScenario?: ConversationScenario,
   ): Promise<EvaluationResult> {
     validateInvocationLengths(actualInvocations, expectedInvocations);
     if (actualInvocations.length === 0) {
       return emptyEvaluationResult();
     }
 
-    const perInvocationResults: PerInvocationResult[] = actualInvocations
-      .slice(0, -1)
-      .map((actual, index) => ({
-        actualInvocation: actual,
-        expectedInvocation: expectedInvocations?.[index],
-        score: undefined,
-        evalStatus: EvalStatus.NOT_EVALUATED,
-      }));
-
     const result = await this.client.evaluate({
       dataset: {evalCases: [{agentData: getAgentData(actualInvocations)}]},
       metrics: [{name: this.metricName}],
     });
 
-    const lastTurn = actualInvocations.length - 1;
     const score = getScore(result);
+    if (score === undefined) {
+      // Parity with adk-python: an unscored conversation reports nothing at
+      // all, not even the turns that were sent.
+      return emptyEvaluationResult();
+    }
+
+    const evalStatus = this.getEvalStatus(score);
+    const lastTurn = actualInvocations.length - 1;
+    const perInvocationResults: PerInvocationResult[] = actualInvocations
+      .slice(0, lastTurn)
+      .map((actual, index) => ({
+        actualInvocation: actual,
+        expectedInvocation: expectedInvocations?.[index],
+        evalStatus: EvalStatus.NOT_EVALUATED,
+      }));
     perInvocationResults.push({
       actualInvocation: actualInvocations[lastTurn],
       expectedInvocation: expectedInvocations?.[lastTurn],
       score,
-      evalStatus: getEvalStatus(score, this.threshold),
+      evalStatus,
     });
-
-    if (score === undefined) {
-      // Parity with adk-python: an unscored conversation reports nothing at
-      // all, and the per-invocation results accumulated above are discarded.
-      return emptyEvaluationResult();
-    }
 
     return {
       overallScore: score,
-      overallEvalStatus: getEvalStatus(score, this.threshold),
+      overallEvalStatus: evalStatus,
       perInvocationResults,
     };
+  }
+
+  /** Returns the status of a score against this facade's threshold. */
+  private getEvalStatus(score: number): EvalStatus {
+    return score >= this.threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
   }
 }

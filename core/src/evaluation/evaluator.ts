@@ -5,7 +5,6 @@
  */
 
 import {InputValidationError} from '../errors/input_validation_error.js';
-import type {ConversationScenario} from './conversation_scenarios.js';
 import type {Invocation} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
 
@@ -46,15 +45,10 @@ export interface Evaluator {
    * @param expectedInvocations Golden invocations. A metric that needs them
    *   rejects the call when they are absent. When supplied, the list must
    *   have the same length as `actualInvocations`.
-   * @param conversationScenario The scenario a simulated user played out to
-   *   produce the invocations. A metric that scores how closely the agent
-   *   followed the scenario reads it; every other metric ignores it. It sits
-   *   on the shared contract so that one caller drives either kind of metric.
    */
   evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
   ): EvaluationResult | Promise<EvaluationResult>;
 }
 
@@ -85,15 +79,4 @@ export function validateInvocationLengths(
         `got ${actualInvocations.length} and ${expectedInvocations.length}.`,
     );
   }
-}
-
-/** Returns the status of a score, which is absent when nothing was scored. */
-export function getEvalStatus(
-  score: number | undefined,
-  threshold: number,
-): EvalStatus {
-  if (score === undefined) {
-    return EvalStatus.NOT_EVALUATED;
-  }
-  return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
 }

@@ -11,17 +11,12 @@
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
-export type {ConversationScenario} from './conversation_scenarios.js';
 export type {
   Invocation,
   InvocationEvent,
   InvocationEvents,
 } from './eval_case.js';
-export {
-  EvalStatus,
-  PrebuiltMetrics,
-  getMetricThreshold,
-} from './eval_metrics.js';
+export {EvalStatus, PrebuiltMetrics} from './eval_metrics.js';
 export type {BaseCriterion, EvalMetric} from './eval_metrics.js';
 export type {
   EvaluationResult,
@@ -30,14 +25,12 @@ export type {
 } from './evaluator.js';
 export {MultiTurnTrajectoryQualityV1Evaluator} from './multi_turn_trajectory_quality_evaluator.js';
 export type {MultiTurnTrajectoryQualityV1EvaluatorOptions} from './multi_turn_trajectory_quality_evaluator.js';
-export {MultiTurnVertexAiEvalFacade} from './vertex_ai_eval_facade.js';
 export type {
   VertexAgentConfig,
   VertexAgentData,
   VertexAgentEvent,
   VertexAggregatedMetricResult,
   VertexAiEvalClient,
-  VertexAiEvalFacadeOptions,
   VertexAiEvalRequest,
   VertexConversationTurn,
   VertexEvalCase,
