@@ -80,6 +80,23 @@ export type {
 } from './tools/retrieval/files_retrieval.js';
 export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {
+  BIGQUERY_CREDENTIAL_KEY,
+  BIGQUERY_TOKEN_CACHE_KEY,
+  DEFAULT_BIGQUERY_SCOPES,
+} from './tools/bigquery/bigquery_credentials.js';
+export type {
+  BigQueryCredentials,
+  BigQueryCredentialsConfig,
+} from './tools/bigquery/bigquery_credentials.js';
+export {BigQueryTool, isBigQueryTool} from './tools/bigquery/bigquery_tool.js';
+export type {
+  BigQueryToolError,
+  BigQueryToolExecute,
+  BigQueryToolOptions,
+} from './tools/bigquery/bigquery_tool.js';
+export {BigQueryToolset} from './tools/bigquery/bigquery_toolset.js';
+export type {BigQueryToolsetOptions} from './tools/bigquery/bigquery_toolset.js';
+export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
