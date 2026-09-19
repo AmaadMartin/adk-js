@@ -33,7 +33,11 @@ export default defineConfig([
           "varsIgnorePattern": "^_",
           "caughtErrorsIgnorePattern": "^_"
         }
-      ]
+      ],
+      // `js/recommended` re-enables the base rule, which reads every overload
+      // signature as a redeclaration. The TypeScript version understands them.
+      "no-redeclare": "off",
+      "@typescript-eslint/no-redeclare": "error"
     },
   },
 ]);
