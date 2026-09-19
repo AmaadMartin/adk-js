@@ -11,15 +11,16 @@ import {REQUEST_CONFIRMATION_FUNCTION_CALL_NAME} from '../agents/functions.js';
 import {Event} from '../events/event.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {BaseTool} from '../tools/base_tool.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {
+  REQUIRE_CONFIRMATION_MESSAGE,
+  ToolConfirmation,
+} from '../tools/tool_confirmation.js';
 
 // Constants
 // Re-exported, not redefined: `agents/functions.ts` is the single definition.
 export {REQUEST_CONFIRMATION_FUNCTION_CALL_NAME};
 
 const TOOL_CALL_SECURITY_CHECK_STATES = 'orcas_tool_call_security_check_states';
-const INTERMEDIATE_REQUIRE_TOOL_CALL_CONFIRMATION_ERROR =
-  'This tool call needs external confirmation before completion.';
 
 // --------------------------------------------------------------------------
 // #START Policy Engine Interface
@@ -132,7 +133,7 @@ export class SecurityPlugin extends BasePlugin {
     }
 
     if (!toolContext.toolConfirmation) {
-      return {partial: INTERMEDIATE_REQUIRE_TOOL_CALL_CONFIRMATION_ERROR};
+      return {partial: REQUIRE_CONFIRMATION_MESSAGE};
     }
 
     this.setToolCallCheckState(toolContext, toolContext.toolConfirmation);
@@ -206,7 +207,7 @@ export class SecurityPlugin extends BasePlugin {
             tool.name
           }. Reason: ${policyCheckResult.reason}`,
         });
-        return {partial: INTERMEDIATE_REQUIRE_TOOL_CALL_CONFIRMATION_ERROR};
+        return {partial: REQUIRE_CONFIRMATION_MESSAGE};
       case PolicyOutcome.ALLOW:
         return;
       default:
