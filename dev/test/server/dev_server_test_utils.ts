@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionTool, LlmAgent, RunnableRoot} from '@google/adk';
+import {App, FunctionTool, LlmAgent, RunnableRoot} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -26,32 +26,44 @@ export const TEST_AGENT = new LlmAgent({
   ],
 });
 
+/** Name of the app the stub loader serves wrapped in an {@link App}. */
+export const TEST_WRAPPED_APP_NAME = 'wrapped_app';
+
+const TEST_APP = new App({
+  name: TEST_WRAPPED_APP_NAME,
+  rootAgent: new LlmAgent({name: TEST_WRAPPED_APP_NAME}),
+});
+
 /** An {@link AgentFile} that hands back an in-memory agent instead of a file. */
 class StubAgentFile extends AgentFile {
-  constructor(private readonly stubAgent: RunnableRoot) {
+  constructor(private readonly loaded: RunnableRoot | App) {
     super('<stub>');
   }
 
-  override async load(): Promise<RunnableRoot> {
-    return this.stubAgent;
+  override async load(): Promise<RunnableRoot | App> {
+    return this.loaded;
   }
 }
 
 /**
- * An {@link AgentLoader} serving one in-memory agent, so a server can be
- * started without an agent module on disk.
+ * An {@link AgentLoader} serving two in-memory apps, so a server can be started
+ * without an agent module on disk. One is a bare agent and one is wrapped in an
+ * {@link App}, which the graph endpoint unwraps.
  */
 export class StubAgentLoader extends AgentLoader {
   override async listAgents(): Promise<string[]> {
-    return [TEST_APP_NAME];
+    return [TEST_APP_NAME, TEST_WRAPPED_APP_NAME];
   }
 
   override async getAgentFile(agentName: string): Promise<AgentFile> {
-    if (agentName !== TEST_APP_NAME) {
-      throw new Error(`Agent '${agentName}' not found`);
+    if (agentName === TEST_APP_NAME) {
+      return new StubAgentFile(TEST_AGENT);
+    }
+    if (agentName === TEST_WRAPPED_APP_NAME) {
+      return new StubAgentFile(TEST_APP);
     }
 
-    return new StubAgentFile(TEST_AGENT);
+    throw new Error(`Agent '${agentName}' not found`);
   }
 }
 
