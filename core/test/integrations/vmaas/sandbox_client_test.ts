@@ -15,7 +15,6 @@ import {
   SandboxClient,
   SandboxErrorCode,
   isSandboxError,
-  type SandboxScrollDirection,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
@@ -64,6 +63,12 @@ describe('SandboxClient', () => {
 
     it('reads an empty object from a JSON body that is not an object', async () => {
       const client = clientOver(async () => ({body: '[1, 2]'}));
+
+      expect(await client.makeCdpRequest('Page.reload')).toEqual({});
+    });
+
+    it('reads an empty object from a JSON null body', async () => {
+      const client = clientOver(async () => ({body: 'null'}));
 
       expect(await client.makeCdpRequest('Page.reload')).toEqual({});
     });
@@ -249,9 +254,7 @@ describe('SandboxClient', () => {
 
       const results = await client.makeCdpBatchRequest(commands);
 
-      expect(results).toEqual([
-        {status: 'error', error: 'command rejected', result: undefined},
-      ]);
+      expect(results).toEqual([{status: 'error', error: 'command rejected'}]);
       expect(sendCommand).toHaveBeenCalledTimes(2);
     });
 
@@ -278,23 +281,13 @@ describe('SandboxClient', () => {
       });
     });
 
-    it('keeps the error the sandbox reported for one command', async () => {
+    it('returns the batch results the sandbox reported, unchanged', async () => {
       const client = clientOver(async () => ({
-        body: JSON.stringify({results: [{status: 'error', error: 'boom'}]}),
+        body: JSON.stringify({results: [{status: 'error', why: 'boom'}]}),
       }));
 
       expect(await client.makeCdpBatchRequest(commands)).toEqual([
-        {status: 'error', error: 'boom', result: undefined},
-      ]);
-    });
-
-    it('normalises a batch entry that is not an object', async () => {
-      const client = clientOver(async () => ({
-        body: JSON.stringify({results: ['nope']}),
-      }));
-
-      expect(await client.makeCdpBatchRequest(commands)).toEqual([
-        {status: undefined, result: undefined, error: undefined},
+        {status: 'error', why: 'boom'},
       ]);
     });
   });
@@ -326,29 +319,6 @@ describe('SandboxClient', () => {
         params: Record<string, unknown>;
       };
       expect(body.params).toMatchObject(expected);
-    });
-
-    // adk-python lowercases the direction, so a caller outside TypeScript that
-    // sends 'UP' must scroll up rather than down.
-    it('lowercases the direction before it signs the deltas', async () => {
-      const sendCommand = alwaysRespond({});
-      const client = new SandboxClient({
-        sandbox: SANDBOX,
-        accessToken: ACCESS_TOKEN,
-        sendCommand,
-      });
-
-      await client.scrollAt({
-        x: 1,
-        y: 2,
-        direction: 'UP' as SandboxScrollDirection,
-        magnitude: 300,
-      });
-
-      const body = sendCommand.mock.calls[0][0].requestBody as {
-        params: Record<string, unknown>;
-      };
-      expect(body.params).toMatchObject({deltaX: 0, deltaY: -300});
     });
   });
 

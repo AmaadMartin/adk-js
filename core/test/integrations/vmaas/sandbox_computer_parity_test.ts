@@ -30,7 +30,6 @@ import {
   SANDBOX_NAME,
   SCREENSHOT_BYTES,
   SandboxCall,
-  asVertexClient,
   createFakeSandbox,
   createMockVertexClient,
   createTestContext,
@@ -77,7 +76,7 @@ async function createHarness(
     sandboxTemplateName: options.sandboxTemplateName,
     sandboxSnapshotName: options.sandboxSnapshotName,
     searchEngineUrl: options.searchEngineUrl,
-    vertexaiClient: asVertexClient(vertexClient),
+    vertexaiClient: vertexClient,
     accessTokenProvider,
     sendCommand: sandbox.sendCommand,
   });
@@ -349,7 +348,7 @@ describe('AgentEngineSandboxComputer parity with adk-python', () => {
         },
       },
     ]);
-    expect(Array.from(result.screenshot!)).toEqual(
+    expect(Array.from(result.screenshot ?? [])).toEqual(
       Array.from(SCREENSHOT_BYTES),
     );
     expect(result.url).toBe(PAGE_URL);
@@ -538,7 +537,7 @@ describe('AgentEngineSandboxComputer parity with adk-python', () => {
 
     const result = await computer.currentState();
 
-    expect(Array.from(result.screenshot!)).toEqual(
+    expect(Array.from(result.screenshot ?? [])).toEqual(
       Array.from(SCREENSHOT_BYTES),
     );
     expect(result.url).toBe(PAGE_URL);
@@ -549,7 +548,7 @@ describe('AgentEngineSandboxComputer parity with adk-python', () => {
 
     const result = await computer.openWebBrowser();
 
-    expect(Array.from(result.screenshot!)).toEqual(
+    expect(Array.from(result.screenshot ?? [])).toEqual(
       Array.from(SCREENSHOT_BYTES),
     );
     expect(batchedCommands(sandbox.calls)).toEqual([]);
