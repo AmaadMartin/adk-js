@@ -36,13 +36,10 @@ import {
   ResponsesStreamAccumulator,
   streamResponses,
 } from '../../../src/labs/openai/openai_responses_stream.js';
-import {
-  enforceStrictOpenAiSchema,
-  isRecord,
-  lowercaseSchemaTypes,
-} from '../../../src/labs/openai/openai_schema.js';
+import {enforceStrictOpenAiSchema} from '../../../src/labs/openai/openai_schema.js';
 import {logger} from '../../../src/utils/logger.js';
 import type {OptionalPeer} from '../../../src/utils/optional_peer.js';
+import {isRecord, lowercaseSchemaTypes} from '../../../src/utils/schema.js';
 
 import {
   CaptureClient,

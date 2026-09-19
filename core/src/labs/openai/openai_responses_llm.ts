@@ -50,11 +50,11 @@ const ASYNC_API_KEY_MESSAGE =
 /**
  * Supplies the API key for the client this model builds.
  *
- * ADK resolves the key synchronously. A provider that returns a promise is
- * rejected with a clear error when the key is resolved, which is why the
- * declared return type admits one.
+ * ADK resolves the key synchronously, so the provider must return a string. An
+ * untyped JavaScript caller can still pass an async provider, which is
+ * rejected with a clear error when the key is resolved.
  */
-export type OpenAIApiKeyProvider = () => string | PromiseLike<string>;
+export type OpenAIApiKeyProvider = () => string;
 
 /** Per-request options ADK passes to the OpenAI client. */
 export interface OpenAIRequestOptions {
@@ -339,7 +339,7 @@ export class AzureOpenAIResponsesLlm extends OpenAIResponsesLlm {
     const options = super.clientOptions();
     if (this.azureEndpoint) {
       options.baseURL =
-        this.azureEndpoint.replace(/\/+$/, () => '') + AZURE_RESPONSES_PATH;
+        this.azureEndpoint.replace(/\/+$/, '') + AZURE_RESPONSES_PATH;
     }
     return options;
   }

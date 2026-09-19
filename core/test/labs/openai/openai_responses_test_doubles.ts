@@ -74,6 +74,18 @@ export function userRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
   });
 }
 
+/**
+ * Returns `value` typed as `T`, for input only an untyped caller can supply.
+ *
+ * A few ADK guards exist for JavaScript callers, who can reach a function with
+ * a value its TypeScript signature forbids — an async `apiKey` provider, for
+ * one. A test cannot express that without stepping outside the type system, so
+ * the escape lives here, named once, rather than at each call site.
+ */
+export function asUntypedInput<T>(value: unknown): T {
+  return value as T;
+}
+
 /** Drains an async generator into an array. */
 export async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
   const items: T[] = [];
