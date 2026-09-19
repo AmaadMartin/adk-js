@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Agents
+
+- [Context service wrappers](agents/context/index.md) - Reading and writing artifacts, memory and auth state from a callback or a tool.
+
 ### Tools
 
 #### Retrieval
