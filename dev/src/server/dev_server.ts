@@ -56,15 +56,6 @@ function isHttpError(error: unknown): error is HttpError {
   );
 }
 
-function describeError(error: unknown): string {
-  return typeof error === 'object' &&
-    error !== null &&
-    'message' in error &&
-    typeof error.message === 'string'
-    ? error.message
-    : String(error);
-}
-
 function isFileNotFoundError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -327,7 +318,7 @@ export class DevServer extends AdkApiServer {
           return;
         }
 
-        const message = `${context}: ${describeError(error)}`;
+        const message = `${context}: ${error}`;
         this.logger.error(message);
         res.status(500).json({error: message});
       }
