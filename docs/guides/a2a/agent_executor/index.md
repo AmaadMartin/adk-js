@@ -80,11 +80,16 @@ The executor derives both identifiers from the A2A context id: the session id is
 the context id, and the user id is `A2A_USER_` followed by it. It looks the
 session up on the runner's session service and creates it when it is missing.
 
-The lookup asks for the session's full event history. Those events decide
-whether a human-in-the-loop request raised by an earlier turn is still
-unanswered. When one is, the executor publishes an `input-required` status
-update and does not run the agent, so a client cannot talk past an open gate by
-starting a new task in the same context.
+The lookup reads an existing session twice. The first read passes
+`numRecentEvents: 0`, because it only asks whether the session exists. The
+second read fetches the event history. The executor creates the session when
+either read finds none, so it never runs against the event-less result the
+first read asked for.
+
+Those events decide whether a human-in-the-loop request raised by an earlier
+turn is still unanswered. When one is, the executor publishes an
+`input-required` status update and does not run the agent, so a client cannot
+talk past an open gate by starting a new task in the same context.
 
 ## Converting parts
 
