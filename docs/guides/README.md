@@ -33,3 +33,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Integrations
+
+- [Agent Engine sandbox computer](integrations/vmaas/index.md) - Driving a browser hosted in a Vertex AI Agent Engine Computer Use Sandbox, and the session state it shares.
