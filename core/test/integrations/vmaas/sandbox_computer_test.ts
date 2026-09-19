@@ -100,17 +100,25 @@ describe('AgentEngineSandboxComputer', () => {
     }
 
     it('clears the cached token and retries once after a failure', async () => {
+      let stateDuringRetry: {token?: string; expiry?: number} | undefined;
       const provider = vi
         .fn()
-        .mockRejectedValueOnce(new Error('token minting failed'))
-        .mockResolvedValue('fresh_token');
+        .mockRejectedValueOnce(new Error('minting failed'));
       const {computer, context, sandbox} = await withProvider(provider);
+      provider.mockImplementation(async () => {
+        stateDuringRetry = {
+          token: context.state.get<string>(STATE_KEY_ACCESS_TOKEN),
+          expiry: context.state.get<number>(STATE_KEY_TOKEN_EXPIRY),
+        };
+        return 'fresh_token';
+      });
       context.state.set(STATE_KEY_ACCESS_TOKEN, 'stale_token');
       context.state.set(STATE_KEY_TOKEN_EXPIRY, Date.now() / 1000 - 1);
 
       await computer.currentState();
 
       expect(provider).toHaveBeenCalledTimes(2);
+      expect(stateDuringRetry).toEqual({token: undefined, expiry: 0});
       expect(context.state.get(STATE_KEY_ACCESS_TOKEN)).toBe('fresh_token');
       expect(sandbox.calls[0].accessToken).toBe('fresh_token');
     });
