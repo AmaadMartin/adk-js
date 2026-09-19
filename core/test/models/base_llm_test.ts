@@ -7,13 +7,15 @@
 import {
   BaseLlm,
   BaseLlmConnection,
+  LlmCapabilities,
   LlmRequest,
   LlmResponse,
+  createLlmCapabilities,
   isBaseLlm,
   runWithClientLabel,
   version,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 class TestLlm extends BaseLlm {
   constructor() {
@@ -99,5 +101,60 @@ describe('isBaseLlm', () => {
 
   it('should return false for FakeLlm instance (not extending BaseLlm)', () => {
     expect(isBaseLlm(new FakeLlm())).toBe(false);
+  });
+});
+
+describe('BaseLlm.capabilities', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  class NamedLlm extends TestLlm {
+    constructor(readonly model: string) {
+      super();
+    }
+  }
+
+  class SelfReportingLlm extends NamedLlm {
+    override get capabilities(): LlmCapabilities {
+      return createLlmCapabilities({outputSchemaAndTools: true});
+    }
+  }
+
+  it('denies outputSchemaAndTools outside the Vertex AI variant', () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', undefined);
+
+    expect(
+      new NamedLlm('gemini-2.5-pro').capabilities.outputSchemaAndTools,
+    ).toBe(false);
+  });
+
+  it('grants outputSchemaAndTools to a Gemini model on Vertex AI', () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', 'true');
+
+    expect(
+      new NamedLlm('gemini-2.5-pro').capabilities.outputSchemaAndTools,
+    ).toBe(true);
+  });
+
+  it('denies outputSchemaAndTools to a non-Gemini model on Vertex AI', () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', 'true');
+
+    expect(
+      new NamedLlm('claude-3-7-sonnet').capabilities.outputSchemaAndTools,
+    ).toBe(false);
+  });
+
+  it('lets a subclass declare a capability its name denies', () => {
+    vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', undefined);
+
+    expect(
+      new SelfReportingLlm('claude-3-7-sonnet').capabilities
+        .outputSchemaAndTools,
+    ).toBe(true);
+  });
+
+  it('returns a frozen snapshot', () => {
+    expect(Object.isFrozen(new TestLlm().capabilities)).toBe(true);
   });
 });

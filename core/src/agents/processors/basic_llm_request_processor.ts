@@ -6,7 +6,6 @@
 
 import {Event} from '../../events/event.js';
 import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
-import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
@@ -48,7 +47,7 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
       agent.outputSchema &&
       agent.mode !== 'task' &&
       (!agent.tools?.length ||
-        canUseOutputSchemaWithTools(agent.canonicalModel.model))
+        agent.canonicalModel.capabilities.outputSchemaAndTools)
     ) {
       setOutputSchema(llmRequest, agent.outputSchema);
     }
