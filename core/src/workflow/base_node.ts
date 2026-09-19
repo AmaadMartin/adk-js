@@ -6,7 +6,9 @@
 
 import {Content, createModelContent, PartListUnion} from '@google/genai';
 import {createEvent, Event, isEvent} from '../events/event.js';
+import {isIdentifier} from '../utils/identifier_utils.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
+import {toSerializable} from '../utils/serialization_utils.js';
 import {NodeSchemaValidationError} from './errors.js';
 import type {NodeContext} from './node_context.js';
 import {isRequestInput} from './request_input.js';
@@ -113,6 +115,11 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
       throw new Error('Node name must be a non-empty string.');
     }
     this.name = config.name.trim();
+    if (!isIdentifier(this.name)) {
+      throw new Error(
+        `Found invalid node name: "${this.name}". Node name must be a valid identifier. It should start with a letter (a-z, A-Z) or an underscore (_), and can only contain letters, digits (0-9), underscores, and hyphens.`,
+      );
+    }
     this.description = config.description ?? '';
     this.rerunOnResume = config.rerunOnResume ?? false;
     this.waitForOutput = config.waitForOutput ?? false;
@@ -194,13 +201,21 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
    * Validates node output against `outputSchema` (Content passes through). Only
    * enforced for Zod schemas; a genai `Schema` is left unvalidated (see
    * `parseWithSchema`).
+   *
+   * A validated output is flattened with {@link toSerializable} so a value the
+   * schema produced — a `Date`, a `Set`, a class instance a `.transform()`
+   * built — survives the session store. With no schema the output is returned
+   * untouched, mirroring adk-python's `validate_node_data`.
    */
   protected validateOutput(output: unknown): unknown {
     if (isContent(output)) {
       return output;
     }
+    if (this.outputSchema === undefined) {
+      return output;
+    }
     try {
-      return parseWithSchema(this.outputSchema, output);
+      return toSerializable(parseWithSchema(this.outputSchema, output));
     } catch (e) {
       throw new NodeSchemaValidationError({
         nodeName: this.name,
