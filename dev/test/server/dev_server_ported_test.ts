@@ -21,6 +21,7 @@ import {DevServer} from '../../src/server/dev_server.js';
 import {
   makeAgentsDir,
   STUB_AGENT_LOADER,
+  stubHomeDir,
   TEST_APP_NAME,
   TestHttpClient,
   testsDirOf,
@@ -38,7 +39,7 @@ describe('DevServer (ported from adk-python)', () => {
     homeDir = await makeAgentsDir();
     // The consent record lives at `~/.adk/config.json`, so the whole read and
     // write path runs unmocked against a temporary home directory.
-    vi.stubEnv('HOME', homeDir);
+    stubHomeDir(homeDir);
 
     server = new DevServer({agentsDir, agentLoader: STUB_AGENT_LOADER});
     await server.start();
