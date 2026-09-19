@@ -15,8 +15,7 @@
  * model, so it is behaviour rather than style.
  */
 
-/** The GEPA component key holding the root agent's instruction. */
-export const AGENT_PROMPT_NAME = 'agent_prompt';
+import {AGENT_PROMPT_NAME} from './gepa_root_agent_prompt_optimizer.js';
 
 /** The GEPA component key prefix for a skill's instructions. */
 export const SKILL_KEY_PREFIX = 'skill_instructions:';
