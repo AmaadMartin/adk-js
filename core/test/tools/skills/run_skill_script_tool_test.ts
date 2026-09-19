@@ -12,17 +12,21 @@ import {
   ExecuteCodeParams,
   File,
   FileContentEncoding,
+  InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  PluginManager,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
+  createSession,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
+import {logger} from '../../../src/utils/logger.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
   materializeFiles: vi.fn(),
@@ -309,5 +313,50 @@ describe('RunSkillScriptTool', () => {
 
     expect(materializeFiles).toHaveBeenLastCalledWith([], outputDir);
     expect(result.outputDirectory).toBe(outputDir);
+  });
+});
+
+describe('RunSkillScriptTool payload size', () => {
+  it('warns once when the skill resources exceed the recommended limit', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const bigSkill: Skill = {
+      frontmatter: {name: 'big-skill', description: 'A large skill'},
+      instructions: 'Test instructions',
+      resources: {
+        references: {'big.txt': 'x'.repeat(17 * 1024 * 1024)},
+        scripts: {'setup.js': {src: 'console.log(1);'}},
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([bigSkill], {
+      codeExecutor: mockExecutor,
+      scriptOutputDir: await fs.mkdtemp(
+        path.join(os.tmpdir(), 'skill_payload_test_'),
+      ),
+    });
+
+    const result = await new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'big-skill', script_path: 'scripts/setup.js'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'payload-invocation',
+          agent: new LlmAgent({name: 'test-agent', model: 'gemini-2.0-flash'}),
+          session: createSession({id: 's', appName: 'app', userId: 'u'}),
+          sessionService: new InMemorySessionService(),
+          pluginManager: new PluginManager([]),
+        }),
+      }),
+    });
+
+    // The warning does not block the run: the script still executed.
+    expect(mockExecutor.executeCodeParams).toBeDefined();
+    expect(result).toHaveProperty('status', 'success');
+    const warnings = warn.mock.calls.filter((c) =>
+      String(c[0]).includes('exceeding the recommended limit'),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0][0])).toContain("Skill 'big-skill'");
+    expect(String(warnings[0][0])).toContain('16777216 bytes');
+    warn.mockRestore();
   });
 });

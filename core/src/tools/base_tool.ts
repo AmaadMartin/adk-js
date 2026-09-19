@@ -193,6 +193,18 @@ export abstract class BaseTool {
   }
 
   /**
+   * Reports the error type a tool response carries, for telemetry.
+   *
+   * A tool that reports a failure as a response object rather than by throwing
+   * overrides this so the `execute_tool` span can record the failure. It must
+   * not mutate the response. Returning `undefined` means the response is not
+   * an error.
+   */
+  detectErrorInResponse(_response: unknown): string | undefined {
+    return undefined;
+  }
+
+  /**
    * The Google API LLM variant to use.
    */
   get apiVariant() {

@@ -325,6 +325,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         stdout: executionResult.stdout,
         stderr: executionResult.stderr,
         outputFiles,
+        exitCode: executionResult.exitCode,
       };
     } finally {
       if (tempDir) {
