@@ -6,6 +6,8 @@
 
 import {Content, createModelContent, PartListUnion} from '@google/genai';
 import {createEvent, Event, isEvent} from '../events/event.js';
+import {isIdentifier} from '../utils/identifier_utils.js';
+import {isPlainObject} from '../utils/object_utils.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {NodeSchemaValidationError} from './errors.js';
 import type {NodeContext} from './node_context.js';
@@ -105,14 +107,7 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
   readonly isolationScope?: string | true;
 
   constructor(config: BaseNodeConfig) {
-    if (
-      !config.name ||
-      typeof config.name !== 'string' ||
-      config.name.trim().length === 0
-    ) {
-      throw new Error('Node name must be a non-empty string.');
-    }
-    this.name = config.name.trim();
+    this.name = validateNodeName(config.name);
     this.description = config.description ?? '';
     this.rerunOnResume = config.rerunOnResume ?? false;
     this.waitForOutput = config.waitForOutput ?? false;
@@ -171,7 +166,8 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
   }
 
   /**
-   * Validates node input against `inputSchema` (Content passes through). Only
+   * Validates node input against `inputSchema` (Content passes through), then
+   * flattens the validated value into plain data (see `toSerializable`). Only
    * enforced for Zod schemas; a genai `Schema` is left unvalidated (see
    * `parseWithSchema`).
    */
@@ -180,7 +176,7 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
       return input;
     }
     try {
-      return parseWithSchema(this.inputSchema, input);
+      return validateAgainstSchema(this.inputSchema, input);
     } catch (e) {
       throw new NodeSchemaValidationError({
         nodeName: this.name,
@@ -191,7 +187,8 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
   }
 
   /**
-   * Validates node output against `outputSchema` (Content passes through). Only
+   * Validates node output against `outputSchema` (Content passes through), then
+   * flattens the validated value into plain data (see `toSerializable`). Only
    * enforced for Zod schemas; a genai `Schema` is left unvalidated (see
    * `parseWithSchema`).
    */
@@ -200,7 +197,7 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
       return output;
     }
     try {
-      return parseWithSchema(this.outputSchema, output);
+      return validateAgainstSchema(this.outputSchema, output);
     } catch (e) {
       throw new NodeSchemaValidationError({
         nodeName: this.name,
@@ -234,6 +231,184 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
       output,
     });
   }
+}
+
+/**
+ * Validates a node name, returning it trimmed.
+ *
+ * A node name is not just a label: it becomes a segment of the node path and
+ * the author of every event the node emits. `nodeNameFromPath` splits a path
+ * on `.` and `@`, so a name carrying either would silently resolve to the
+ * wrong node. Rejecting it at construction puts the stack trace on the line
+ * that named the node.
+ *
+ * Mirrors `google/adk-python` `_base_node.py::BaseNode._validate_name`, using
+ * the identifier rule adk-js already applies to agent names. That rule permits
+ * `-`, which Python's `str.isidentifier()` rejects.
+ *
+ * @throws Error when the name is empty, blank, or not a valid identifier.
+ */
+export function validateNodeName(name: unknown): string {
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    throw new Error('Node name must be a non-empty string.');
+  }
+  const trimmed = name.trim();
+  if (!isIdentifier(trimmed)) {
+    throw new Error(
+      `Found invalid node name: "${
+        trimmed
+      }". Node name must be a valid identifier. It should start with a letter (a-z, A-Z) or an underscore (_), and can only contain letters, digits (0-9), underscores, and hyphens.`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Parses `value` against `schema` and flattens the result into plain data.
+ *
+ * `value` is returned untouched when there is no schema, matching
+ * `google/adk-python` `utils/_schema_utils.py::validate_node_data`, which
+ * returns early rather than serializing a value it never validated.
+ *
+ * The result is declared as `T` for the same reason `parseWithSchema` declares
+ * it: a schema may legitimately widen or flatten the value, and the caller
+ * still holds it under the type it declared.
+ */
+function validateAgainstSchema<T>(schema: SchemaLike | undefined, value: T): T {
+  if (schema === undefined) {
+    return value;
+  }
+  return toSerializable(parseWithSchema(schema, value)) as T;
+}
+
+/**
+ * Flattens a validated value into plain data.
+ *
+ * An object exposing `toJSON()` is dumped through it, which is how a class
+ * instance states how it wants to be persisted and what `JSON.stringify` would
+ * do when the session store writes it. Arrays and plain objects are rebuilt
+ * with their members flattened. Every other value — a `Map`, a `Set`, a class
+ * instance without `toJSON()`, a primitive — is returned as it is.
+ *
+ * For an ordinary Zod schema this is close to a no-op, because
+ * `z.object().parse()` already returns a plain object. It earns its place on
+ * the `.transform()`, `z.instanceof()` and genai `Schema` paths, where a
+ * validated value can be a live class instance: a fresh run would then hold
+ * the instance while a resumed run reads the dumped form back out of the
+ * session store, and the two runs would disagree on the type.
+ *
+ * The input is never mutated. Mirrors `google/adk-python`
+ * `_base_node.py::BaseNode._to_serializable`, with `toJSON()` standing in for
+ * `BaseModel.model_dump()`.
+ */
+export function toSerializable(value: unknown): unknown {
+  if (hasToJson(value)) {
+    return toSerializable(value.toJSON());
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => toSerializable(item));
+  }
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, toSerializable(item)]),
+    );
+  }
+  return value;
+}
+
+/** Narrows a value to an object that declares how to dump itself. */
+function hasToJson(value: unknown): value is {toJSON(): unknown} {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'toJSON' in value &&
+    typeof (value as {toJSON: unknown}).toJSON === 'function'
+  );
+}
+
+/**
+ * Returns the static (run-id-free) path of `target` within `root`, or
+ * `undefined` when `target` is not reachable from `root`.
+ *
+ * The path is the chain of node names from `root` down to `target`, joined by
+ * `.`. It identifies a node by position rather than by name, so two copies of
+ * one sub-node mounted under different parents get different paths even though
+ * they answer to the same name.
+ *
+ * Children are the node's own enumerable properties: a property holding a
+ * node, or an array or plain object holding nodes one level deep — the
+ * TypeScript reading of the reference's "a field that is a node, a list, or a
+ * dict". Any other class instance is not traversed, so a `Workflow`'s `Graph`
+ * is opaque here — as it is in the reference, where `Graph` is a `BaseModel`
+ * and not a `BaseNode`.
+ *
+ * Mirrors `google/adk-python` `_base_node.py::find_static_node_path`, which
+ * joins with `/`. adk-js joins with `.` because every other path in the
+ * project is dot-separated (`BranchPath`, `event.nodeInfo.path`), and a
+ * `/`-joined string would compose with none of them.
+ */
+export function findStaticNodePath(
+  root: BaseNode,
+  target: BaseNode,
+): string | undefined {
+  return findNodeNameChain(root, target, new Set())?.join('.');
+}
+
+/**
+ * Depth-first search for `target` under `curr`, returning the chain of node
+ * names that reaches it.
+ *
+ * `visited` spans the whole search, so a child holding a back-reference to an
+ * ancestor terminates instead of recurring forever.
+ */
+function findNodeNameChain(
+  curr: BaseNode,
+  target: BaseNode,
+  visited: Set<BaseNode>,
+): string[] | undefined {
+  if (visited.has(curr)) {
+    return undefined;
+  }
+  visited.add(curr);
+  if (curr === target) {
+    return [curr.name];
+  }
+  for (const child of childNodesOf(curr)) {
+    const chain = findNodeNameChain(child, target, visited);
+    if (chain) {
+      return [curr.name, ...chain];
+    }
+  }
+  return undefined;
+}
+
+/** Yields the nodes held by a node's own enumerable properties. */
+function* childNodesOf(node: BaseNode): Generator<BaseNode> {
+  for (const value of Object.values(node)) {
+    if (isBaseNode(value)) {
+      yield value;
+      continue;
+    }
+    for (const member of containerValues(value)) {
+      if (isBaseNode(member)) {
+        yield member;
+      }
+    }
+  }
+}
+
+/**
+ * Returns the values a container holds, or nothing when `value` is not one of
+ * the containers a node may keep its children in.
+ */
+function containerValues(value: unknown): Iterable<unknown> {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (isPlainObject(value)) {
+    return Object.values(value);
+  }
+  return [];
 }
 
 /**
