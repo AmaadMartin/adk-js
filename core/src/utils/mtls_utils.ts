@@ -17,6 +17,7 @@
 
 import {execFile} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
+import type {ClientRequest, IncomingMessage} from 'node:http';
 import * as https from 'node:https';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
@@ -207,6 +208,36 @@ export function createClientCertAgent(certs: MtlsClientCerts): https.Agent {
 }
 
 /**
+ * Reads a response body as text.
+ *
+ * A body that grows past {@link MAX_RESPONSE_BODY_BYTES} destroys `request`,
+ * which fails the request instead of resolving this promise.
+ */
+export function collectResponseBody(
+  request: ClientRequest,
+  response: IncomingMessage,
+): Promise<HttpGetResult> {
+  return new Promise((resolve) => {
+    let body = '';
+    response.setEncoding('utf8');
+    response.on('data', (chunk: string) => {
+      body += chunk;
+      if (body.length > MAX_RESPONSE_BODY_BYTES) {
+        request.destroy(
+          new Error(
+            `Response exceeded ${MAX_RESPONSE_BODY_BYTES} bytes and was abandoned`,
+          ),
+        );
+      }
+    });
+    response.on('end', () => {
+      const status = response.statusCode ?? 0;
+      resolve({ok: status >= 200 && status < 300, status, body});
+    });
+  });
+}
+
+/**
  * Performs an HTTPS GET that presents `certs` as the client certificate.
  *
  * `globalThis.fetch` cannot present a client certificate, which is why this
@@ -228,22 +259,7 @@ export function getWithClientCert(
         timeout: timeoutMs,
       },
       (response) => {
-        let body = '';
-        response.setEncoding('utf8');
-        response.on('data', (chunk: string) => {
-          body += chunk;
-          if (body.length > MAX_RESPONSE_BODY_BYTES) {
-            request.destroy(
-              new Error(
-                `Response exceeded ${MAX_RESPONSE_BODY_BYTES} bytes and was abandoned`,
-              ),
-            );
-          }
-        });
-        response.on('end', () => {
-          const status = response.statusCode ?? 0;
-          resolve({ok: status >= 200 && status < 300, status, body});
-        });
+        collectResponseBody(request, response).then(resolve, reject);
       },
     );
     // A node:https timeout only emits the event; the socket stays open until
