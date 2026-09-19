@@ -6,7 +6,11 @@
 
 import {getClientLabels, runWithClientLabel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {parseUserAgent} from '../../src/utils/client_labels.js';
+import {
+  getTrackingHeaders,
+  mergeTrackingHeaders,
+  parseUserAgent,
+} from '../../src/utils/client_labels.js';
 
 describe('client_labels', () => {
   describe('parseUserAgent', () => {
@@ -144,5 +148,50 @@ describe('client_labels', () => {
         runWithClientLabel('   ', () => {});
       }).toThrow('Client label must be a non-empty string.');
     });
+  });
+});
+
+describe('getTrackingHeaders', () => {
+  it('identifies the caller as ADK on both header names', () => {
+    const headers = getTrackingHeaders();
+    expect(headers['x-goog-api-client']).toContain('google-adk/');
+    expect(headers['user-agent']).toBe(headers['x-goog-api-client']);
+  });
+
+  it('carries the current client labels', () => {
+    expect(getTrackingHeaders()['x-goog-api-client']).toBe(
+      getClientLabels().join(' '),
+    );
+  });
+});
+
+describe('mergeTrackingHeaders', () => {
+  it('adds the tracking headers to an empty input', () => {
+    expect(mergeTrackingHeaders()).toEqual(getTrackingHeaders());
+    expect(mergeTrackingHeaders({})).toEqual(getTrackingHeaders());
+  });
+
+  it('keeps headers it does not own', () => {
+    const merged = mergeTrackingHeaders({'Content-Type': 'application/json'});
+    expect(merged['Content-Type']).toBe('application/json');
+    expect(merged['user-agent']).toContain('google-adk/');
+  });
+
+  it('appends a caller label instead of replacing it', () => {
+    const merged = mergeTrackingHeaders({'user-agent': 'my-app/1.0'});
+    expect(merged['user-agent']).toContain('my-app/1.0');
+    expect(merged['user-agent']).toContain('google-adk/');
+  });
+
+  it('does not repeat a label the tracking headers already carry', () => {
+    const trackingValue = getTrackingHeaders()['x-goog-api-client'];
+    const merged = mergeTrackingHeaders({'x-goog-api-client': trackingValue});
+    expect(merged['x-goog-api-client']).toBe(trackingValue);
+  });
+
+  it('leaves the callers own headers object unchanged', () => {
+    const headers = {'user-agent': 'my-app/1.0'};
+    mergeTrackingHeaders(headers);
+    expect(headers).toEqual({'user-agent': 'my-app/1.0'});
   });
 });
