@@ -541,12 +541,9 @@ function toolParameters(
   if (!declaration.parameters) {
     return {type: 'object', properties: {}};
   }
-  const parameters = genaiSchemaToJsonSchema(declaration.parameters);
-  const required = declaration.parameters.required;
-  if (required?.length && !('required' in parameters)) {
-    parameters['required'] = required;
-  }
-  return parameters;
+  // `genaiSchemaToJsonSchema` carries `required` through, so unlike the Python
+  // reference there is nothing left to re-add here.
+  return genaiSchemaToJsonSchema(declaration.parameters);
 }
 
 /**
