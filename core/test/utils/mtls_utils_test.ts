@@ -30,7 +30,9 @@ const FAKE_PASSPHRASE =
 
 /** Home directory the SecureConnect metadata is read from during a test. */
 let homeDir: string;
-let originalHome: string | undefined;
+/** Both variables are set: os.homedir() reads USERPROFILE on Windows. */
+const HOME_VARIABLES = ['HOME', 'USERPROFILE'];
+let originalHome: Record<string, string | undefined>;
 
 /** Writes `contents` as the SecureConnect metadata file under the fake home. */
 function writeMetadata(contents: string): void {
@@ -130,17 +132,23 @@ describe('loadDefaultClientCerts', () => {
 
   beforeEach(() => {
     homeDir = mkdtempSync(join(tmpdir(), 'adk-mtls-'));
-    originalHome = process.env['HOME'];
-    process.env['HOME'] = homeDir;
+    originalHome = {};
+    for (const variable of HOME_VARIABLES) {
+      originalHome[variable] = process.env[variable];
+      process.env[variable] = homeDir;
+    }
     warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     debug = vi.spyOn(logger, 'debug').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    if (originalHome === undefined) {
-      delete process.env['HOME'];
-    } else {
-      process.env['HOME'] = originalHome;
+    for (const variable of HOME_VARIABLES) {
+      const value = originalHome[variable];
+      if (value === undefined) {
+        delete process.env[variable];
+      } else {
+        process.env[variable] = value;
+      }
     }
     rmSync(homeDir, {recursive: true, force: true});
     vi.restoreAllMocks();
