@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Dev
+
+- [DevServer](dev/dev_server/index.md) - The HTTP server behind `adk web`, and the dev-only endpoints it adds to `AdkApiServer`.
+
 ### Tools
 
 #### Retrieval

@@ -17,6 +17,7 @@ import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
+import {DevServer} from '../server/dev_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
@@ -216,6 +217,10 @@ export const REPOSITORY_DEPLOY_OPTION = new Option(
   '--repository [string]',
   'Optional. Artifact Registry repository name to push docker images. Required for agent_engine deploy.',
 );
+export const STAGING_BUCKET_DEPLOY_OPTION = new Option(
+  '--staging_bucket [string]',
+  'Optional. Google Cloud Storage bucket name (no gs:// prefix) used for deployment staging. Cloud Build logs are written to gs://<staging_bucket>/logs. If not set, gs://<project>_cloudbuild/logs is used.',
+);
 export const AGENT_ENGINE_ID_OPTION = new Option(
   '--agent_engine_id [id]',
   'Optional. ID of the Agent Engine instance to update if it exists (default: undefined, which means a new instance will be created). If project and region are set, this should be the resource ID or the full resource name (projects/.../locations/.../reasoningEngines/...).',
@@ -275,7 +280,7 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
-        const server = new AdkApiServer({
+        const server = new DevServer({
           logLevel,
           agentsDir: getAbsolutePath(agentsDir),
           host: options['host'],
@@ -518,6 +523,7 @@ export function createProgram(): Command {
       .addOption(DISPLAY_NAME_OPTION)
       .addOption(DESCRIPTION_OPTION)
       .addOption(REPOSITORY_DEPLOY_OPTION)
+      .addOption(STAGING_BUCKET_DEPLOY_OPTION)
       .option(
         '--temp_folder [string]',
         'Optional. Temp folder for the generated source files (default: a private directory created in the system temp directory).',
@@ -545,6 +551,7 @@ export function createProgram(): Command {
             displayName: options['display_name'],
             description: options['description'],
             repository: options['repository'],
+            stagingBucket: options['staging_bucket'],
             tempFolder: options['temp_folder'],
             port: 8080, // Agent Engine requires fixed port of 8080
             withUi: getBoolean(options['with_ui']),
