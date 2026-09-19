@@ -238,6 +238,33 @@ export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
 export {
+  AgentOptimizer,
+  isAgentOptimizer,
+} from './optimization/agent_optimizer.js';
+export type {OptimizeParams} from './optimization/agent_optimizer.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
+export type {
+  EvaluationBatch,
+  GepaAdapter,
+  GepaEngine,
+  GepaOptimizeParams,
+  GepaRunResult,
+  ReflectionLm,
+} from './optimization/gepa_engine.js';
+export {requireStaticInstruction} from './optimization/gepa_utils.js';
+export {
+  AGENT_PROMPT_NAME,
+  SKILL_KEY_PREFIX,
+  skillComponentKey,
+} from './optimization/instruction_proposal.js';
+export {Sampler, isSampler} from './optimization/sampler.js';
+export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
+export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
   ScopedFailureTracker,
