@@ -21,7 +21,6 @@ import {describe, expect, it, vi} from 'vitest';
 import {
   AGENT_ENGINE_NAME,
   SANDBOX_NAME,
-  asVertexClient,
   createFakeSandbox,
   createMockVertexClient,
   createTestContext,
@@ -42,7 +41,7 @@ describe('AgentEngineSandboxComputer', () => {
   describe('session state', () => {
     it('refuses to act before prepare() binds the state', async () => {
       const computer = new AgentEngineSandboxComputer({
-        vertexaiClient: asVertexClient(createMockVertexClient()),
+        vertexaiClient: createMockVertexClient(),
         accessTokenProvider: vi.fn(),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -62,7 +61,7 @@ describe('AgentEngineSandboxComputer', () => {
       const context = createTestContext();
       const vertexClient = createMockVertexClient();
       const options = {
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       };
@@ -91,7 +90,7 @@ describe('AgentEngineSandboxComputer', () => {
       const sandbox = createFakeSandbox();
       const computer = new AgentEngineSandboxComputer({
         sandboxName: SANDBOX_NAME,
-        vertexaiClient: asVertexClient(createMockVertexClient()),
+        vertexaiClient: createMockVertexClient(),
         accessTokenProvider: provider,
         sendCommand: sandbox.sendCommand,
       });
@@ -176,7 +175,7 @@ describe('AgentEngineSandboxComputer', () => {
     it('checks the seams before it provisions anything', async () => {
       const vertexClient = createMockVertexClient();
       const computer = new AgentEngineSandboxComputer({
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
       });
       await computer.prepare(createTestContext());
@@ -197,7 +196,7 @@ describe('AgentEngineSandboxComputer', () => {
       const vertexClient = createMockVertexClient();
       const computer = new AgentEngineSandboxComputer({
         sandboxName: SANDBOX_NAME,
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         sendCommand: createFakeSandbox().sendCommand,
       });
       await computer.prepare(createTestContext());
@@ -214,7 +213,7 @@ describe('AgentEngineSandboxComputer', () => {
     it('names the missing access token method', async () => {
       const computer = new AgentEngineSandboxComputer({
         sandboxName: SANDBOX_NAME,
-        vertexaiClient: asVertexClient(createMockVertexClient()),
+        vertexaiClient: createMockVertexClient(),
         sendCommand: createFakeSandbox().sendCommand,
       });
       await computer.prepare(createTestContext());
@@ -233,7 +232,7 @@ describe('AgentEngineSandboxComputer', () => {
     it('names the missing send command method', async () => {
       const computer = new AgentEngineSandboxComputer({
         sandboxName: SANDBOX_NAME,
-        vertexaiClient: asVertexClient(createMockVertexClient()),
+        vertexaiClient: createMockVertexClient(),
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
       });
       await computer.prepare(createTestContext());
@@ -262,7 +261,7 @@ describe('AgentEngineSandboxComputer', () => {
       const vertexClient = createMockVertexClient();
       const computer = new AgentEngineSandboxComputer({
         ...options,
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -280,7 +279,7 @@ describe('AgentEngineSandboxComputer', () => {
       const vertexClient = createMockVertexClient();
       const computer = new AgentEngineSandboxComputer({
         ...options,
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -357,7 +356,7 @@ describe('AgentEngineSandboxComputer', () => {
       const computer = new AgentEngineSandboxComputer({
         sandboxName: SANDBOX_NAME,
         sandboxTemplateName: TEMPLATE_NAME,
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -382,7 +381,7 @@ describe('AgentEngineSandboxComputer', () => {
         {name: 'operations/create-sandbox-op'},
       );
       const computer = new AgentEngineSandboxComputer({
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -407,7 +406,7 @@ describe('AgentEngineSandboxComputer', () => {
         pending,
       );
       const computer = new AgentEngineSandboxComputer({
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -425,13 +424,35 @@ describe('AgentEngineSandboxComputer', () => {
       }
     });
 
+    it('gives up on a create operation that has no name to poll by', async () => {
+      const vertexClient = createMockVertexClient();
+      vertexClient.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(
+        {},
+      );
+      const computer = new AgentEngineSandboxComputer({
+        vertexaiClient: vertexClient,
+        accessTokenProvider: vi.fn().mockResolvedValue('token'),
+        sendCommand: createFakeSandbox().sendCommand,
+      });
+      await computer.prepare(createTestContext());
+
+      const error = await computer.currentState().catch((e: unknown) => e);
+
+      expect(sandboxErrorCode(error)).toBe(
+        SandboxErrorCode.SANDBOX_CREATE_TIMED_OUT,
+      );
+      expect(
+        vertexClient.agentEnginesInternal.sandboxes.getSandboxOperationInternal,
+      ).not.toHaveBeenCalled();
+    });
+
     it('replaces a cached sandbox that no longer resolves', async () => {
       const vertexClient = createMockVertexClient();
       vertexClient.agentEnginesInternal.sandboxes.getInternal
         .mockRejectedValueOnce(new Error('sandbox not found'))
         .mockResolvedValue({name: SANDBOX_NAME});
       const computer = new AgentEngineSandboxComputer({
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -456,7 +477,7 @@ describe('AgentEngineSandboxComputer', () => {
         {name: 'operations/create-sandbox-op', done: true, response: {}},
       );
       const computer = new AgentEngineSandboxComputer({
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -484,7 +505,7 @@ describe('AgentEngineSandboxComputer', () => {
         operations.poll ?? operations.create,
       );
       const computer = new AgentEngineSandboxComputer({
-        vertexaiClient: asVertexClient(vertexClient),
+        vertexaiClient: vertexClient,
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: createFakeSandbox().sendCommand,
       });
@@ -550,7 +571,7 @@ describe('AgentEngineSandboxComputer', () => {
       const sandbox = createFakeSandbox();
       const computer = new AgentEngineSandboxComputer({
         sandboxName: SANDBOX_NAME,
-        vertexaiClient: asVertexClient(createMockVertexClient()),
+        vertexaiClient: createMockVertexClient(),
         accessTokenProvider: vi.fn().mockResolvedValue('token'),
         sendCommand: sandbox.sendCommand,
       });
