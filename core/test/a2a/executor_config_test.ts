@@ -11,6 +11,7 @@ import {
   A2aAgentExecutorConverterConfig,
   A2AEvent,
   Event as AdkEvent,
+  AdkEventToA2AEventsConverter,
   AdkEventToA2AEventsConverterImpl,
   BaseSessionService,
   createEvent,
@@ -87,8 +88,18 @@ describe('resolveA2aAgentExecutorConfig', () => {
     expect(Object.keys(resolved).sort()).toEqual([
       'a2aPartConverter',
       'adkEventConverter',
+      'eventConverter',
       'genAiPartConverter',
     ]);
+  });
+
+  it('carries a supplied eventConverter through, with no default for it', () => {
+    const eventConverter: AdkEventToA2AEventsConverter = () => [];
+
+    expect(resolveA2aAgentExecutorConfig({}).eventConverter).toBeUndefined();
+    expect(resolveA2aAgentExecutorConfig({eventConverter}).eventConverter).toBe(
+      eventConverter,
+    );
   });
 
   it('keeps every supplied converter', () => {
@@ -127,6 +138,7 @@ describe('resolveA2aAgentExecutorConfig', () => {
   it.each([
     ['a2aPartConverter', 'number', 3],
     ['genAiPartConverter', 'null', null],
+    ['eventConverter', 'string', 'nope'],
     ['adkEventConverter', 'object', {}],
   ])('rejects a %s that is a %s', (field, described, value) => {
     expect(() =>
@@ -231,6 +243,42 @@ describe('toA2AArtifactUpdateEventsFromArtifactMap', () => {
 
     expect((event.artifact.parts[0] as TextPart).text).toBe('rewritten');
     expect(genAiPartConverter).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a part its converter returns undefined for', () => {
+    const event = onlyArtifactUpdate(
+      toA2AArtifactUpdateEventsFromArtifactMap(
+        createEvent({
+          author: 'model',
+          content: {role: 'model', parts: [{text: 'secret'}, {text: 'public'}]},
+          actions: createEventActions(),
+        }),
+        new Map(),
+        TASK_ID,
+        CONTEXT_ID,
+        (part) =>
+          part.text === 'secret'
+            ? undefined
+            : {kind: 'text', text: part.text ?? ''},
+      ),
+    );
+
+    expect(event.artifact.parts).toEqual([{kind: 'text', text: 'public'}]);
+  });
+
+  it('publishes nothing when its converter drops every part', () => {
+    const agentsArtifacts = new Map<string, string>();
+
+    const events = toA2AArtifactUpdateEventsFromArtifactMap(
+      modelEvent('secret', true),
+      agentsArtifacts,
+      TASK_ID,
+      CONTEXT_ID,
+      () => undefined,
+    );
+
+    expect(events).toEqual([]);
+    expect(agentsArtifacts.size).toBe(0);
   });
 
   it('falls back to toA2APart when no converter is supplied', () => {

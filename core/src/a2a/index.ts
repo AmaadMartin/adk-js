@@ -39,6 +39,7 @@ export {
 } from './executor_config.js';
 export type {
   A2aAgentExecutorConverterConfig,
+  AdkEventToA2AEventsConverter,
   AdkEventToA2AEventsConverterImpl,
   ResolvedA2aAgentExecutorConfig,
 } from './executor_config.js';
