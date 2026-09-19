@@ -47,13 +47,19 @@ class StubAgentFile extends AgentFile {
 }
 
 /**
- * An {@link AgentLoader} serving two in-memory apps, so a server can be started
- * without an agent module on disk. One is a bare agent and one is wrapped in an
- * {@link App}, which the graph endpoint unwraps.
+ * Name of an app the loader lists but cannot load, so a route can be driven
+ * down its "the app exists but is broken" path.
+ */
+export const TEST_BROKEN_APP_NAME = 'broken_app';
+
+/**
+ * An {@link AgentLoader} serving in-memory apps, so a server can be started
+ * without an agent module on disk. One is a bare agent, one is wrapped in an
+ * {@link App} which the graph endpoint unwraps, and one fails to load.
  */
 export class StubAgentLoader extends AgentLoader {
   override async listAgents(): Promise<string[]> {
-    return [TEST_APP_NAME, TEST_WRAPPED_APP_NAME];
+    return [TEST_APP_NAME, TEST_WRAPPED_APP_NAME, TEST_BROKEN_APP_NAME];
   }
 
   override async getAgentFile(agentName: string): Promise<AgentFile> {

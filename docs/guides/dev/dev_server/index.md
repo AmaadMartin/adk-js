@@ -20,6 +20,11 @@ flag, so a route registered on `DevServer` cannot reach a plain
 `AdkApiServer` by accident. adk-python makes the same split between
 `ApiServer` and `DevServer`.
 
+`DevServer` does not hold every dev-facing route. `AdkApiServer` also serves
+`/dev/apps/:appName/debug/trace/*` and `/dev/apps/:appName/build_graph*`, which
+adk-python puts on its `DevServer`. They only read, and `adk api_server` has
+served them for as long as they have existed, so they stay where they are.
+
 Like the base class, every endpoint is unauthenticated. Bind this server to
 loopback and do not expose it to an untrusted network.
 
@@ -85,7 +90,9 @@ path.
 
 `GET /dev/apps/:appName/graph` returns the agent graph in DOT format with no
 highlights, so the UI can fetch it once and compute highlights itself.
-`?dark_mode=true` draws it on the dark background; the default is light.
+`?dark_mode=true` draws it on the dark background; the default is light. An
+app name the loader does not list answers 404, and an app that fails to load
+answers 500 with its real cause.
 
 ## Telemetry consent
 
