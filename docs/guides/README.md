@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### A2A
+
+- [A2AAgentExecutor converter configuration](a2a/agent_executor/index.md) - The converter slots on the A2A executor config, their declared defaults, and how a bad one is rejected.
+
 ### Tools
 
 #### Retrieval
