@@ -201,14 +201,11 @@ async function retryWhileNavigating<T>(
   operation: () => Promise<T>,
   maxRetries: number,
 ): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
+  for (let attempt = 1; attempt < maxRetries; attempt++) {
     try {
       return await operation();
     } catch (e: unknown) {
-      if (
-        attempt >= maxRetries ||
-        !isTransientNavigationError(formatError(e))
-      ) {
+      if (!isTransientNavigationError(formatError(e))) {
         throw e;
       }
       logger.debug(
@@ -217,6 +214,7 @@ async function retryWhileNavigating<T>(
       await sleep(RETRY_DELAY_MS);
     }
   }
+  return operation();
 }
 
 /** Builds the CDP command that dispatches a key event. */
