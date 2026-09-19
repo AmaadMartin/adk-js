@@ -154,6 +154,10 @@ export {InputValidationError} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
+  StaleSessionError,
+  isStaleSessionError,
+} from './errors/stale_session_error.js';
+export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
@@ -170,6 +174,8 @@ export {
   populateClientFunctionCallId,
   pruneThoughts,
   stringifyContent,
+  transformToCamelCaseEvent,
+  transformToSnakeCaseEvent,
 } from './events/event.js';
 export type {
   CreateEventParams,
@@ -293,6 +299,12 @@ export type {
 export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
+export {
+  extractStateDelta,
+  makeJsonSafeState,
+  paginateSessions,
+} from './sessions/session_util.js';
+export type {StateDelta} from './sessions/session_util.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
@@ -370,6 +382,9 @@ export type {
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {randomUUID} from './utils/env_aware_utils.js';
+export {toJsonSafe} from './utils/json_utils.js';
+export type {JsonSafeResult} from './utils/json_utils.js';
 export {
   LogLevel,
   getLogger,
@@ -383,6 +398,8 @@ export {
   isGemini3xFlashLive,
   isGemini3xLive,
 } from './utils/model_name.js';
+export {loadOptionalPeer} from './utils/optional_peer.js';
+export type {OptionalPeer} from './utils/optional_peer.js';
 export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export {Task} from './utils/task.js';

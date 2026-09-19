@@ -52,6 +52,17 @@ export interface Session {
    * The last update time of the session.
    */
   lastUpdateTime: number;
+
+  /**
+   * Opaque storage revision marker.
+   *
+   * A session service that does optimistic concurrency control stamps this
+   * when it loads the session, and checks it again on the next write. A
+   * mismatch means another writer changed the session in storage since, and
+   * the write is rejected with `StaleSessionError`. A service that does not
+   * do such checks leaves it unset.
+   */
+  storageUpdateMarker?: string;
 }
 
 /**
