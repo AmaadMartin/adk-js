@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Evaluation
+
+- [MultiTurnTaskSuccessV1Evaluator](evaluation/multi_turn_task_success_evaluator/index.md) - Scoring whether an agent achieved the goal of a whole conversation, with the Vertex AI Gen AI evaluation service.
+
 ### Tools
 
 #### Retrieval
