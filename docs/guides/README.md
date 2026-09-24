@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Integrations
+
+- [SlackRunner](integrations/slack_runner/index.md) - Putting an ADK agent behind a Slack bot over Socket Mode, and how a Slack thread maps onto a session.
+
 ### Tools
 
 #### Retrieval
