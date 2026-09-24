@@ -206,13 +206,29 @@ export function toGenAIContent(a2aMessage: Message): GenAIContent {
 }
 
 /**
+ * Converts one inbound A2A part into GenAI parts.
+ *
+ * Returning `undefined` drops the part, and returning an array expands it into
+ * several.
+ */
+export type A2APartToGenAIPartConverter = (
+  part: A2APart,
+) => GenAIPart | GenAIPart[] | undefined;
+
+/**
  * Converts an array of A2A Parts to GenAI Parts.
  *
  * @param a2aParts - The A2A parts to convert.
+ * @param partConverter - Converts a single part. Defaults to
+ *   {@link toGenAIPart}. A converter may drop a part by returning `undefined`,
+ *   or expand it by returning an array.
  * @returns An array of GenAI parts.
  */
-export function toGenAIParts(a2aParts: A2APart[]): GenAIPart[] {
-  return a2aParts.map((a2aPart) => toGenAIPart(a2aPart));
+export function toGenAIParts(
+  a2aParts: A2APart[],
+  partConverter: A2APartToGenAIPartConverter = toGenAIPart,
+): GenAIPart[] {
+  return a2aParts.flatMap((a2aPart) => partConverter(a2aPart) ?? []);
 }
 
 /**
