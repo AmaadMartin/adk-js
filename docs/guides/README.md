@@ -10,6 +10,8 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ### Tools
 
+- [ExecuteTool](tools/execute_tool/index.md) - Running a shell command in an environment working directory, and the confirmation gate in front of it.
+
 #### Retrieval
 
 Client-side retrieval tools. The agent calls a one-argument search function, your code answers it, and you choose the store, the chunking and the ranking. Start with `BaseRetrievalTool` if you are deciding between these and server-side retrieval.
