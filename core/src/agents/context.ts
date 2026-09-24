@@ -6,6 +6,7 @@
 
 import {Part} from '@google/genai';
 
+import {ArtifactVersion} from '../artifacts/base_artifact_service.js';
 import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthHandler} from '../auth/auth_handler.js';
 import {AuthConfig} from '../auth/auth_tool.js';
@@ -107,9 +108,15 @@ export class Context extends ReadonlyContext {
    *
    * @param filename The filename of the artifact.
    * @param artifact The artifact to save.
+   * @param customMetadata Custom metadata to store with this version. The
+   *     supported keys depend on the artifact service.
    * @return A promise that resolves to the version of the saved artifact.
    */
-  async saveArtifact(filename: string, artifact: Part): Promise<number> {
+  async saveArtifact(
+    filename: string,
+    artifact: Part,
+    customMetadata?: Record<string, unknown>,
+  ): Promise<number> {
     if (!this.invocationContext.artifactService) {
       throw new Error('Artifact service is not initialized.');
     }
@@ -117,10 +124,35 @@ export class Context extends ReadonlyContext {
     const version = await this.invocationContext.artifactService.saveArtifact({
       filename,
       artifact,
+      customMetadata,
     });
     this.eventActions.artifactDelta[filename] = version;
 
     return version;
+  }
+
+  /**
+   * Gets the metadata of one version of an artifact attached to the current
+   * session.
+   *
+   * @param filename The filename of the artifact.
+   * @param version The version of the artifact. If not provided, the latest
+   *     version will be used.
+   * @return A promise that resolves to the version metadata, or `undefined`
+   *     when the session holds no such artifact version.
+   */
+  getArtifactVersion(
+    filename: string,
+    version?: number,
+  ): Promise<ArtifactVersion | undefined> {
+    if (!this.invocationContext.artifactService) {
+      throw new Error('Artifact service is not initialized.');
+    }
+
+    return this.invocationContext.artifactService.getArtifactVersion({
+      filename,
+      version,
+    });
   }
 
   requestCredential(authConfig: AuthConfig) {
@@ -156,6 +188,24 @@ export class Context extends ReadonlyContext {
     }
 
     return this.invocationContext.artifactService.listArtifactKeys();
+  }
+
+  /**
+   * Adds the current session to memory, so a later invocation can recall it.
+   *
+   * @return A promise that resolves once the memory service has ingested the
+   *     session.
+   */
+  addSessionToMemory(): Promise<void> {
+    if (!this.invocationContext.memoryService) {
+      throw new Error(
+        'Cannot add session to memory: memory service is not available.',
+      );
+    }
+
+    return this.invocationContext.memoryService.addSessionToMemory(
+      this.invocationContext.session,
+    );
   }
 
   /**
