@@ -42,6 +42,15 @@ export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.
 export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
 export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';
 export type {VertexAiRagMemoryServiceOptions} from './memory/vertex_ai_rag_memory_service.js';
+export {
+  GEPARootAgentOptimizer,
+  RootAgentGepaAdapter,
+} from './optimization/gepa_root_agent_optimizer.js';
+export type {
+  GEPARootAgentOptimizerConfig,
+  GEPARootAgentOptimizerResult,
+  RootAgentGepaAdapterParams,
+} from './optimization/gepa_root_agent_optimizer.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
@@ -120,7 +129,7 @@ export {
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
-export {SkillToolset} from './tools/skill/skill_toolset.js';
+export {isSkillToolset, SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';
