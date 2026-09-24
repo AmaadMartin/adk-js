@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Plugins
+
+- [DebugLoggingPlugin](plugins/debug_logging/index.md) - Recording a complete on-disk trace of every invocation, with credentials redacted.
+
 ### Tools
 
 #### Retrieval
