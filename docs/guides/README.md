@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Server
+
+- [Per-app plugins and the default model](server/api_server_plugins/index.md) - Attaching the plugin an app declares in `plugins.yaml`, and setting the model for agents that declare none.
+
 ### Tools
 
 #### Retrieval
