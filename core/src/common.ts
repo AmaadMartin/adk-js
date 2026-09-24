@@ -153,6 +153,7 @@ export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
+export {StaleSessionError} from './errors/stale_session_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
@@ -170,6 +171,8 @@ export {
   populateClientFunctionCallId,
   pruneThoughts,
   stringifyContent,
+  transformToCamelCaseEvent,
+  transformToSnakeCaseEvent,
 } from './events/event.js';
 export type {
   CreateEventParams,
@@ -292,10 +295,12 @@ export type {
   GetSessionRequest,
   ListSessionsRequest,
   ListSessionsResponse,
+  ScopedStateDelta,
 } from './sessions/base_session_service.js';
 export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
+export {makeJsonSafeState} from './sessions/session_util.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
@@ -390,6 +395,7 @@ export type {
 export {AsyncQueue} from './utils/async_queue.js';
 export {renameReservedKeywords, toSnakeCaseName} from './utils/case_utils.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {toJsonSerializable} from './utils/json_utils.js';
 export {
   LogLevel,
   getLogger,
