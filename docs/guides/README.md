@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Agents
+
+- [Context and NodeContext](agents/context/index.md) - The object a callback, a tool, and a workflow node each receive, and what each one may do with it.
+
 ### Tools
 
 #### Retrieval
