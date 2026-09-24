@@ -83,3 +83,17 @@ export function getClientLabels(): string[] {
   }
   return labels;
 }
+
+/**
+ * HTTP headers that identify a request as ADK traffic.
+ *
+ * Mirrors adk-python `utils/_google_client_headers.py`, so server-side usage
+ * data can separate ADK calls from any other caller of the same API.
+ */
+export function getTrackingHeaders(): Record<string, string> {
+  const headerValue = getClientLabels().join(' ');
+  return {
+    'x-goog-api-client': headerValue,
+    'user-agent': headerValue,
+  };
+}
