@@ -84,7 +84,7 @@ class SleepyTool extends BaseTool {
   override _getDeclaration() {
     return {name: this.name, description: this.description};
   }
-  // `callToolAsync` invokes `runAsync({args, toolContext})` with one argument;
+  // The tool runner invokes `runAsync({args, toolContext})` with one argument;
   // the abort signal rides on the context, not a second parameter.
   async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
     await new Promise((resolve) => setTimeout(resolve, 50));
