@@ -40,6 +40,16 @@ const EXPECTED_SESSION_METADATA = {
   'adk_session_id': 'session-id',
 };
 
+// Every event the executor publishes carries the ADK integration extension flag
+// over the session metadata, so the task, working and input-required events now
+// carry both. This matches the adk-python reference expected_metadata.
+const A2A_EXTENSION_URL =
+  'https://google.github.io/adk-docs/a2a/a2a-extension/';
+const EXPECTED_INVOCATION_METADATA = {
+  ...EXPECTED_SESSION_METADATA,
+  [A2A_EXTENSION_URL]: {adk_agent_executor_v2: true},
+};
+
 describe('A2AAgentExecutor', () => {
   let mockSessionService: Mocked<BaseSessionService>;
   let mockEventBus: Mocked<ExecutionEventBus>;
@@ -252,12 +262,12 @@ describe('A2AAgentExecutor', () => {
 
     const task = mockEventBus.publish.mock.calls[0][0] as Task;
     expect(task.kind).toBe('task');
-    expect(task.metadata).toEqual(EXPECTED_SESSION_METADATA);
+    expect(task.metadata).toEqual(EXPECTED_INVOCATION_METADATA);
 
     const workingEvent = mockEventBus.publish.mock
       .calls[1][0] as TaskStatusUpdateEvent;
     expect(workingEvent.status.state).toBe('working');
-    expect(workingEvent.metadata).toEqual(EXPECTED_SESSION_METADATA);
+    expect(workingEvent.metadata).toEqual(EXPECTED_INVOCATION_METADATA);
   });
 
   it('should publish the input-required event with ADK session metadata', async () => {
@@ -300,7 +310,7 @@ describe('A2AAgentExecutor', () => {
     const event = mockEventBus.publish.mock
       .calls[0][0] as TaskStatusUpdateEvent;
     expect(event.status.state).toBe('input-required');
-    expect(event.metadata).toEqual(EXPECTED_SESSION_METADATA);
+    expect(event.metadata).toEqual(EXPECTED_INVOCATION_METADATA);
   });
 
   it('should handle unrecoverable runner errors properly', async () => {
