@@ -210,6 +210,8 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
+export {createLlmCapabilities} from './models/capabilities.js';
+export type {LlmCapabilities} from './models/capabilities.js';
 export {
   ChromeBuiltInLlm,
   ChromeModelUnavailableError,
