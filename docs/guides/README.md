@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### CLI
+
+- [Pub/Sub and Eventarc triggers](cli/triggers/index.md) - Opt-in HTTP endpoints that let an event source invoke an agent, with bounded concurrency and retry on rate limits.
+
 ### Tools
 
 #### Retrieval
