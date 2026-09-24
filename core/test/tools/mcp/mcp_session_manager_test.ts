@@ -34,9 +34,26 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
 
 vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
   return {
-    StreamableHTTPClientTransport: vi.fn(),
+    // The implementation mutates `this` rather than returning a literal, so
+    // `mock.instances` still yields the object the manager holds.
+    StreamableHTTPClientTransport: vi.fn(function (this: {
+      terminateSession: () => Promise<void>;
+    }) {
+      this.terminateSession = vi.fn().mockResolvedValue(undefined);
+    }),
   };
 });
+
+/** The transport built for the session created most recently. */
+function lastHttpTransport(): StreamableHTTPClientTransport {
+  const transport = vi
+    .mocked(StreamableHTTPClientTransport)
+    .mock.instances.at(-1);
+  if (!transport) {
+    expect.fail('no StreamableHTTPClientTransport was constructed');
+  }
+  return transport;
+}
 
 describe('MCPSessionManager', () => {
   it('creates an stdio client', async () => {
@@ -296,6 +313,200 @@ describe('MCPSessionManager', () => {
       );
 
       errorSpy.mockRestore();
+    });
+  });
+
+  /**
+   * Ported from adk-python
+   * `tests/unittests/tools/mcp_tool/test_mcp_session_manager.py` (commit
+   * d232e621, "support for streamable http MCP servers for MCPToolset").
+   * The Python names are recorded here rather than copied into `it()`, so each
+   * description says what the TypeScript test asserts:
+   *
+   * - `test_init_with_streamable_http_params` -> 'forwards the configured
+   *   timeout ...' below.
+   * - `terminate_on_close is True` (test_init_with_streamable_http_*_factory)
+   *   -> 'terminates the server session before closing the client'.
+   * - `test_create_session_bounds_hung_connect` -> covered against the real SDK
+   *   by `tests/e2e/tools/mcp/mcp_streamable_http_e2e_test.ts`, because the
+   *   mocked `Client` here has no timer to exceed.
+   *
+   * `test_init_with_streamable_http_custom_httpx_factory` and
+   * `test_init_with_streamable_http_default_httpx_factory` are not portable:
+   * `httpx_client_factory` has no counterpart in the MCP TypeScript SDK, which
+   * takes a `fetch` override instead.
+   */
+  describe('connection options', () => {
+    it('forwards the configured timeout to connect as milliseconds', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        timeout: 15,
+      });
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), {
+        timeout: 15000,
+      });
+    });
+
+    it('forwards the configured timeout for a stdio session', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+        timeout: 5,
+      });
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), {
+        timeout: 5000,
+      });
+    });
+
+    it('leaves the SDK default in place when no timeout is configured', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), undefined);
+    });
+  });
+
+  describe('session termination', () => {
+    it('terminates the server session before closing the client', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      const client = await manager.createSession();
+      const terminateSession = vi.mocked(lastHttpTransport().terminateSession);
+
+      await manager.closeSession(client);
+
+      expect(terminateSession).toHaveBeenCalledTimes(1);
+      expect(client.close).toHaveBeenCalledTimes(1);
+      expect(terminateSession.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(client.close).mock.invocationCallOrder[0],
+      );
+    });
+
+    it('does not terminate the server session when terminateOnClose is false', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        terminateOnClose: false,
+      });
+
+      const client = await manager.createSession();
+      const terminateSession = vi.mocked(lastHttpTransport().terminateSession);
+
+      await manager.closeSession(client);
+
+      expect(terminateSession).not.toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('never terminates a stdio session', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      const client = await manager.createSession();
+      await manager.closeSession(client);
+
+      expect(client.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes the client and resolves when termination fails', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      const client = await manager.createSession();
+      vi.mocked(lastHttpTransport().terminateSession).mockRejectedValue(
+        new Error('server refused the delete'),
+      );
+
+      await expect(manager.closeSession(client)).resolves.toBeUndefined();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to terminate MCP session'),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('server refused the delete'),
+      );
+      expect(client.close).toHaveBeenCalledTimes(1);
+
+      warnSpy.mockRestore();
+    });
+
+    it('reports a failed termination once, not also through onerror', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      const client = await manager.createSession();
+      const transport = lastHttpTransport();
+      // The real transport calls `onerror` and then rejects.
+      vi.mocked(transport.terminateSession).mockImplementation(async () => {
+        const err = new Error('server refused the delete');
+        transport.onerror?.(err);
+        throw err;
+      });
+
+      await manager.closeSession(client);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it('drops the session from getActiveSessions even when termination fails', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      const client = await manager.createSession();
+      vi.mocked(lastHttpTransport().terminateSession).mockRejectedValue(
+        new Error('server refused the delete'),
+      );
+
+      await manager.closeSession(client);
+
+      expect(manager.getActiveSessions()).toEqual([]);
+      warnSpy.mockRestore();
+    });
+
+    it('is a no-op for a client the manager no longer owns', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      const client = await manager.createSession();
+      const terminateSession = vi.mocked(lastHttpTransport().terminateSession);
+
+      await manager.closeSession(client);
+      await manager.closeSession(client);
+
+      expect(terminateSession).toHaveBeenCalledTimes(1);
+      expect(client.close).toHaveBeenCalledTimes(1);
     });
   });
 });
