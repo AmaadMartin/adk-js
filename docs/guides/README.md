@@ -8,6 +8,16 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Artifacts
+
+Versioned binary and text storage (`Part` payloads) scoped to an individual session or shared across a user's sessions via the `user:` prefix.
+
+- [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
+
+### Auth
+
+- [Authenticated tools](auth/tool_auth/index.md) - Declaring the credential a tool needs, and the pause-for-consent handshake.
+
 ### Tools
 
 #### Retrieval

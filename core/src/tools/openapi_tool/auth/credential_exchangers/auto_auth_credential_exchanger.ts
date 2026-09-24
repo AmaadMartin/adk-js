@@ -13,9 +13,9 @@ import {
   BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../../auth/exchanger/base_credential_exchanger.js';
+import {ServiceAccountCredentialExchanger} from '../../../../auth/exchanger/service_account_exchanger.js';
 import {OAuth2CredentialExchanger} from '../../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../../utils/experimental.js';
-import {ServiceAccountCredentialExchanger} from './service_account_exchanger.js';
 
 /**
  * A map from auth credential type to the exchanger that handles it, merged

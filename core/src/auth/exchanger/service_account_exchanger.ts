@@ -5,18 +5,18 @@
  */
 
 import {GoogleAuth, JWT} from 'google-auth-library';
+import {AuthCredentialMissingError} from '../../tools/openapi_tool/auth/credential_exchangers/base_auth_credential_exchanger.js';
+import {experimental} from '../../utils/experimental.js';
 import {
   AuthCredential,
   AuthCredentialTypes,
   ServiceAccount,
-} from '../../../../auth/auth_credential.js';
-import {AuthScheme} from '../../../../auth/auth_schemes.js';
+} from '../auth_credential.js';
+import {AuthScheme} from '../auth_schemes.js';
 import {
   BaseCredentialExchanger,
   ExchangeResult,
-} from '../../../../auth/exchanger/base_credential_exchanger.js';
-import {experimental} from '../../../../utils/experimental.js';
-import {AuthCredentialMissingError} from './base_auth_credential_exchanger.js';
+} from './base_credential_exchanger.js';
 
 const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
 

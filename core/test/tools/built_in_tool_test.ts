@@ -279,6 +279,10 @@ describe('the declaration-less tool surface', () => {
   // name for them, so no function call can come back naming one.
   const NOT_MODEL_ADDRESSABLE = new Set(['ExampleTool', 'PreloadMemoryTool']);
 
+  // Abstract bases nobody registers: a concrete subclass supplies the
+  // declaration, and the base itself cannot be instantiated.
+  const ABSTRACT_TOOL_BASES = new Set(['BaseAuthenticatedTool']);
+
   type ToolClass = (abstract new (...args: never[]) => BaseTool) & {
     name: string;
   };
@@ -329,7 +333,9 @@ describe('the declaration-less tool surface', () => {
       .filter(([, ctor]) => !declaresAFunction(ctor) && !isBuiltIn(ctor))
       .map(([name]) => name);
 
-    expect(new Set(unaddressable)).toEqual(NOT_MODEL_ADDRESSABLE);
+    expect(new Set(unaddressable)).toEqual(
+      new Set([...NOT_MODEL_ADDRESSABLE, ...ABSTRACT_TOOL_BASES]),
+    );
   });
 
   it('finds the built-in tools it is meant to be checking', () => {
