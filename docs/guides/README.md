@@ -8,6 +8,12 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Evaluation
+
+- [Pre-built user personas](evaluation/pre_built_personas/index.md) - The user
+  personas ADK ships, the behaviors they are built from, and how to compose and
+  register one of your own.
+
 ### Tools
 
 #### Retrieval
