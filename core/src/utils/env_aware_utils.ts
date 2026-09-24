@@ -136,6 +136,34 @@ export function getBooleanEnvVar(envVar: string): boolean {
   return ['true', '1'].includes(envVarValue);
 }
 
+/**
+ * Gets the numeric value of the given environment variable.
+ *
+ * A value that is not a finite number is logged and replaced by the default.
+ * A blank value counts as invalid: `Number('')` and `Number('  ')` are both
+ * `0`, which would silently pass as a configured zero.
+ *
+ * @param envVar The environment variable to get the value of.
+ * @param defaultValue The value to use when the variable is unset or unusable.
+ * @return The numeric value of the environment variable.
+ */
+export function getNumberEnvVar(envVar: string, defaultValue: number): number {
+  const raw = process.env[envVar];
+  if (raw === undefined) {
+    return defaultValue;
+  }
+
+  const parsed = raw.trim() === '' ? Number.NaN : Number(raw);
+  if (!Number.isFinite(parsed)) {
+    logger.warn(
+      `Found invalid value for ${envVar}=${raw}, using default ${defaultValue}`,
+    );
+    return defaultValue;
+  }
+
+  return parsed;
+}
+
 let warnedDeprecatedEnterpriseModeEnvVar = false;
 
 function warnDeprecatedEnterpriseModeEnvVar(message: string): void {
