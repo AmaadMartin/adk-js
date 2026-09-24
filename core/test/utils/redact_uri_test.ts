@@ -7,6 +7,7 @@
 import {describe, expect, it, vi} from 'vitest';
 import {getArtifactServiceFromUri} from '../../src/artifacts/registry.js';
 import {parseAuthorizationCode} from '../../src/auth/oauth2/oauth2_utils.js';
+import {getMemoryServiceFromUri} from '../../src/memory/registry.js';
 import {getConnectionOptionsFromUri} from '../../src/sessions/db/operations.js';
 import {getSessionServiceFromUri} from '../../src/sessions/registry.js';
 import {logger} from '../../src/utils/logger.js';
@@ -111,6 +112,15 @@ describe('connection-URI errors do not leak the password', () => {
     ).toThrow(/s3:\/\/admin:\*\*\*@bucket\/prefix/);
     expect(() =>
       getArtifactServiceFromUri('s3://admin:hunter2@bucket/prefix'),
+    ).not.toThrow(/hunter2/);
+  });
+
+  it('getMemoryServiceFromUri redacts the password in its error', () => {
+    expect(() => getMemoryServiceFromUri('mem://admin:hunter2@host/x')).toThrow(
+      /mem:\/\/admin:\*\*\*@host\/x/,
+    );
+    expect(() =>
+      getMemoryServiceFromUri('mem://admin:hunter2@host/x'),
     ).not.toThrow(/hunter2/);
   });
 

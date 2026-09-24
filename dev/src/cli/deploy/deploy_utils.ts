@@ -48,6 +48,7 @@ export interface CreateDockerFileContentOptions {
   allowOrigins?: string;
   sessionServiceUri?: string;
   artifactServiceUri?: string;
+  memoryServiceUri?: string;
   otelToCloud?: boolean;
   a2a?: boolean;
 }
@@ -81,13 +82,13 @@ function assertSafeDockerfileToken(value: string, label: string): void {
   }
 }
 
-// logLevel, allowOrigins, sessionServiceUri and artifactServiceUri are
-// free-form (a service URI can carry credentials, allowOrigins is a
-// comma-separated list) so they can't be restricted to the plain-identifier
-// token above. They only reach the Dockerfile's CMD line, so a newline in
-// any of them still breaks out of that instruction the same way appName
-// does, and once inside the CMD line they're read by /bin/sh at container
-// start, so shell metacharacters must be neutralized too.
+// logLevel, allowOrigins, sessionServiceUri, artifactServiceUri and
+// memoryServiceUri are free-form (a service URI can carry credentials,
+// allowOrigins is a comma-separated list) so they can't be restricted to the
+// plain-identifier token above. They only reach the Dockerfile's CMD line, so a
+// newline in any of them still breaks out of that instruction the same way
+// appName does, and once inside the CMD line they're read by /bin/sh at
+// container start, so shell metacharacters must be neutralized too.
 function assertNoDockerfileNewline(value: string, label: string): void {
   if (/[\r\n]/.test(value)) {
     throw new Error(
@@ -137,6 +138,13 @@ export function createDockerFileContent(
     assertNoDockerfileNewline(options.sessionServiceUri, 'sessionServiceUri');
     adkServerOptions.push(
       `--session_service_uri=${shellQuote(options.sessionServiceUri)}`,
+    );
+  }
+
+  if (options.memoryServiceUri) {
+    assertNoDockerfileNewline(options.memoryServiceUri, 'memoryServiceUri');
+    adkServerOptions.push(
+      `--memory_service_uri=${shellQuote(options.memoryServiceUri)}`,
     );
   }
 
