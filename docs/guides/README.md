@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Models
+
+- [OpenAI Responses models](models/openai_responses/index.md) - Driving a GPT model, Azure OpenAI, or an OpenAI-compatible host through the Responses API.
+
 ### Tools
 
 #### Retrieval
