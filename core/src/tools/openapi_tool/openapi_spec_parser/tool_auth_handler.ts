@@ -16,6 +16,7 @@ import {
   BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../auth/exchanger/base_credential_exchanger.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {stableHash} from '../../../utils/hash_utils.js';
 import {logger} from '../../../utils/logger.js';
@@ -172,10 +173,27 @@ export class ToolAuthHandler {
     );
 
     if (existingCredential) {
+      // Returns the same object unless it actually obtained new tokens: a
+      // non-OAuth2 credential, a token that is still valid and a failed
+      // refresh all come back untouched.
+      const credential = await new OAuth2CredentialRefresher().refresh(
+        existingCredential,
+        this.authScheme,
+      );
+      if (credential !== existingCredential) {
+        this.credentialStore.storeCredential(
+          this.credentialStore.getCredentialKey(
+            this.authScheme,
+            this.authCredential,
+          ),
+          credential,
+        );
+      }
+
       return {
         state: 'done',
         authScheme: this.authScheme,
-        authCredential: existingCredential,
+        authCredential: credential,
       };
     }
 
