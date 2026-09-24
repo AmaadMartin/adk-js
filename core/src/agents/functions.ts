@@ -30,6 +30,11 @@ import {
 } from './framework_function_calls.js';
 
 import {
+  createSkillToolScope,
+  dispatchSkillTelemetry,
+  withSkillToolScope,
+} from '../telemetry/_skill_instrumentation.js';
+import {
   traceMergedToolCalls,
   tracer,
   traceToolCall,
@@ -200,22 +205,28 @@ async function callToolAsync(
   toolContext: Context,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
+  // Published so a skill tool running underneath can report telemetry back to
+  // this span without reaching for the ambient span itself.
+  const skillToolScope = createSkillToolScope();
   return tracer.startActiveSpan(`execute_tool ${tool.name}`, async (span) => {
     try {
       logger.debug(`callToolAsync ${tool.name}`);
-      const result = await tool.runAsync({args, toolContext});
-      traceToolCall({
-        tool,
-        args,
-        functionResponseEvent: buildResponseEvent(
+      return await withSkillToolScope(skillToolScope, async () => {
+        const result = await tool.runAsync({args, toolContext});
+        traceToolCall({
           tool,
-          result,
-          toolContext,
-          toolContext.invocationContext,
-        ),
+          args,
+          functionResponseEvent: buildResponseEvent(
+            tool,
+            result,
+            toolContext,
+            toolContext.invocationContext,
+          ),
+        });
+        return result;
       });
-      return result;
     } finally {
+      dispatchSkillTelemetry(span, skillToolScope);
       span.end();
     }
   });
