@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {createEvent} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {isSegmentPrefix} from '../../src/utils/branch_trie.js';
+import {isEventInBranch, isSegmentPrefix} from '../../src/utils/branch_trie.js';
 
 describe('branch_trie', () => {
   describe('isSegmentPrefix', () => {
@@ -44,5 +45,30 @@ describe('branch_trie', () => {
       expect(isSegmentPrefix('agent_1.agent_2', 'agent_1.agent_3')).toBe(false);
       expect(isSegmentPrefix('agent_1', 'agent_1.agent_2')).toBe(false);
     });
+  });
+});
+
+describe('isEventInBranch', () => {
+  it('accepts a branchless event from any branch', () => {
+    const event = createEvent({author: 'a'});
+
+    expect(isEventInBranch('wf.child', event)).toBe(true);
+    expect(isEventInBranch(undefined, event)).toBe(true);
+  });
+
+  it('accepts an event on the current branch', () => {
+    const event = createEvent({author: 'a', branch: 'wf.child'});
+
+    expect(isEventInBranch('wf.child', event)).toBe(true);
+  });
+
+  it('rejects an event on another branch, ancestors included', () => {
+    const event = createEvent({author: 'a', branch: 'wf.other'});
+
+    expect(isEventInBranch('wf.child', event)).toBe(false);
+    expect(isEventInBranch(undefined, event)).toBe(false);
+    expect(
+      isEventInBranch('wf', createEvent({author: 'a', branch: 'wf.x'})),
+    ).toBe(false);
   });
 });

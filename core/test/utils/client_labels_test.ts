@@ -145,4 +145,43 @@ describe('client_labels', () => {
       }).toThrow('Client label must be a non-empty string.');
     });
   });
+
+  describe('frameworkLabel', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      process.env = {...originalEnv};
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+    });
+
+    it('appends the label to the google-adk token as build metadata', () => {
+      delete process.env['GOOGLE_CLOUD_AGENT_ENGINE_ID'];
+
+      const [frameworkToken] = getClientLabels('managed_agent');
+
+      expect(frameworkToken).toMatch(/^google-adk\/[^+]+\+managed_agent$/);
+    });
+
+    it('takes precedence over the Agent Engine suffix', () => {
+      process.env['GOOGLE_CLOUD_AGENT_ENGINE_ID'] = 'my-engine-id';
+
+      const [withLabel] = getClientLabels('managed_agent');
+      const [withoutLabel] = getClientLabels();
+
+      expect(withLabel).toContain('+managed_agent');
+      expect(withLabel).not.toContain('remote_reasoning_engine');
+      expect(withoutLabel).toContain('+remote_reasoning_engine');
+    });
+
+    it('leaves the token bare when no label is given', () => {
+      delete process.env['GOOGLE_CLOUD_AGENT_ENGINE_ID'];
+
+      const [frameworkToken] = getClientLabels();
+
+      expect(frameworkToken).not.toContain('+');
+    });
+  });
 });

@@ -159,3 +159,31 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/** The status and message a backend reported on a failed call. */
+export interface ApiFailure {
+  /** The HTTP status code the backend returned. */
+  status: number;
+  /** The message the backend returned. */
+  message: string;
+}
+
+/**
+ * Reads the backend status and message off a failed API call, or returns
+ * `undefined` when the value carries neither.
+ *
+ * Matched structurally rather than with `instanceof ApiError`: a program can
+ * resolve two copies of `@google/genai`, and an error thrown by one fails an
+ * `instanceof` check against the class of the other.
+ *
+ * @param err The thrown or rejected value to inspect.
+ * @return The reported status and message, or undefined.
+ */
+export function asApiFailure(err: unknown): ApiFailure | undefined {
+  const record = asRecord(err);
+  const status = record?.['status'];
+  if (typeof status !== 'number') {
+    return undefined;
+  }
+  return {status, message: baseMessage(err)};
+}

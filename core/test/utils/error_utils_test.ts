@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {asApiFailure, formatError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,22 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('asApiFailure', () => {
+  it('reads the status and message of an API error', () => {
+    const err = Object.assign(new Error('400 Quota exceeded.'), {status: 400});
+
+    expect(asApiFailure(err)).toEqual({
+      status: 400,
+      message: '400 Quota exceeded.',
+    });
+  });
+
+  it('returns undefined when the value carries no numeric status', () => {
+    expect(asApiFailure(new Error('boom'))).toBeUndefined();
+    expect(asApiFailure({status: '400'})).toBeUndefined();
+    expect(asApiFailure(null)).toBeUndefined();
   });
 });
