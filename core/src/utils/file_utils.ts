@@ -9,6 +9,27 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
+ * Resolves every symlink in `target` that exists, like Python's non-strict
+ * `Path.resolve()`.
+ *
+ * A component that does not exist yet cannot be resolved, so the deepest
+ * existing ancestor is resolved and the remainder is appended lexically. Use
+ * it to compare two paths that may be reached through a symlink when one of
+ * them is a file about to be created.
+ */
+export async function realpathNonStrict(target: string): Promise<string> {
+  try {
+    return await fs.realpath(target);
+  } catch {
+    const parent = path.dirname(target);
+    if (parent === target) {
+      return target;
+    }
+    return path.join(await realpathNonStrict(parent), path.basename(target));
+  }
+}
+
+/**
  * Reports whether resolvedPath is resolvedBaseDir itself, or a path nested
  * inside it.
  *
