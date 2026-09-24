@@ -241,6 +241,38 @@ export {BasePlanner} from './planners/base_planner.js';
 export {BuiltInPlanner} from './planners/built_in_planner.js';
 export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
 export {
+  AgentOptimizer,
+  isAgentOptimizer,
+} from './optimization/agent_optimizer.js';
+export type {OptimizeParams} from './optimization/agent_optimizer.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
+export type {
+  EvaluationBatch,
+  GepaAdapter,
+  GepaEngine,
+  GepaOptimizeParams,
+  GepaRunResult,
+  ReflectionLm,
+} from './optimization/gepa_engine.js';
+export {
+  AGENT_PROMPT_NAME,
+  AgentGepaAdapter,
+  GEPARootAgentPromptOptimizer,
+} from './optimization/gepa_root_agent_prompt_optimizer.js';
+export type {
+  AgentGepaAdapterParams,
+  GEPARootAgentPromptOptimizerConfig,
+  GEPARootAgentPromptOptimizerResult,
+} from './optimization/gepa_root_agent_prompt_optimizer.js';
+export {requireStaticInstruction} from './optimization/gepa_utils.js';
+export {Sampler, isSampler} from './optimization/sampler.js';
+export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
+export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
   ScopedFailureTracker,
