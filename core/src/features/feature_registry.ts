@@ -11,6 +11,7 @@ import {logger} from '../utils/logger.js';
  * Feature names.
  */
 export enum FeatureName {
+  ENVIRONMENT_SIMULATION = 'ENVIRONMENT_SIMULATION',
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
 }
 
@@ -33,6 +34,10 @@ export interface FeatureConfig {
 
 // Central registry: FeatureName -> FeatureConfig
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
+  [FeatureName.ENVIRONMENT_SIMULATION]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
@@ -137,6 +142,21 @@ export function isFeatureEnabled(featureName: FeatureName): boolean {
     emitNonStableWarningOnce(featureName, config.stage);
   }
   return config.defaultOn;
+}
+
+/**
+ * Throws unless a feature is enabled at runtime.
+ *
+ * A feature whose entry point is reachable without its own factory needs this
+ * at that entry point, so the flag cannot be walked around.
+ *
+ * @param featureName The feature name.
+ * @throws {Error} When the feature is disabled.
+ */
+export function assertFeatureEnabled(featureName: FeatureName): void {
+  if (!isFeatureEnabled(featureName)) {
+    throw new Error(`Feature ${featureName} is not enabled.`);
+  }
 }
 
 function emitNonStableWarningOnce(
