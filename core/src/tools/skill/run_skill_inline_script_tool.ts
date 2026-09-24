@@ -11,6 +11,7 @@ import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.j
 import {experimental} from '../../utils/experimental.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {RUN_SKILL_INLINE_SCRIPT_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 /**
@@ -37,9 +38,11 @@ const REQUIRE_CONFIRMATION_MESSAGE =
 
 @experimental
 export class RunSkillInlineScriptTool extends BaseTool {
+  static readonly TOOL_NAME = RUN_SKILL_INLINE_SCRIPT_TOOL_NAME;
+
   constructor(private toolset: SkillToolset) {
     super({
-      name: 'run_skill_inline_script',
+      name: toolset.toolName(RunSkillInlineScriptTool.TOOL_NAME),
       description:
         'Executes an inline script provided directly in the request.',
     });
