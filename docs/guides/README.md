@@ -8,6 +8,12 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Memory
+
+Cross-session memory ingestion (`addSessionToMemory`) and retrieval (`searchMemory`) across in-memory keyword stores, Vertex AI RAG Engine corpora, and Vertex AI Agent Engine Memory Bank.
+
+- [Memory](memory/index.md) - `BaseMemoryService`, `InMemoryMemoryService`, `VertexAiRagMemoryService`, `VertexAiMemoryBankService`, and the `LOAD_MEMORY` / `PRELOAD_MEMORY` tools.
+
 ### Tools
 
 #### Retrieval
