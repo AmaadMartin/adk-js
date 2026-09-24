@@ -8,6 +8,13 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Plugins
+
+- [Plugin close lifecycle](plugins/plugin_close_lifecycle/index.md) - Releasing
+  the resources a plugin holds, and the timeout that bounds each shutdown.
+- [Run error notifications](plugins/run_error_notifications/index.md) - Telling
+  every plugin that an invocation failed, without letting one swallow the error.
+
 ### Tools
 
 #### Retrieval

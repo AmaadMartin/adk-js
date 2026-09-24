@@ -13,11 +13,22 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
+import {resolvesWithin} from '../utils/promise_utils.js';
 import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
 
 import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
+
+/**
+ * How long each plugin gets to finish its `close()`, in seconds, when the
+ * manager is constructed without an explicit timeout.
+ *
+ * Matches `google/adk-python` `PluginManager.__init__`, whose `close_timeout`
+ * defaults to `5.0`.
+ */
+export const DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS = 5;
 
 /**
  * Manages the registration and execution of plugins.
@@ -35,6 +46,7 @@ import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
  */
 export class PluginManager {
   private readonly plugins: Set<BasePlugin> = new Set();
+  private skipClosingPlugins = false;
 
   /** Whether any plugin is registered. */
   get hasPlugins(): boolean {
@@ -46,12 +58,69 @@ export class PluginManager {
    *
    * @param plugins An optional list of plugins to register upon
    *     initialization.
+   * @param closeTimeoutSeconds How long each plugin gets to finish its
+   *     `close()`, in seconds. A value of zero or less waits indefinitely.
    */
-  constructor(plugins?: BasePlugin[]) {
+  constructor(
+    plugins?: BasePlugin[],
+    private readonly closeTimeoutSeconds = DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS,
+  ) {
     if (plugins) {
       for (const plugin of plugins) {
         this.registerPlugin(plugin);
       }
+    }
+  }
+
+  /**
+   * Controls whether {@link close} tears the registered plugins down.
+   *
+   * Set this when another component owns the plugins, such as a parent
+   * `Runner` whose plugin list this manager borrows. The last call wins, so
+   * passing `false` restores normal closing.
+   *
+   * @param value `true` to skip closing the plugins, `false` to close them.
+   */
+  setSkipClosingPlugins(value: boolean): void {
+    this.skipClosingPlugins = value;
+  }
+
+  /**
+   * Closes every registered plugin, in registration order.
+   *
+   * A plugin that throws or exceeds `closeTimeoutSeconds` does not stop the
+   * remaining plugins from closing. Closing is sequential rather than
+   * concurrent because a plugin that owns a transport, an MCP session for
+   * example, must not be torn down while its peers are still using it.
+   *
+   * Does nothing when {@link setSkipClosingPlugins} was set: no plugin is
+   * closed and no close timeout starts.
+   *
+   * @throws An `AggregateError` naming every plugin that failed to close, once
+   *     all of them have been attempted.
+   */
+  async close(): Promise<void> {
+    if (this.skipClosingPlugins) {
+      logger.debug(
+        'Skipping plugin close; plugins are owned by another component.',
+      );
+      return;
+    }
+    const failures: Array<{name: string; error: Error}> = [];
+    for (const plugin of this.plugins) {
+      const error = await closePlugin(plugin, this.closeTimeoutSeconds);
+      if (error) {
+        failures.push({name: plugin.name, error});
+      }
+    }
+    if (failures.length > 0) {
+      const reasons = failures
+        .map((f) => `'${f.name}': ${f.error.message}`)
+        .join(', ');
+      throw new AggregateError(
+        failures.map((f) => f.error),
+        `Failed to close plugins: ${reasons}`,
+      );
     }
   }
 
@@ -116,7 +185,7 @@ export class PluginManager {
       } catch (e) {
         const errorMessage = `Error in plugin '${plugin.name}' during '${callbackName}' callback: ${e}`;
         logger.error(errorMessage);
-        throw new Error(errorMessage);
+        throw new Error(errorMessage, {cause: e});
       }
     }
     return undefined;
@@ -436,5 +505,76 @@ export class PluginManager {
         plugin.onToolErrorCallback({tool, toolArgs, toolContext, error}),
       'onToolErrorCallback',
     )) as Record<string, unknown> | undefined;
+  }
+
+  /**
+   * Runs the `onRunErrorCallback` for all plugins.
+   */
+  async runOnRunErrorCallback({
+    invocationContext,
+    error,
+  }: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    await this.runNotificationCallbacks(
+      (plugin: BasePlugin) =>
+        plugin.onRunErrorCallback({invocationContext, error}),
+      'onRunErrorCallback',
+    );
+  }
+
+  /**
+   * Runs a notification-only callback for every registered plugin.
+   *
+   * Unlike {@link runCallbacks} this method never exits early and never
+   * re-throws: a plugin that fails is logged and the next one still runs. A
+   * notification reports an error that already happened, so a failure here must
+   * not replace the error the caller is about to propagate.
+   *
+   * @param callback A closure containing the callback method to run on each
+   *     plugin.
+   * @param callbackName The name of the callback, used for logging.
+   */
+  private async runNotificationCallbacks(
+    callback: (plugin: BasePlugin) => Promise<void>,
+    callbackName: string,
+  ): Promise<void> {
+    for (const plugin of this.plugins) {
+      try {
+        await callback(plugin);
+      } catch (e: unknown) {
+        logger.error(
+          `Error in plugin '${plugin.name}' during '${callbackName}' callback: ${formatError(e)}`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Closes one plugin, giving it `timeoutSeconds` to finish.
+ *
+ * @param plugin The plugin to close.
+ * @param timeoutSeconds How long to wait, in seconds. Zero or less waits
+ *     indefinitely.
+ * @returns The reason the plugin failed to close, or `undefined` when it
+ *     closed cleanly.
+ */
+async function closePlugin(
+  plugin: BasePlugin,
+  timeoutSeconds: number,
+): Promise<Error | undefined> {
+  try {
+    if (await resolvesWithin(plugin.close(), timeoutSeconds)) {
+      return undefined;
+    }
+    logger.warn(`Timed out closing plugin '${plugin.name}'.`);
+    return new Error(
+      `Closing plugin '${plugin.name}' timed out after ${timeoutSeconds}s.`,
+    );
+  } catch (e: unknown) {
+    logger.error(`Error closing plugin '${plugin.name}'.`, e);
+    return new Error(formatError(e), {cause: e});
   }
 }
