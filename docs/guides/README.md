@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Telemetry
+
+- [SqliteSpanExporter](telemetry/sqlite_span_exporter/index.md) - Persisting OpenTelemetry spans to a local SQLite file and reading them back by session.
+
 ### Tools
 
 #### Retrieval
