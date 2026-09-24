@@ -6,6 +6,7 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import path from 'node:path';
+import {getAsset, getReference, getScript} from '../../skills/skill.js';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {
@@ -93,17 +94,16 @@ export class LoadSkillResourceTool extends BaseTool {
     }
 
     let content: string | Buffer | undefined;
-    const skillResources = skill.resources || {};
 
     if (resourcePath.startsWith('references/')) {
       const refName = resourcePath.substring('references/'.length);
-      content = skillResources.references?.[refName];
+      content = getReference(skill.resources, refName);
     } else if (resourcePath.startsWith('assets/')) {
       const assetName = resourcePath.substring('assets/'.length);
-      content = skillResources.assets?.[assetName];
+      content = getAsset(skill.resources, assetName);
     } else if (resourcePath.startsWith('scripts/')) {
       const scriptName = resourcePath.substring('scripts/'.length);
-      const script = skillResources.scripts?.[scriptName];
+      const script = getScript(skill.resources, scriptName);
       if (script) {
         content = script.src;
       }
@@ -169,17 +169,18 @@ export class LoadSkillResourceTool extends BaseTool {
             continue;
           }
           if (!skill) continue;
-          const skillResources = skill.resources || {};
 
           let content: string | Buffer | undefined;
           if (resourcePath.startsWith('references/')) {
-            content =
-              skillResources.references?.[
-                resourcePath.substring('references/'.length)
-              ];
+            content = getReference(
+              skill.resources,
+              resourcePath.substring('references/'.length),
+            );
           } else if (resourcePath.startsWith('assets/')) {
-            content =
-              skillResources.assets?.[resourcePath.substring('assets/'.length)];
+            content = getAsset(
+              skill.resources,
+              resourcePath.substring('assets/'.length),
+            );
           }
 
           if (Buffer.isBuffer(content)) {

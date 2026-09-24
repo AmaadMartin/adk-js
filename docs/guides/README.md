@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Skills
+
+- [Frontmatter, Resources and Skill](skills/skill_model/index.md) - How a SKILL.md directory becomes a Skill, the name rules, and the resource accessors.
+
 ### Tools
 
 #### Retrieval

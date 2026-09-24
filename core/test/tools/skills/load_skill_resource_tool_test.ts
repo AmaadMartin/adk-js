@@ -71,6 +71,27 @@ describe('LoadSkillResourceTool', () => {
     });
   });
 
+  it.each([
+    'references/constructor',
+    'references/__proto__',
+    'assets/toString',
+    'scripts/constructor',
+  ])(
+    'reports %s as not found rather than an inherited member',
+    async (resourcePath) => {
+      const toolset = new SkillToolset([mockSkill]);
+      const tool = new LoadSkillResourceTool(toolset);
+      const result = await tool.runAsync({
+        args: {skill_name: 'test-skill', path: resourcePath},
+        toolContext: createMockContext(),
+      });
+      expect(result).toEqual({
+        error: `Resource '${resourcePath}' not found in skill 'test-skill'.`,
+        error_code: 'RESOURCE_NOT_FOUND',
+      });
+    },
+  );
+
   it('handles binary files by returning status', async () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillResourceTool(toolset);
@@ -199,6 +220,56 @@ describe('LoadSkillResourceTool', () => {
       Buffer.from('fake image data').toString('base64'),
     );
     expect(llmRequest.contents[1]?.parts?.[1].inlineData?.mimeType).toBe(
+      'image/png',
+    );
+  });
+
+  it('injects a binary reference in processLlmRequest', async () => {
+    const skillWithBinaryReference: Skill = {
+      frontmatter: {name: 'test-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        references: {
+          'diagram.png': Buffer.from('fake diagram data'),
+        },
+      },
+    };
+    const toolset = new SkillToolset([skillWithBinaryReference]);
+    const tool = new LoadSkillResourceTool(toolset);
+
+    const llmRequest: LlmRequest = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'load_skill_resource',
+                response: {
+                  skill_name: 'test-skill',
+                  path: 'references/diagram.png',
+                  status:
+                    'Binary file detected. The content has been injected into the conversation history for you to analyze.',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await tool.processLlmRequest({
+      toolContext: createMockContext(),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents.length).toBe(2);
+    expect(llmRequest.contents[1].parts?.[1]?.inlineData?.data).toBe(
+      Buffer.from('fake diagram data').toString('base64'),
+    );
+    expect(llmRequest.contents[1].parts?.[1]?.inlineData?.mimeType).toBe(
       'image/png',
     );
   });
