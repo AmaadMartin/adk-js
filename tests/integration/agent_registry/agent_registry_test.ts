@@ -11,6 +11,7 @@ import {
   GCP_MCP_SERVER_DESTINATION_ID,
   LlmAgent,
   ReadonlyContext,
+  RemoteA2AAgent,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -167,5 +168,56 @@ describe('AgentRegistry Integration E2E', () => {
     expect(finalEvent.content?.parts?.[0]?.text).toBe(
       'Retrieved GCP billing info: $0.00',
     );
+  });
+
+  it('hands an A2A agent the auth provider its registry binding names', async () => {
+    const registryFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.includes('agents/support')) {
+        return Response.json({
+          displayName: 'Support Agent',
+          description: 'Answers support questions',
+          version: '1.0',
+          agentId: 'urn:agent:gcp:support-agent',
+          protocols: [
+            {
+              type: 'A2A_AGENT',
+              interfaces: [
+                {
+                  url: 'https://support-agent.example.com',
+                  protocolBinding: 'HTTP_JSON',
+                },
+              ],
+            },
+          ],
+        });
+      }
+      if (url.includes('bindings')) {
+        return Response.json({
+          bindings: [
+            {
+              target: {identifier: 'urn:agent:gcp:support-agent'},
+              authProviderBinding: {
+                authProvider: 'projects/p/locations/l/authProviders/ap-2',
+              },
+            },
+          ],
+        });
+      }
+      return new Response(null, {status: 404});
+    });
+    globalThis.fetch = registryFetch;
+
+    const agent = await registry.getRemoteA2AAgent('agents/support', {
+      continueUri: 'https://app.example.com/oauth/continue',
+    });
+
+    expect(agent).toBeInstanceOf(RemoteA2AAgent);
+    expect(agent.name).toBe('Support_Agent');
+    expect(agent.authScheme).toEqual({
+      type: 'gcpAuthProviderScheme',
+      name: 'projects/p/locations/l/authProviders/ap-2',
+      continueUri: 'https://app.example.com/oauth/continue',
+    });
   });
 });
