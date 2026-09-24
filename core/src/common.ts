@@ -96,7 +96,7 @@ export type {
   SessionLoadArtifactRequest,
   SessionSaveArtifactRequest,
 } from './artifacts/session_artifact_service.js';
-export {AuthCredentialTypes} from './auth/auth_credential.js';
+export {AuthCredentialTypes, isAuthCredential} from './auth/auth_credential.js';
 export type {
   AuthCredential,
   HttpAuth,
@@ -237,6 +237,9 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export {BasePlanner} from './planners/base_planner.js';
+export {BuiltInPlanner} from './planners/built_in_planner.js';
+export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
@@ -368,7 +371,24 @@ export type {
   VertexAiSearchToolParams,
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
+export {WebMCPTool} from './tools/webmcp/webmcp_tool.js';
+export type {WebMCPToolParams} from './tools/webmcp/webmcp_tool.js';
+export {WebMCPToolset} from './tools/webmcp/webmcp_toolset.js';
+export type {WebMCPToolsetOptions} from './tools/webmcp/webmcp_toolset.js';
+export {
+  getModelContext,
+  isWebMCPSupported,
+} from './tools/webmcp/webmcp_types.js';
+export type {
+  WebMCPDocument,
+  WebMCPExecuteToolOptions,
+  WebMCPGetToolsOptions,
+  WebMCPModelContext,
+  WebMCPRegisteredTool,
+  WebMCPToolAnnotations,
+} from './tools/webmcp/webmcp_types.js';
 export {AsyncQueue} from './utils/async_queue.js';
+export {renameReservedKeywords, toSnakeCaseName} from './utils/case_utils.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {
   LogLevel,
@@ -380,6 +400,7 @@ export {
 export type {Logger} from './utils/logger.js';
 export {
   isGemini2OrAbove,
+  isGemini35LiveTranslate,
   isGemini3xFlashLive,
   isGemini3xLive,
 } from './utils/model_name.js';
