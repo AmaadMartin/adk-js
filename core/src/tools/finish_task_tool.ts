@@ -12,6 +12,7 @@ import {
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from './base_tool.js';
+import {DEFAULT_TASK_OUTPUT_SCHEMA} from './task_models.js';
 
 /** The name of the finish_task tool. */
 export const FINISH_TASK_TOOL_NAME = 'finish_task';
@@ -22,18 +23,6 @@ export const FINISH_TASK_TOOL_NAME = 'finish_task';
  * validation-error retry signal.
  */
 export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
-
-/** The default output schema when the task agent declares none. */
-const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    result: {
-      type: Type.STRING,
-      description: 'A brief summary of what the agent accomplished.',
-    },
-  },
-  required: ['result'],
-};
 
 /**
  * Tool for signaling that a task-mode {@link LlmAgent} has completed its task.
