@@ -10,6 +10,8 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ### Tools
 
+- [WriteFileTool](tools/environment_write_file/index.md) - Letting an agent create or overwrite a file in a `BaseEnvironment` working directory.
+
 #### Retrieval
 
 Client-side retrieval tools. The agent calls a one-argument search function, your code answers it, and you choose the store, the chunking and the ranking. Start with `BaseRetrievalTool` if you are deciding between these and server-side retrieval.
