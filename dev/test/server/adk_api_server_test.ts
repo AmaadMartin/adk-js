@@ -983,6 +983,24 @@ describe('AdkWebServer', () => {
       expect(response.status).toBe(302);
       await debugServer.stop();
     });
+
+    it('should redirect / to /dev-ui/ with a trailing slash', async () => {
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        serveDebugUI: true,
+      });
+      await debugServer.start();
+
+      const response = await fetch(`${debugServer.url}/`, {
+        redirect: 'manual',
+      });
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('/dev-ui/');
+      await debugServer.stop();
+    });
   });
 
   describe('Debug Trace', () => {
