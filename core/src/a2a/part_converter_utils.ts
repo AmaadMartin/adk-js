@@ -25,6 +25,25 @@ import {
 import {A2AMetadataKeys} from './metadata_converter_utils.js';
 
 /**
+ * Converts one inbound A2A part into a GenAI part.
+ *
+ * Mirrors `A2APartToGenAIPartConverter` in
+ * `google/adk/a2a/converters/part_converter.py`.
+ */
+export type A2APartToGenAIPartConverter = (a2aPart: A2APart) => GenAIPart;
+
+/**
+ * Converts one outbound GenAI part into an A2A part.
+ *
+ * Mirrors `GenAIPartToA2APartConverter` in
+ * `google/adk/a2a/converters/part_converter.py`.
+ */
+export type GenAIPartToA2APartConverter = (
+  part: GenAIPart,
+  longRunningToolIDs?: string[],
+) => A2APart;
+
+/**
  * The types of data parts.
  */
 enum DataPartType {
@@ -195,10 +214,14 @@ export function toA2ADataPart(
  * Converts an A2A Message to a GenAI Content object.
  *
  * @param a2aMessage - The A2A message to convert.
+ * @param a2aPartConverter - Converts one part. Defaults to `toGenAIPart`.
  * @returns A GenAI user or model content object based on the message role.
  */
-export function toGenAIContent(a2aMessage: Message): GenAIContent {
-  const parts = toGenAIParts(a2aMessage.parts);
+export function toGenAIContent(
+  a2aMessage: Message,
+  a2aPartConverter: A2APartToGenAIPartConverter = toGenAIPart,
+): GenAIContent {
+  const parts = toGenAIParts(a2aMessage.parts, a2aPartConverter);
 
   return a2aMessage.role === 'user'
     ? createUserContent(parts)
@@ -209,10 +232,14 @@ export function toGenAIContent(a2aMessage: Message): GenAIContent {
  * Converts an array of A2A Parts to GenAI Parts.
  *
  * @param a2aParts - The A2A parts to convert.
+ * @param a2aPartConverter - Converts one part. Defaults to `toGenAIPart`.
  * @returns An array of GenAI parts.
  */
-export function toGenAIParts(a2aParts: A2APart[]): GenAIPart[] {
-  return a2aParts.map((a2aPart) => toGenAIPart(a2aPart));
+export function toGenAIParts(
+  a2aParts: A2APart[],
+  a2aPartConverter: A2APartToGenAIPartConverter = toGenAIPart,
+): GenAIPart[] {
+  return a2aParts.map((a2aPart) => a2aPartConverter(a2aPart));
 }
 
 /**
