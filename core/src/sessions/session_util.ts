@@ -1,0 +1,120 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {toJsonSafe} from '../utils/json_utils.js';
+import {logger} from '../utils/logger.js';
+import {
+  ListSessionsRequest,
+  ListSessionsResponse,
+} from './base_session_service.js';
+import {Session} from './session.js';
+import {State} from './state.js';
+
+/**
+ * A state map split by the scope its keys belong to.
+ *
+ * The keys in `app` and `user` have lost their `app:` and `user:` prefix: that
+ * is the form a session service writes to its shared app-state and user-state
+ * records.
+ */
+export interface StateDelta {
+  /** Values scoped to the whole application. */
+  app: Record<string, unknown>;
+  /** Values scoped to one user of the application. */
+  user: Record<string, unknown>;
+  /** Values scoped to this session alone. */
+  session: Record<string, unknown>;
+}
+
+/**
+ * Splits a state map into its app, user and session scopes.
+ *
+ * `temp:` keys are dropped: they live only for the current invocation and no
+ * session service persists them.
+ */
+export function extractStateDelta(
+  state: Record<string, unknown> = {},
+): StateDelta {
+  // Null-prototype: a `__proto__` key copied into a plain object literal
+  // invokes the inherited setter, which re-parents the object instead of
+  // storing the entry. See `trimTempState` in `base_session_service.ts`.
+  const delta: StateDelta = {
+    app: Object.create(null),
+    user: Object.create(null),
+    session: Object.create(null),
+  };
+  for (const [key, value] of Object.entries(state)) {
+    if (key.startsWith(State.APP_PREFIX)) {
+      delta.app[key.slice(State.APP_PREFIX.length)] = value;
+    } else if (key.startsWith(State.USER_PREFIX)) {
+      delta.user[key.slice(State.USER_PREFIX.length)] = value;
+    } else if (!key.startsWith(State.TEMP_PREFIX)) {
+      delta.session[key] = value;
+    }
+  }
+  return delta;
+}
+
+/**
+ * Coerces a state map into a form that survives a JSON write.
+ *
+ * A session service that persists state as JSON must use this rather than
+ * writing the raw map: a value JSON cannot represent is replaced with its
+ * string form instead of being dropped or failing the whole write. One
+ * warning is logged when a replacement was needed, so a lossy write is
+ * diagnosable.
+ */
+export function makeJsonSafeState(
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  const {record, lossy} = toJsonSafe(state);
+  if (lossy) {
+    logger.warn(
+      'Session state holds values that JSON cannot represent. They are ' +
+        'persisted as their string form, so reading the session back returns ' +
+        'the string rather than the original value.',
+    );
+  }
+  return record;
+}
+
+/**
+ * Applies a list request's pagination to sessions the caller has already
+ * ordered.
+ *
+ * A backend that cannot page in the store — an in-memory map, a Firestore
+ * collection-group query with no cheap count — reads the whole match set and
+ * slices it here. When no `limit` is asked for, the response reports one page
+ * holding everything, or no pages at all when there is nothing to report.
+ */
+export function paginateSessions(
+  sessions: Session[],
+  {limit, offset, page}: ListSessionsRequest,
+): ListSessionsResponse {
+  const totalItems = sessions.length;
+  if (limit === undefined) {
+    return {
+      sessions: offset ? sessions.slice(offset) : sessions,
+      page: 1,
+      limit: totalItems,
+      totalItems,
+      totalPages: totalItems === 0 ? 0 : 1,
+    };
+  }
+
+  const effectiveOffset =
+    page !== undefined ? (page - 1) * limit : (offset ?? 0);
+  const effectivePage =
+    page ?? (limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1);
+
+  return {
+    sessions: sessions.slice(effectiveOffset, effectiveOffset + limit),
+    page: effectivePage,
+    limit,
+    totalItems,
+    totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
+  };
+}

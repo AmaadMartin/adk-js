@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Sessions
+
+- [FirestoreSessionService](sessions/firestore_session_service/index.md) - Storing sessions, events and shared state in Google Cloud Firestore, with revision checks that reject a stale write.
+
 ### Tools
 
 #### Retrieval
