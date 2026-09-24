@@ -309,17 +309,22 @@ export function traceCallLlm({
     shouldAddRequestResponseToSpans() ? safeJsonSerialize(llmResponse) : '{}',
   );
 
-  if (llmResponse.usageMetadata) {
+  const usageMetadata = llmResponse.usageMetadata;
+
+  // A count is emitted when the model reported it, including a reported zero,
+  // and omitted when the model reported nothing. Parity with adk-python
+  // `TokenUsage.from_usage_metadata`.
+  if (typeof usageMetadata?.promptTokenCount === 'number') {
     span.setAttribute(
       'gen_ai.usage.input_tokens',
-      llmResponse.usageMetadata.promptTokenCount || 0,
+      usageMetadata.promptTokenCount,
     );
   }
 
-  if (llmResponse.usageMetadata?.candidatesTokenCount) {
+  if (typeof usageMetadata?.candidatesTokenCount === 'number') {
     span.setAttribute(
       'gen_ai.usage.output_tokens',
-      llmResponse.usageMetadata.candidatesTokenCount,
+      usageMetadata.candidatesTokenCount,
     );
   }
 
