@@ -8,6 +8,7 @@ import {cloneDeep} from 'lodash-es';
 import {Context} from '../../../agents/context.js';
 import {
   AuthCredential,
+  AuthCredentialTypes,
   isAuthCredential,
 } from '../../../auth/auth_credential.js';
 import {AuthScheme} from '../../../auth/auth_schemes.js';
@@ -16,6 +17,7 @@ import {
   BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../auth/exchanger/base_credential_exchanger.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {stableHash} from '../../../utils/hash_utils.js';
 import {logger} from '../../../utils/logger.js';
@@ -124,6 +126,19 @@ export class ToolContextCredentialStore {
   }
 }
 
+/**
+ * Whether the credential still needs a token obtained outside this tool call.
+ * An OAuth2/OIDC credential that holds no access token authenticates nothing,
+ * however it came to be cached.
+ */
+function externalExchangeRequired(credential: AuthCredential): boolean {
+  return (
+    (credential.authType === AuthCredentialTypes.OAUTH2 ||
+      credential.authType === AuthCredentialTypes.OPEN_ID_CONNECT) &&
+    !credential.oauth2?.accessToken
+  );
+}
+
 @experimental
 export class ToolAuthHandler {
   private readonly authScheme?: AuthScheme;
@@ -160,18 +175,39 @@ export class ToolAuthHandler {
     return new ToolAuthHandler(context, authScheme, authCredential, options);
   }
 
+  private async getExistingCredential(): Promise<AuthCredential | undefined> {
+    const store = this.credentialStore;
+    const existing = store.getCredential(this.authScheme, this.authCredential);
+    if (!existing?.oauth2) {
+      return existing;
+    }
+
+    const refresher = new OAuth2CredentialRefresher();
+    if (!(await refresher.isRefreshNeeded(existing))) {
+      return existing;
+    }
+
+    const refreshed = await refresher.refresh(existing, this.authScheme);
+    // Write the new tokens back: providers that rotate the refresh token on
+    // each refresh invalidate the previous one, so a stale cached copy could
+    // never be refreshed again.
+    store.storeCredential(
+      store.getCredentialKey(this.authScheme, this.authCredential),
+      refreshed,
+    );
+
+    return refreshed;
+  }
+
   @experimental
   public async prepareAuthCredentials(): Promise<AuthPreparationResult> {
     if (!this.authScheme) {
       return {state: 'done'};
     }
 
-    const existingCredential = this.credentialStore.getCredential(
-      this.authScheme,
-      this.authCredential,
-    );
+    const existingCredential = await this.getExistingCredential();
 
-    if (existingCredential) {
+    if (existingCredential && !externalExchangeRequired(existingCredential)) {
       return {
         state: 'done',
         authScheme: this.authScheme,
