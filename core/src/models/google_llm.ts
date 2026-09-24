@@ -13,6 +13,7 @@ import {
   LiveServerMessage,
 } from '@google/genai';
 
+import {mergeTrackingHeaders} from '../utils/client_headers.js';
 import {isBrowser, isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
@@ -179,12 +180,13 @@ export class Gemini extends BaseLlm {
       llmRequest.config = {};
     }
 
-    if (llmRequest.config.httpOptions) {
-      llmRequest.config.httpOptions.headers = {
-        ...llmRequest.config.httpOptions.headers,
-        ...this.trackingHeaders,
-      };
-    }
+    // Request http options override the ones set on the api client, so the
+    // tracking headers are merged in unconditionally to keep the request
+    // attributable to ADK even when the caller supplies its own headers.
+    llmRequest.config.httpOptions = {
+      ...llmRequest.config.httpOptions,
+      headers: mergeTrackingHeaders(llmRequest.config.httpOptions?.headers),
+    };
 
     if (abortSignal) {
       llmRequest.config.abortSignal = abortSignal;
@@ -218,7 +220,7 @@ export class Gemini extends BaseLlm {
   }
 
   protected getHttpOptions(): HttpOptions {
-    return {headers: {...this.trackingHeaders, ...this.headers}};
+    return {headers: mergeTrackingHeaders(this.headers)};
   }
 
   get apiClient(): GoogleGenAI {
@@ -293,16 +295,12 @@ export class Gemini extends BaseLlm {
    * @returns BaseLlmConnection, the connection to the Gemini model.
    */
   override async connect(llmRequest: LlmRequest): Promise<BaseLlmConnection> {
-    // add tracking headers to custom headers and set api_version given
-    // the customized http options will override the one set in the api client
-    // constructor
+    // Unlike the non-live path, this stays guarded: the live client already
+    // carries the tracking headers, and creating httpOptions here would also
+    // pin apiVersion onto a config the caller left open.
     if (llmRequest.liveConnectConfig?.httpOptions) {
-      if (!llmRequest.liveConnectConfig.httpOptions.headers) {
-        llmRequest.liveConnectConfig.httpOptions.headers = {};
-      }
-      Object.assign(
+      llmRequest.liveConnectConfig.httpOptions.headers = mergeTrackingHeaders(
         llmRequest.liveConnectConfig.httpOptions.headers,
-        this.trackingHeaders,
       );
       llmRequest.liveConnectConfig.httpOptions.apiVersion = this.liveApiVersion;
     }
