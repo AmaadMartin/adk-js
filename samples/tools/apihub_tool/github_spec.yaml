@@ -1,0 +1,72 @@
+---
+openapi: 3.0.0
+info:
+  title: GitHub Repositories
+  description: A read-only slice of the public GitHub REST API.
+  version: 1.0.0
+servers:
+  - url: https://api.github.com
+paths:
+  /repos/{owner}/{repo}:
+    get:
+      operationId: getRepository
+      summary: >-
+        Returns one public repository, including its star count, its fork
+        count and its open issue count.
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          description: The user or organization that owns the repository.
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          description: The repository name.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The repository.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  full_name:
+                    type: string
+                  description:
+                    type: string
+                  stargazers_count:
+                    type: integer
+                  forks_count:
+                    type: integer
+                  open_issues_count:
+                    type: integer
+  /repos/{owner}/{repo}/languages:
+    get:
+      operationId: getRepositoryLanguages
+      summary: >-
+        Returns the languages a public repository is written in, with the
+        number of bytes of code in each.
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          description: The user or organization that owns the repository.
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          description: The repository name.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bytes of code per language.
+          content:
+            application/json:
+              schema:
+                type: object

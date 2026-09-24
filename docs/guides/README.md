@@ -21,3 +21,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+#### API Hub Tool
+
+- [API Hub tool](tools/apihub_tool/index.md) - Resolving a Google Cloud API Hub resource name to an OpenAPI specification and turning its operations into agent tools.

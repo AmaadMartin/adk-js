@@ -1,357 +1,331 @@
 /**
  * @license
- * Copyright 2025 Google LLC
+ * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleAuth} from 'google-auth-library';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {
-  APIHubClient,
-  BaseAPIHubClient,
-  extractResourceName,
-} from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
+/**
+ * adk-js behaviour the ported adk-python `v0.1.0` suite does not reach:
+ * the fixed endpoint, credential precedence, and the paths and payloads
+ * TypeScript handles differently from Python.
+ */
 
-function createMockJsonResponse(
-  body: Record<string, unknown>,
-  status = 200,
-): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    headers: {'content-type': 'application/json'},
-  });
+import {APIHubClient, BaseAPIHubClient} from '@google/adk';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {extractResourceName} from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
+
+/**
+ * Mutable state the `google-auth-library` mock reads. The client resolves
+ * both credential kinds through `GoogleAuth`, which is handed the keyfile
+ * when there is one, so the mock reports which of the two it was given.
+ */
+const authState = vi.hoisted(() => ({
+  adcToken: 'adc_token' as string | undefined,
+  jwtToken: 'jwt_token' as string | undefined,
+  /** When set, `GoogleAuth.getClient` rejects with it. */
+  adcFailure: undefined as Error | undefined,
+}));
+
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: class {
+    constructor(private readonly options: {credentials?: unknown}) {}
+    async getClient() {
+      if (this.options.credentials) {
+        return {getAccessToken: async () => ({token: authState.jwtToken})};
+      }
+      if (authState.adcFailure) {
+        throw authState.adcFailure;
+      }
+      return {getAccessToken: async () => ({token: authState.adcToken})};
+    }
+  },
+}));
+
+const SPEC_RESOURCE = 'projects/p/locations/l/apis/a/versions/v/specs/s';
+
+/** Queues one successful JSON response per API Hub call, in order. */
+function queueJson(...payloads: unknown[]): void {
+  for (const payload of payloads) {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(payload), {status: 200}),
+    );
+  }
+}
+
+/** The URL of the nth `fetch` call. */
+function requestedUrl(nth: number): string {
+  return String(vi.mocked(globalThis.fetch).mock.calls[nth][0]);
+}
+
+/** The `Authorization` header of the first `fetch` call. */
+function sentAuthorization(): string | null {
+  const init = vi.mocked(globalThis.fetch).mock.calls[0][1];
+  return new Headers(init?.headers).get('Authorization');
 }
 
 describe('APIHubClient', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    globalThis.fetch = vi.fn();
+    authState.adcToken = 'adc_token';
+    authState.jwtToken = 'jwt_token';
+    authState.adcFailure = undefined;
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
-  describe('extractResourceName', () => {
-    it('test_extract_resource_name_from_api_resource_path', () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      const result = client.extractResourceName(
-        'projects/my-project/locations/us-central1/apis/my-api',
-      );
-      expect(result).toEqual([
-        'projects/my-project/locations/us-central1/apis/my-api',
-        undefined,
-        undefined,
-      ]);
-    });
-
-    it('test_extract_resource_name_from_version_resource_path', () => {
-      const result = extractResourceName(
-        'projects/my-project/locations/us-central1/apis/my-api/versions/v1',
-      );
-      expect(result).toEqual([
-        'projects/my-project/locations/us-central1/apis/my-api',
-        'projects/my-project/locations/us-central1/apis/my-api/versions/v1',
-        undefined,
-      ]);
-    });
-
-    it('test_extract_resource_name_from_spec_resource_path', () => {
-      const result = extractResourceName(
-        'projects/my-project/locations/us-central1/apis/my-api/versions/v1/specs/my-spec',
-      );
-      expect(result).toEqual([
-        'projects/my-project/locations/us-central1/apis/my-api',
-        'projects/my-project/locations/us-central1/apis/my-api/versions/v1',
-        'projects/my-project/locations/us-central1/apis/my-api/versions/v1/specs/my-spec',
-      ]);
-    });
-
-    it('test_extract_resource_name_from_ui_url', () => {
-      const result = extractResourceName(
-        'https://console.cloud.google.com/apigee/api-hub/locations/us-central1/apis/my-api/versions/v1/specs/my-spec?project=my-ui-project',
-      );
-      expect(result).toEqual([
-        'projects/my-ui-project/locations/us-central1/apis/my-api',
-        'projects/my-ui-project/locations/us-central1/apis/my-api/versions/v1',
-        'projects/my-ui-project/locations/us-central1/apis/my-api/versions/v1/specs/my-spec',
-      ]);
-    });
-
-    it('test_extract_resource_name_missing_project', () => {
-      expect(() =>
-        extractResourceName('locations/us-central1/apis/my-api'),
-      ).toThrow(/Project ID not found in URL or path in APIHubClient/);
-    });
-
-    it('test_extract_resource_name_missing_location', () => {
-      expect(() =>
-        extractResourceName('projects/my-project/apis/my-api'),
-      ).toThrow(/Location not found in URL or path in APIHubClient/);
-    });
-
-    it('test_extract_resource_name_missing_api_id', () => {
-      expect(() =>
-        extractResourceName('projects/my-project/locations/us-central1'),
-      ).toThrow(/API id not found in URL or path in APIHubClient/);
-    });
-  });
-
-  describe('getSpecContent', () => {
-    it('test_get_spec_content_from_api_path', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      const specText = 'openapi: 3.0.0\ninfo:\n  title: Sample API';
-      const base64Spec = Buffer.from(specText, 'utf-8').toString('base64');
-
-      fetchSpy
-        .mockResolvedValueOnce(
-          createMockJsonResponse({
-            versions: [
-              'projects/my-project/locations/us-central1/apis/my-api/versions/v1',
-            ],
-          }),
-        )
-        .mockResolvedValueOnce(
-          createMockJsonResponse({
-            specs: [
-              'projects/my-project/locations/us-central1/apis/my-api/versions/v1/specs/spec1',
-            ],
-          }),
-        )
-        .mockResolvedValueOnce(
-          createMockJsonResponse({
-            contents: base64Spec,
-          }),
-        );
-
-      const content = await client.getSpecContent(
-        'projects/my-project/locations/us-central1/apis/my-api',
+  describe('endpoint', () => {
+    it('sends every request to the public API Hub endpoint', async () => {
+      const client = new APIHubClient({accessToken: 'token'});
+      queueJson(
+        {apis: []},
+        {versions: ['projects/p/locations/l/apis/a/versions/v']},
+        {specs: [SPEC_RESOURCE]},
+        {contents: Buffer.from('spec').toString('base64')},
       );
 
-      expect(content).toBe(specText);
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
-      expect(fetchSpy).toHaveBeenNthCalledWith(
-        1,
-        'https://apihub.googleapis.com/v1/projects/my-project/locations/us-central1/apis/my-api',
-        expect.objectContaining({
-          headers: {
-            accept: 'application/json, text/plain, */*',
-            Authorization: 'Bearer test-token',
-          },
-        }),
-      );
-      expect(fetchSpy).toHaveBeenNthCalledWith(
-        2,
-        'https://apihub.googleapis.com/v1/projects/my-project/locations/us-central1/apis/my-api/versions/v1',
-        expect.any(Object),
-      );
-      expect(fetchSpy).toHaveBeenNthCalledWith(
-        3,
-        'https://apihub.googleapis.com/v1/projects/my-project/locations/us-central1/apis/my-api/versions/v1/specs/spec1:contents',
-        expect.any(Object),
-      );
-    });
+      await client.listApis('p', 'l');
+      await client.getSpecContent('projects/p/locations/l/apis/a');
 
-    it('test_get_spec_content_from_api_no_versions', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      fetchSpy.mockResolvedValueOnce(createMockJsonResponse({versions: []}));
-
-      await expect(
-        client.getSpecContent(
-          'projects/my-project/locations/us-central1/apis/my-api',
-        ),
-      ).rejects.toThrow(
-        'No versions found in API Hub resource: projects/my-project/locations/us-central1/apis/my-api',
-      );
-    });
-
-    it('test_get_spec_content_from_version_path', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      const specText = '{"swagger": "2.0"}';
-      const base64Spec = Buffer.from(specText, 'utf-8').toString('base64');
-
-      fetchSpy
-        .mockResolvedValueOnce(
-          createMockJsonResponse({
-            specs: [
-              'projects/my-project/locations/us-central1/apis/my-api/versions/v1/specs/spec1',
-            ],
-          }),
-        )
-        .mockResolvedValueOnce(
-          createMockJsonResponse({
-            contents: base64Spec,
-          }),
-        );
-
-      const content = await client.getSpecContent(
-        'projects/my-project/locations/us-central1/apis/my-api/versions/v1',
-      );
-
-      expect(content).toBe(specText);
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-    });
-
-    it('test_get_spec_content_from_version_no_specs', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      fetchSpy.mockResolvedValueOnce(createMockJsonResponse({specs: []}));
-
-      await expect(
-        client.getSpecContent(
-          'projects/my-project/locations/us-central1/apis/my-api/versions/v1',
-        ),
-      ).rejects.toThrow(
-        'No specs found in API Hub version: projects/my-project/locations/us-central1/apis/my-api/versions/v1',
-      );
-    });
-
-    it('test_get_spec_content_from_spec_path', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      const specText = 'openapi: 3.1.0';
-      const base64Spec = Buffer.from(specText, 'utf-8').toString('base64');
-
-      fetchSpy.mockResolvedValueOnce(
-        createMockJsonResponse({contents: base64Spec}),
-      );
-
-      const content = await client.getSpecContent(
-        'projects/my-project/locations/us-central1/apis/my-api/versions/v1/specs/spec1',
-      );
-
-      expect(content).toBe(specText);
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-    });
-
-    it('test_fetch_spec_empty_contents', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      fetchSpy.mockResolvedValueOnce(createMockJsonResponse({}));
-
-      const content = await client.fetchSpec(
-        'projects/my-project/locations/us-central1/apis/my-api/versions/v1/specs/spec1',
-      );
-      expect(content).toBe('');
-    });
-  });
-
-  describe('listApis, getApi, and getApiVersion', () => {
-    it('test_list_apis', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      const expectedApis = [{name: 'projects/p/locations/l/apis/api1'}];
-      fetchSpy.mockResolvedValueOnce(
-        createMockJsonResponse({apis: expectedApis}),
-      );
-
-      const apis = await client.listApis('p', 'l');
-      expect(apis).toEqual(expectedApis);
-      expect(fetchSpy).toHaveBeenCalledWith(
+      expect(requestedUrl(0)).toBe(
         'https://apihub.googleapis.com/v1/projects/p/locations/l/apis',
-        expect.objectContaining({
-          method: 'GET',
-          headers: {
-            accept: 'application/json, text/plain, */*',
-            Authorization: 'Bearer test-token',
-          },
-        }),
       );
-    });
-
-    it('test_get_api', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      const expectedApi = {
-        name: 'projects/p/locations/l/apis/api1',
-        versions: ['projects/p/locations/l/apis/api1/versions/v1'],
-      };
-      fetchSpy.mockResolvedValueOnce(createMockJsonResponse(expectedApi));
-
-      const api = await client.getApi('projects/p/locations/l/apis/api1');
-      expect(api).toEqual(expectedApi);
-    });
-
-    it('test_get_api_version', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      const expectedVersion = {
-        name: 'projects/p/locations/l/apis/api1/versions/v1',
-        specs: ['projects/p/locations/l/apis/api1/versions/v1/specs/s1'],
-      };
-      fetchSpy.mockResolvedValueOnce(createMockJsonResponse(expectedVersion));
-
-      const version = await client.getApiVersion(
-        'projects/p/locations/l/apis/api1/versions/v1',
+      expect(requestedUrl(1)).toBe(
+        'https://apihub.googleapis.com/v1/projects/p/locations/l/apis/a',
       );
-      expect(version).toEqual(expectedVersion);
-    });
-
-    it('test_http_error_status_throws', async () => {
-      const client = new APIHubClient({accessToken: 'test-token'});
-      fetchSpy.mockResolvedValueOnce(createMockJsonResponse({}, 404));
-
-      await expect(
-        client.getApi('projects/p/locations/l/apis/missing'),
-      ).rejects.toThrow('API Hub request failed with status 404');
+      expect(requestedUrl(2)).toBe(
+        'https://apihub.googleapis.com/v1/projects/p/locations/l/apis/a/versions/v',
+      );
+      expect(requestedUrl(3)).toBe(
+        `https://apihub.googleapis.com/v1/${SPEC_RESOURCE}:contents`,
+      );
     });
   });
 
-  describe('authentication and getAccessToken', () => {
-    it('test_get_access_token_with_explicit_access_token', async () => {
-      const client = new APIHubClient({accessToken: 'direct-token'});
-      expect(await client.getAccessToken()).toBe('direct-token');
+  describe('credential precedence', () => {
+    it('sends the access token when one is configured', async () => {
+      queueJson({apis: []});
+
+      await new APIHubClient({
+        accessToken: 'explicit_token',
+        serviceAccountJson: JSON.stringify({client_email: 'a@b.c'}),
+      }).listApis('p', 'l');
+
+      expect(sentAuthorization()).toBe('Bearer explicit_token');
     });
 
-    it('test_get_access_token_uses_cached_credential', async () => {
-      const mockAuth = {
-        getAccessToken: vi.fn().mockResolvedValue('resolved-auth-token'),
-      } as unknown as GoogleAuth;
+    it('signs with the service account when no access token is configured', async () => {
+      queueJson({apis: []});
 
-      const client = new APIHubClient({
+      await new APIHubClient({
         serviceAccountJson: JSON.stringify({
-          client_email: 'sa@example.iam.gserviceaccount.com',
-          private_key: 'fake-key',
+          client_email: 'a@b.c',
+          private_key: 'key',
         }),
-        auth: mockAuth,
-      });
+      }).listApis('p', 'l');
 
-      const firstToken = await client.getAccessToken();
-      const secondToken = await client.getAccessToken();
-
-      expect(firstToken).toBe('resolved-auth-token');
-      expect(secondToken).toBe('resolved-auth-token');
-      expect(mockAuth.getAccessToken).toHaveBeenCalledTimes(1);
+      expect(sentAuthorization()).toBe('Bearer jwt_token');
     });
 
-    it('test_get_access_token_invalid_service_account_json', async () => {
-      const client = new APIHubClient({
-        serviceAccountJson: '{not-valid-json',
-      });
+    it('falls back to Application Default Credentials', async () => {
+      queueJson({apis: []});
 
-      await expect(client.getAccessToken()).rejects.toThrow(
-        /Invalid service account JSON:/,
-      );
+      await new APIHubClient().listApis('p', 'l');
+
+      expect(sentAuthorization()).toBe('Bearer adc_token');
     });
 
-    it('test_get_access_token_missing_credentials_throws', async () => {
-      const mockAuth = {
-        getAccessToken: vi.fn().mockResolvedValue(null),
-      } as unknown as GoogleAuth;
+    it('rejects when the resolved credential yields no token', async () => {
+      authState.adcToken = undefined;
 
-      const client = new APIHubClient({auth: mockAuth});
-      await expect(client.getAccessToken()).rejects.toThrow(
+      await expect(new APIHubClient().listApis('p', 'l')).rejects.toThrow(
         'Please provide a service account or an access token to API Hub client.',
       );
     });
+
+    it('keeps the credential library failure as the cause', async () => {
+      const adcFailure = new Error('could not find the default credentials');
+      authState.adcFailure = adcFailure;
+
+      const rejection = await new APIHubClient()
+        .listApis('p', 'l')
+        .catch((e: unknown) => e);
+
+      expect(rejection).toBeInstanceOf(Error);
+      expect(rejection).toHaveProperty('cause', adcFailure);
+    });
+
+    it('rejects malformed service account JSON', async () => {
+      await expect(
+        new APIHubClient({serviceAccountJson: 'not json'}).listApis('p', 'l'),
+        // adk-python renders the parse failure as `f"{e}"`, which is the
+        // message without the exception class, and so does this.
+      ).rejects.toThrow(
+        'Invalid service account JSON: Unexpected token \'o\', "not json" ' +
+          'is not valid JSON',
+      );
+    });
   });
 
-  describe('BaseAPIHubClient', () => {
-    it('test_custom_subclass_implementation', async () => {
-      class CustomClient extends BaseAPIHubClient {
-        override getSpecContent(resourceName: string): string {
-          return `spec-for-${resourceName}`;
-        }
-      }
+  describe('response payloads', () => {
+    it('returns an empty list when the response names no apis', async () => {
+      queueJson({});
 
-      const client = new CustomClient();
-      expect(client.getSpecContent('my-resource')).toBe('spec-for-my-resource');
+      await expect(new APIHubClient().listApis('p', 'l')).resolves.toEqual([]);
     });
+
+    it('returns an empty string when the spec response names no contents', async () => {
+      queueJson({});
+
+      await expect(
+        new APIHubClient().getSpecContent(SPEC_RESOURCE),
+      ).resolves.toBe('');
+    });
+
+    it('decodes multi-byte UTF-8 spec content', async () => {
+      const spec = 'title: Café 版本 🌍';
+      queueJson({contents: Buffer.from(spec, 'utf-8').toString('base64')});
+
+      await expect(
+        new APIHubClient().getSpecContent(SPEC_RESOURCE),
+      ).resolves.toBe(spec);
+    });
+
+    it('reports a missing version list on the API', async () => {
+      queueJson({name: 'projects/p/locations/l/apis/a'});
+
+      await expect(
+        new APIHubClient().getSpecContent('projects/p/locations/l/apis/a'),
+      ).rejects.toThrow(
+        'No versions found in API Hub resource: projects/p/locations/l/apis/a',
+      );
+    });
+
+    it('reports a missing spec list on the version', async () => {
+      queueJson({name: 'projects/p/locations/l/apis/a/versions/v'});
+
+      await expect(
+        new APIHubClient().getSpecContent(
+          'projects/p/locations/l/apis/a/versions/v',
+        ),
+      ).rejects.toThrow(
+        'No specs found in API Hub version: projects/p/locations/l/apis/a/versions/v',
+      );
+    });
+
+    it('resolves the first version and the first spec that are listed', async () => {
+      queueJson(
+        {
+          versions: [
+            'projects/p/locations/l/apis/a/versions/v1',
+            'projects/p/locations/l/apis/a/versions/v2',
+          ],
+        },
+        {
+          specs: [
+            'projects/p/locations/l/apis/a/versions/v1/specs/s1',
+            'projects/p/locations/l/apis/a/versions/v1/specs/s2',
+          ],
+        },
+        {contents: Buffer.from('first spec').toString('base64')},
+      );
+
+      await expect(
+        new APIHubClient().getSpecContent('projects/p/locations/l/apis/a'),
+      ).resolves.toBe('first spec');
+      expect(requestedUrl(1)).toBe(
+        'https://apihub.googleapis.com/v1/projects/p/locations/l/apis/a/versions/v1',
+      );
+      expect(requestedUrl(2)).toBe(
+        'https://apihub.googleapis.com/v1/projects/p/locations/l/apis/a/versions/v1/specs/s1:contents',
+      );
+    });
+  });
+
+  describe('path forms', () => {
+    it('ignores a trailing slash', () => {
+      expect(
+        extractResourceName('projects/p/locations/l/apis/a/versions/v/'),
+      ).toEqual({
+        apiResourceName: 'projects/p/locations/l/apis/a',
+        apiVersionResourceName: 'projects/p/locations/l/apis/a/versions/v',
+        apiSpecResourceName: undefined,
+      });
+    });
+
+    it('reads the resource path after api-hub/, not a matching segment before it', () => {
+      expect(
+        extractResourceName(
+          'https://console.cloud.google.com/projects/console-p/api-hub/projects/p/locations/l/apis/a',
+        ),
+      ).toEqual({
+        apiResourceName: 'projects/p/locations/l/apis/a',
+        apiVersionResourceName: undefined,
+        apiSpecResourceName: undefined,
+      });
+    });
+
+    it('reads the project from the query when the path names none', () => {
+      expect(
+        extractResourceName(
+          'https://console.cloud.google.com/apigee/api-hub/locations/l/apis/a?project=p',
+        ),
+      ).toEqual({
+        apiResourceName: 'projects/p/locations/l/apis/a',
+        apiVersionResourceName: undefined,
+        apiSpecResourceName: undefined,
+      });
+    });
+
+    it('treats everything after the first question mark as the query', () => {
+      expect(
+        extractResourceName(
+          'https://console.cloud.google.com/apigee/api-hub/locations/l/apis/a?redirect=/page?tab=1&project=p',
+        ),
+      ).toEqual({
+        apiResourceName: 'projects/p/locations/l/apis/a',
+        apiVersionResourceName: undefined,
+        apiSpecResourceName: undefined,
+      });
+    });
+
+    it('ignores the query project when the path has a projects segment', () => {
+      // adk-python reads `project=` only when the path carries no `projects`
+      // segment at all, so a dangling `projects` segment is an error rather
+      // than a reason to fall back.
+      expect(() => extractResourceName('projects?project=p')).toThrow(
+        'Project ID not found in URL or path in APIHubClient.',
+      );
+    });
+
+    it('drops a spec id that no version id precedes', () => {
+      expect(
+        extractResourceName('projects/p/locations/l/apis/a/specs/s'),
+      ).toEqual({
+        apiResourceName: 'projects/p/locations/l/apis/a',
+        apiVersionResourceName: undefined,
+        apiSpecResourceName: undefined,
+      });
+    });
+  });
+});
+
+describe('BaseAPIHubClient', () => {
+  it('accepts a substitute implementation', async () => {
+    class StaticSpecClient extends BaseAPIHubClient {
+      override async getSpecContent(resourceName: string): Promise<string> {
+        return `spec for ${resourceName}`;
+      }
+    }
+
+    const client: BaseAPIHubClient = new StaticSpecClient();
+
+    await expect(client.getSpecContent('my-api')).resolves.toBe(
+      'spec for my-api',
+    );
   });
 });

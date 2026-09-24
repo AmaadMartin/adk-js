@@ -9,153 +9,88 @@ import {OpenAPIV3} from 'openapi-types';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
-import {AuthConfig} from '../../auth/auth_tool.js';
 import {toSnakeCaseName} from '../../utils/case_utils.js';
 import {experimental} from '../../utils/experimental.js';
+import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
-import {RestApiTool} from '../openapi_tool/rest_api_tool.js';
-import {
-  APIHubClient,
-  BaseAPIHubClient,
-} from './clients/apihub_client.js';
+import {APIHubClient, BaseAPIHubClient} from './clients/apihub_client.js';
 
-/**
- * Configuration options for initializing an {@link APIHubToolset}.
- */
+const UNNAMED_TOOLSET = 'unnamed';
+
+/** Options for the API Hub toolset. */
 export interface APIHubToolsetOptions {
   /**
-   * The resource name of the API in Google Cloud API Hub, or its Cloud Console URL.
-   * It must include the API name, and can optionally include the API version and spec name.
-   *
-   * - If `apihubResourceName` includes a spec resource name, the content of that
-   *   spec is used for generating the tools.
-   * - If `apihubResourceName` includes only an API or a version name, the
-   *   first spec of the first version of that API is used.
-   *
-   * Example: `'projects/test-project/locations/us-central1/apis/test-api'`.
+   * The resource name of the API, API version or API spec in API Hub, for
+   * example `projects/p/locations/l/apis/a`. A name that stops at the API
+   * resolves to the first spec of the first version.
    */
   apihubResourceName: string;
   /**
-   * Google OAuth2 access token used for authenticating requests to API Hub
-   * when fetching specifications.
+   * Google access token. Generate one with `gcloud auth print-access-token`.
+   * Useful for local testing.
    */
   accessToken?: string;
   /**
-   * Service account configuration as a JSON string or parsed object used for
-   * creating the default API Hub client and fetching specifications.
+   * The service account configuration as a JSON string. Required when not
+   * using application default credentials.
    */
-  serviceAccountJson?: string | Record<string, unknown>;
-  /**
-   * Optional custom API Hub client instance.
-   */
-  apihubClient?: BaseAPIHubClient;
-  /**
-   * Name of the toolset. If omitted, derived in `snake_case` from the OpenAPI
-   * specification's `info.title` field.
-   */
+  serviceAccountJson?: string;
+  /** Name of the toolset. Defaults to the snake_case spec title. */
   name?: string;
-  /**
-   * Description of the toolset. If omitted, derived from the OpenAPI
-   * specification's `info.description` field.
-   */
+  /** Description of the toolset. Defaults to the spec description. */
   description?: string;
   /**
-   * If `true`, the specification is loaded lazily when tools are requested.
-   * Otherwise, the specification is fetched and parsed during initialization.
+   * Fetches the spec on the first getTools() or getTool() call instead of
+   * during construction.
    */
   lazyLoadSpec?: boolean;
-  /**
-   * Authentication scheme applied to all tools generated in the toolset.
-   */
+  /** Auth scheme that applies to every tool in the toolset. */
   authScheme?: AuthScheme;
-  /**
-   * Authentication credential applied to all tools generated in the toolset.
-   */
+  /** Auth credential that applies to every tool in the toolset. */
   authCredential?: AuthCredential;
-  /**
-   * Filter used to select which tools in the toolset are exposed to an agent.
-   * Can be a predicate function or an array of tool names.
-   */
+  /** A substitute API Hub client, chiefly for tests. */
+  apihubClient?: BaseAPIHubClient;
+  /** Selects which of the generated tools the agent sees. */
   toolFilter?: ToolPredicate | string[];
-  /**
-   * Optional prefix prepended to generated tool names.
-   */
+  /** Prefix added to every generated tool name. */
   prefix?: string;
-  /**
-   * Whether to preserve original property names when parsing the OpenAPI specification.
-   */
-  preservePropertyNames?: boolean;
-  /**
-   * Optional callback providing additional HTTP headers at runtime.
-   */
-  headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-  /**
-   * Optional credential key used to store and retrieve exchanged credentials.
-   */
-  credentialKey?: string;
-}
-
-function parseSpecDocument(specStr: string): {
-  specDict?: OpenAPIV3.Document;
-  title: string;
-  description: string;
-} {
-  const loaded = yaml.load(specStr);
-  if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded)) {
-    return {title: 'unnamed', description: ''};
-  }
-  const specDict = loaded as OpenAPIV3.Document;
-  const rawInfo = specDict.info as unknown;
-  const info =
-    rawInfo && typeof rawInfo === 'object' && !Array.isArray(rawInfo)
-      ? (rawInfo as Record<string, unknown>)
-      : {};
-  const rawTitle = info.title;
-  const title = typeof rawTitle === 'string' ? rawTitle : 'unnamed';
-  const rawDescription = info.description;
-  const description =
-    typeof rawDescription === 'string' ? rawDescription : '';
-  return {specDict, title, description};
 }
 
 /**
- * Generates {@link RestApiTool} instances from a Google Cloud API Hub resource.
+ * Generates tools from an API Hub resource.
+ *
+ * The toolset resolves the resource name to one OpenAPI specification, then
+ * hands that specification to `OpenAPIToolset`, so the tools it produces are
+ * ordinary `RestApiTool` instances.
  *
  * @example
  * ```ts
  * const apihubToolset = new APIHubToolset({
- *   apihubResourceName:
- *     'projects/test-project/locations/us-central1/apis/test-api',
- *   serviceAccountJson: '...',
+ *   apihubResourceName: 'projects/p/locations/us-central1/apis/my-api',
+ *   serviceAccountJson: serviceAccountJson,
  * });
  *
  * const agent = new LlmAgent({
  *   name: 'api_agent',
- *   model: 'gemini-flash-latest',
+ *   model: 'gemini-2.0-flash',
  *   tools: [apihubToolset],
  * });
  * ```
  */
 @experimental
 export class APIHubToolset extends BaseToolset {
+  /** Name of the toolset. Set from the spec title when none was supplied. */
   name: string;
+  /** Description of the toolset. Set from the spec when none was supplied. */
   description: string;
   readonly apihubResourceName: string;
   readonly lazyLoadSpec: boolean;
-  readonly apihubClient: BaseAPIHubClient;
-  readonly authScheme?: AuthScheme;
-  readonly authCredential?: AuthCredential;
-  readonly authConfig?: AuthConfig;
-  generatedTools: Record<string, RestApiTool> = {};
 
-  private openapiToolset?: OpenAPIToolset;
-  private preparingPromise?: Promise<void>;
-  private readonly preservePropertyNames?: boolean;
-  private readonly headerProvider?: (
-    context: ReadonlyContext,
-  ) => Record<string, string>;
-  private readonly credentialKey?: string;
+  private readonly apihubClient: BaseAPIHubClient;
+  private readonly authScheme?: AuthScheme;
+  private readonly authCredential?: AuthCredential;
+  private toolsetPromise?: Promise<OpenAPIToolset | undefined>;
 
   constructor(options: APIHubToolsetOptions) {
     super(options.toolFilter ?? [], options.prefix);
@@ -163,141 +98,79 @@ export class APIHubToolset extends BaseToolset {
     this.description = options.description ?? '';
     this.apihubResourceName = options.apihubResourceName;
     this.lazyLoadSpec = options.lazyLoadSpec ?? false;
+    this.authScheme = options.authScheme;
+    this.authCredential = options.authCredential;
     this.apihubClient =
       options.apihubClient ??
       new APIHubClient({
         accessToken: options.accessToken,
         serviceAccountJson: options.serviceAccountJson,
       });
-    this.authScheme = options.authScheme;
-    this.authCredential = options.authCredential;
-    this.authConfig = options.authScheme
-      ? {
-          authScheme: options.authScheme,
-          rawAuthCredential: options.authCredential,
-          credentialKey: options.credentialKey ?? '',
-        }
-      : undefined;
-    this.preservePropertyNames = options.preservePropertyNames;
-    this.headerProvider = options.headerProvider;
-    this.credentialKey = options.credentialKey;
 
     if (!this.lazyLoadSpec) {
-      this.startPrepareToolset();
+      // A constructor cannot await, so the fetch starts here and the first
+      // getTools() call reports any failure. The no-op catch keeps Node from
+      // reporting an unhandled rejection before that call.
+      this.prepare().catch(() => undefined);
     }
   }
 
+  @experimental
+  override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
+    const toolset = await this.prepare();
+    return toolset ? toolset.getTools(context) : [];
+  }
+
   /**
-   * Retrieves all available tools generated from the API Hub specification.
+   * Returns the generated tool with this name, or undefined.
    *
-   * @param readonlyContext Optional context used to evaluate `toolFilter`.
-   * @returns A list of {@link RestApiTool} instances.
+   * adk-python declares `get_tool` on both `APIHubToolset` and
+   * `OpenAPIToolset` at `v0.1.0`, and the `APIHubToolset` class docstring
+   * uses it to give one operation to an agent. It is part of the surface this
+   * port carries, not a convenience added here.
    */
   @experimental
-  override async getTools(
-    readonlyContext?: ReadonlyContext,
-  ): Promise<RestApiTool[]> {
-    if (!this.openapiToolset) {
-      await this.prepareToolset();
-    }
-    if (!this.openapiToolset) {
-      return [];
-    }
-    const tools = (await this.openapiToolset.getTools(
-      readonlyContext,
-    )) as RestApiTool[];
-    for (const tool of tools) {
-      this.generatedTools[tool.name] = tool;
-    }
-    return tools;
+  async getTool(name: string): Promise<BaseTool | undefined> {
+    const tools = await this.getTools();
+    return tools.find((tool) => tool.name === name);
   }
 
-  /**
-   * Retrieves a specific tool by its name.
-   *
-   * @param name The name of the tool to retrieve.
-   * @returns The tool with the given name, or `undefined` if no such tool exists.
-   */
-  @experimental
-  getTool(name: string): RestApiTool | undefined {
-    if (!this.openapiToolset) {
-      const specResult = this.apihubClient.getSpecContent(
-        this.apihubResourceName,
-      );
-      if (typeof specResult === 'string') {
-        this.prepareFromSpec(specResult);
-      }
-    }
-    const tool = this.openapiToolset?.getTool(name);
-    if (tool) {
-      this.generatedTools[tool.name] = tool;
-    }
-    return tool ?? this.generatedTools[name];
-  }
-
-  /**
-   * Closes the underlying OpenAPI toolset and releases any held resources.
-   */
   @experimental
   override async close(): Promise<void> {
-    if (this.openapiToolset) {
-      await this.openapiToolset.close();
-    }
+    // A failed load leaves nothing to close, and getTools() already reports
+    // that failure.
+    const toolset = await this.toolsetPromise?.catch(() => undefined);
+    await toolset?.close();
   }
 
-  private startPrepareToolset(): void {
-    const specResult = this.apihubClient.getSpecContent(
-      this.apihubResourceName,
-    );
-    if (typeof specResult === 'string') {
-      this.prepareFromSpec(specResult);
-      return;
-    }
-    const promise = specResult.then((specStr) => {
-      this.prepareFromSpec(specStr);
-    });
-    promise.catch(() => {});
-    this.preparingPromise = promise;
+  /** Fetches and parses the spec once, and reuses the result after that. */
+  private prepare(): Promise<OpenAPIToolset | undefined> {
+    this.toolsetPromise ??= this.loadToolset();
+    return this.toolsetPromise;
   }
 
-  private async prepareToolset(): Promise<void> {
-    if (this.preparingPromise) {
-      const pending = this.preparingPromise;
-      this.preparingPromise = undefined;
-      await pending;
-      return;
-    }
+  private async loadToolset(): Promise<OpenAPIToolset | undefined> {
     const specStr = await this.apihubClient.getSpecContent(
       this.apihubResourceName,
     );
-    this.prepareFromSpec(specStr);
-  }
-
-  private prepareFromSpec(specStr: string): void {
-    this.generatedTools = {};
-    const {specDict, title, description} = parseSpecDocument(specStr);
-    if (!specDict) {
-      return;
+    const parsed = yaml.load(specStr);
+    // An empty spec yields no tools. OpenAPIToolset throws when handed one, so
+    // it is never constructed in that case.
+    if (!parsed) {
+      return undefined;
     }
 
-    this.name = this.name || toSnakeCaseName(title);
-    this.description = this.description || description;
-    this.openapiToolset = new OpenAPIToolset({
-      specDict,
+    const spec = parsed as OpenAPIV3.Document;
+    this.name =
+      this.name || toSnakeCaseName(spec.info?.title ?? UNNAMED_TOOLSET);
+    this.description = this.description || (spec.info?.description ?? '');
+
+    return new OpenAPIToolset({
+      specDict: spec,
+      authScheme: this.authScheme,
       authCredential: this.authCredential,
-      authScheme: this.authScheme as
-        | OpenAPIV3.SecuritySchemeObject
-        | undefined,
       toolFilter: this.toolFilter,
       prefix: this.prefix,
-      preservePropertyNames: this.preservePropertyNames,
-      headerProvider: this.headerProvider,
-      credentialKey: this.credentialKey,
     });
   }
 }
-
-export {
-  APIHubToolset as ApiHubToolset,
-  type APIHubToolsetOptions as ApiHubToolsetOptions,
-};

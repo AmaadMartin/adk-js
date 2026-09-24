@@ -69,6 +69,7 @@ Left unset, the sample runs on the corpus written into the file.
 | ---------------------------------------- | --------------------------------------------------------------------------------------- | --- | ------------------------------------------ |
 | `retrieval`                              | `LlamaIndexRetrieval` over a hand-written retriever, plus an optional `FilesRetrieval`  | ✅  | `llamaindex` for the `FilesRetrieval` half |
 | [`openapi_tool`](openapi_tool/README.md) | An OpenAPI spec as a set of tools, one tool selected by name, and an authenticated call | ✅  |                                            |
+| [`apihub_tool`](apihub_tool/README.md)   | An API Hub resource name as a set of tools, with the catalogue client substituted       | ✅  |                                            |
 
 ## Worth knowing
 
@@ -94,6 +95,16 @@ Left unset, the sample runs on the corpus written into the file.
   tool it generates.** The pair is a toolset-wide override, so a specification
   describing several operations authenticates all of them the same way. Give
   each service its own toolset when they need different credentials.
+- **`APIHubToolset` fetches the specification once per instance.** A failed
+  fetch is remembered, so every later `getTools` call reports the same error
+  rather than retrying. Build a new toolset to retry.
+- **A constructor cannot await, so a fetch failure surfaces later.** With
+  `lazyLoadSpec` left at `false` the fetch starts during construction, and the
+  first `getTools` or `getTool` call is what reports a failure.
+- **A resource name above the specification level resolves to the first
+  entry.** An API resolves to its first version, and a version resolves to its
+  first specification. API Hub decides that order, so pin the name at the
+  specification level when an API carries more than one.
 - **A failing HTTP call returns a result, not an exception.** `RestApiTool`
   answers a non-2xx response with `{error: "Tool ... execution failed. ..."}`,
   so the model reads the failure. An agent that is not told what to do with it
@@ -113,4 +124,5 @@ Left unset, the sample runs on the corpus written into the file.
 - [LlamaIndexRetrieval](../../docs/guides/tools/retrieval/llama_index_retrieval/index.md) - Answers from any object with a `retrieve` method.
 - [FilesRetrieval](../../docs/guides/tools/retrieval/files_retrieval/index.md) - Builds the retriever from a directory of documents.
 - [OpenAPI tool](../../docs/guides/tools/openapi_tool/index.md) - Building a toolset from a spec, selecting tools, and configuring the credential the requests carry.
+- [API Hub tool](../../docs/guides/tools/apihub_tool/index.md) - Resolving a catalogued API to tools, the three credential modes, and reading a secret from Secret Manager.
 - [Graph workflow samples](../workflows/README.md) - The other sample category, one directory per section of the graph documentation.

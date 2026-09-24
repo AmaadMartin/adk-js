@@ -1,375 +1,278 @@
 /**
  * @license
- * Copyright 2025 Google LLC
+ * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleAuth} from 'google-auth-library';
+import {AuthClient} from 'google-auth-library';
+import {experimental} from '../../../utils/experimental.js';
+import {
+  parseServiceAccountJson,
+  resolveGoogleAuthClient,
+} from '../../../utils/google_auth_utils.js';
 
+/** The API Hub v1 REST endpoint. */
 const API_HUB_ROOT_URL = 'https://apihub.googleapis.com/v1';
-const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
-/**
- * Extracted API Hub resource names from a resource path or UI URL.
- */
-export type ExtractedResourceNames = [
-  apiResourceName: string,
-  apiVersionResourceName: string | undefined,
-  apiSpecResourceName: string | undefined,
-];
+/** The `accept` header value API Hub is called with. */
+const ACCEPT_HEADER = 'application/json, text/plain, */*';
 
-/**
- * Cached credential token state.
- */
-export interface CachedCredential {
-  token: string;
-  expired: boolean;
-  refresh?: () => Promise<string>;
+/** Thrown when the client holds no usable credential. */
+const NO_CREDENTIALS_MESSAGE =
+  'Please provide a service account or an access token to API Hub client.';
+
+/** An API, as returned by the API Hub `apis` endpoints. */
+export interface ApiHubApi {
+  name?: string;
+  versions?: string[];
 }
 
-/**
- * Configuration options for initializing an {@link APIHubClient}.
- */
+/** One version of an API, as returned by the API Hub versions endpoint. */
+export interface ApiHubApiVersion {
+  name?: string;
+  specs?: string[];
+}
+
+/** The resource names a path resolves to. */
+export interface ApiHubResourceNames {
+  apiResourceName: string;
+  apiVersionResourceName?: string;
+  apiSpecResourceName?: string;
+}
+
+/** Options for {@link APIHubClient}. */
 export interface APIHubClientOptions {
   /**
-   * Google OAuth2 access token used for authenticating requests to API Hub.
+   * A bearer token, sent verbatim. Generate one with
+   * `gcloud auth print-access-token`. Takes precedence over every other
+   * option.
    */
   accessToken?: string;
   /**
-   * Service account configuration as a JSON string or parsed object.
+   * Service account key material, as the JSON **string** read from the key
+   * file. Used when `accessToken` is absent.
    */
-  serviceAccountJson?: string | Record<string, unknown>;
+  serviceAccountJson?: string;
+}
+
+/** Base class for API Hub clients. */
+@experimental
+export abstract class BaseAPIHubClient {
+  /** Returns the specification registered under `resourceName`. */
+  abstract getSpecContent(resourceName: string): Promise<string>;
+}
+
+/** Client for the API Hub service. */
+@experimental
+export class APIHubClient extends BaseAPIHubClient {
+  private readonly accessToken?: string;
+  private readonly serviceAccountJson?: string;
+  private credentialCache?: AuthClient;
+
+  constructor(options: APIHubClientOptions = {}) {
+    super();
+    this.accessToken = options.accessToken;
+    this.serviceAccountJson = options.serviceAccountJson;
+  }
+
   /**
-   * Optional GoogleAuth instance for resolving credentials.
+   * Resolves `path` to a single specification and returns its decoded text.
+   *
+   * A path pinned at the API level resolves to the first version and then the
+   * first specification of that version. A path pinned at the version level
+   * resolves to the first specification. A path pinned at the specification
+   * level is fetched directly.
+   *
+   * @param path An API Hub resource name or a Cloud console URL.
+   * @returns The specification text, or an empty string when the
+   *     specification has no contents.
    */
-  auth?: GoogleAuth;
+  override async getSpecContent(path: string): Promise<string> {
+    const {apiResourceName, apiVersionResourceName, apiSpecResourceName} =
+      extractResourceName(path);
+
+    let versionName = apiVersionResourceName;
+    if (!versionName) {
+      const api = await this.getApi(apiResourceName);
+      const versions = api.versions ?? [];
+      if (versions.length === 0) {
+        throw new Error(
+          `No versions found in API Hub resource: ${apiResourceName}`,
+        );
+      }
+      versionName = versions[0];
+    }
+
+    let specName = apiSpecResourceName;
+    if (!specName) {
+      const version = await this.getApiVersion(versionName);
+      const specs = version.specs ?? [];
+      if (specs.length === 0) {
+        throw new Error(`No specs found in API Hub version: ${versionName}`);
+      }
+      specName = specs[0];
+    }
+
+    return this.fetchSpec(specName);
+  }
+
+  /** Lists the APIs registered in `project` and `location`. */
+  async listApis(project: string, location: string): Promise<ApiHubApi[]> {
+    const {apis} = await this.get<{apis?: ApiHubApi[]}>(
+      `${API_HUB_ROOT_URL}/projects/${project}/locations/${location}/apis`,
+    );
+    return apis ?? [];
+  }
+
+  /** Gets one API by its resource name. */
+  async getApi(apiResourceName: string): Promise<ApiHubApi> {
+    return this.get<ApiHubApi>(`${API_HUB_ROOT_URL}/${apiResourceName}`);
+  }
+
+  /** Gets one API version by its resource name. */
+  async getApiVersion(apiVersionName: string): Promise<ApiHubApiVersion> {
+    return this.get<ApiHubApiVersion>(`${API_HUB_ROOT_URL}/${apiVersionName}`);
+  }
+
+  private async fetchSpec(apiSpecResourceName: string): Promise<string> {
+    const {contents} = await this.get<{contents?: string}>(
+      `${API_HUB_ROOT_URL}/${apiSpecResourceName}:contents`,
+    );
+    return contents ? Buffer.from(contents, 'base64').toString('utf-8') : '';
+  }
+
+  private async get<T>(url: string): Promise<T> {
+    const response = await globalThis.fetch(url, {
+      headers: {
+        accept: ACCEPT_HEADER,
+        Authorization: `Bearer ${await this.getAccessToken()}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(
+        `API Hub request failed with status ${response.status}: ` +
+          `${await response.text()}`,
+      );
+    }
+    return (await response.json()) as T;
+  }
+
+  private async getAccessToken(): Promise<string> {
+    if (this.accessToken) {
+      return this.accessToken;
+    }
+    this.credentialCache ??= await loadCredentials(this.serviceAccountJson);
+
+    const {token} = await this.credentialCache.getAccessToken();
+    if (!token) {
+      throw new Error(NO_CREDENTIALS_MESSAGE);
+    }
+    return token;
+  }
 }
 
 /**
- * Extracts the resource names of an API, API Version, and API Spec from a URL or path.
+ * Extracts the API, API version, and API specification resource names from a
+ * resource path or a Cloud console URL.
  *
- * @param urlOrPath The UI URL, API URL, or resource path string.
- * @returns A tuple of `[apiResourceName, apiVersionResourceName, apiSpecResourceName]`.
- * @throws {Error} If the URL or path is missing `project`, `location`, or `api` identifiers.
+ * The version name is returned only when the input names a version, and the
+ * specification name only when the input names both a version and a
+ * specification.
+ *
+ * @throws Error when the input names no project, no location, or no API.
  */
-export function extractResourceName(urlOrPath: string): ExtractedResourceNames {
-  let path = urlOrPath;
-  let queryParams: URLSearchParams | undefined;
+export function extractResourceName(urlOrPath: string): ApiHubResourceNames {
+  const {path, query} = splitQuery(urlOrPath);
+  const segments = stripConsolePrefix(path)
+    .split('/')
+    .filter((segment) => segment);
 
-  try {
-    if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(urlOrPath)) {
-      const parsedUrl = new URL(urlOrPath);
-      path = parsedUrl.pathname;
-      queryParams = parsedUrl.searchParams;
-    } else {
-      const [rawPath, rawQuery] = urlOrPath.split('?', 2);
-      path = rawPath;
-      if (rawQuery !== undefined) {
-        queryParams = new URLSearchParams(rawQuery.split('#', 1)[0]);
-      }
-    }
-
-    if (path.includes('api-hub/')) {
-      path = path.split('api-hub')[1] ?? '';
-    }
-  } catch {
-    path = urlOrPath;
-  }
-
-  const pathSegments = path.split('/').filter((segment) => segment.length > 0);
-
-  let project: string | undefined;
-  let location: string | undefined;
-  let apiId: string | undefined;
-  let versionId: string | undefined;
-  let specId: string | undefined;
-
-  const projectIndex = pathSegments.indexOf('projects');
-  if (projectIndex !== -1) {
-    if (projectIndex + 1 < pathSegments.length) {
-      project = pathSegments[projectIndex + 1];
-    }
-  } else if (queryParams?.has('project')) {
-    project = queryParams.get('project') ?? undefined;
-  }
-
+  // The query parameter is a fallback for a console URL, which carries the
+  // project there rather than in the path. It matches adk-python, which reads
+  // it only when the path has no `projects` segment at all.
+  const project = segments.includes('projects')
+    ? segmentAfter(segments, 'projects')
+    : query.get('project');
   if (!project) {
     throw new Error(
-      `Project ID not found in URL or path in APIHubClient. Input path is '${urlOrPath}'. Please make sure there is either '/projects/PROJECT_ID' in the path or 'project=PROJECT_ID' query param in the input.`,
+      'Project ID not found in URL or path in APIHubClient. Input path is' +
+        ` '${urlOrPath}'. Please make sure there is either` +
+        " '/projects/PROJECT_ID' in the path or 'project=PROJECT_ID' query" +
+        ' param in the input.',
     );
   }
 
-  const locationIndex = pathSegments.indexOf('locations');
-  if (locationIndex !== -1 && locationIndex + 1 < pathSegments.length) {
-    location = pathSegments[locationIndex + 1];
-  }
+  const location = segmentAfter(segments, 'locations');
   if (!location) {
     throw new Error(
-      `Location not found in URL or path in APIHubClient. Input path is '${urlOrPath}'. Please make sure there is either '/location/LOCATION_ID' in the path.`,
+      'Location not found in URL or path in APIHubClient. Input path is' +
+        ` '${urlOrPath}'. Please make sure there is either` +
+        " '/location/LOCATION_ID' in the path.",
     );
   }
 
-  const apiIndex = pathSegments.indexOf('apis');
-  if (apiIndex !== -1 && apiIndex + 1 < pathSegments.length) {
-    apiId = pathSegments[apiIndex + 1];
-  }
+  const apiId = segmentAfter(segments, 'apis');
   if (!apiId) {
     throw new Error(
-      `API id not found in URL or path in APIHubClient. Input path is '${urlOrPath}'. Please make sure there is either '/apis/API_ID' in the path.`,
+      'API id not found in URL or path in APIHubClient. Input path is' +
+        ` '${urlOrPath}'. Please make sure there is either '/apis/API_ID' in` +
+        ' the path.',
     );
   }
 
-  const versionIndex = pathSegments.indexOf('versions');
-  if (versionIndex !== -1 && versionIndex + 1 < pathSegments.length) {
-    versionId = pathSegments[versionIndex + 1];
-  }
-
-  const specIndex = pathSegments.indexOf('specs');
-  if (specIndex !== -1 && specIndex + 1 < pathSegments.length) {
-    specId = pathSegments[specIndex + 1];
-  }
+  const versionId = segmentAfter(segments, 'versions');
+  const specId = segmentAfter(segments, 'specs');
 
   const apiResourceName = `projects/${project}/locations/${location}/apis/${apiId}`;
   const apiVersionResourceName = versionId
     ? `${apiResourceName}/versions/${versionId}`
     : undefined;
   const apiSpecResourceName =
-    versionId && specId
+    apiVersionResourceName && specId
       ? `${apiVersionResourceName}/specs/${specId}`
       : undefined;
 
-  return [apiResourceName, apiVersionResourceName, apiSpecResourceName];
+  return {apiResourceName, apiVersionResourceName, apiSpecResourceName};
 }
 
 /**
- * Base class for API Hub clients.
+ * Splits an input into its path part and its parsed query string.
+ *
+ * `new URL` is not used here: it rejects a bare resource name, and giving it a
+ * base percent-encodes the path, which would alter an API id.
  */
-export abstract class BaseAPIHubClient {
-  /**
-   * Retrieves the specification content from API Hub for a given resource name or path.
-   */
-  abstract getSpecContent(resourceName: string): Promise<string> | string;
+function splitQuery(urlOrPath: string): {path: string; query: URLSearchParams} {
+  const [path, ...query] = urlOrPath.split('?');
+  return {path, query: new URLSearchParams(query.join('?'))};
+}
+
+/** Drops everything up to and including `api-hub` from a console URL. */
+function stripConsolePrefix(path: string): string {
+  return path.includes('api-hub/') ? path.split('api-hub')[1] : path;
+}
+
+/** Returns the segment after `key`, or undefined when `key` is absent or last. */
+function segmentAfter(segments: string[], key: string): string | undefined {
+  const index = segments.indexOf(key);
+  return index === -1 ? undefined : segments[index + 1];
 }
 
 /**
- * Client for interacting with the Google Cloud API Hub service.
+ * Resolves the credential the client signs with.
+ *
+ * Key material the caller supplied reports its own failure, and a failure to
+ * resolve Application Default Credentials is reported as a missing
+ * credential, which is what adk-python does.
  */
-export class APIHubClient extends BaseAPIHubClient {
-  readonly rootUrl: string = API_HUB_ROOT_URL;
-  credentialCache: CachedCredential | null = null;
-  accessToken: string | null = null;
-  serviceAccount: string | Record<string, unknown> | null = null;
-  private readonly auth?: GoogleAuth;
-
-  constructor(options: APIHubClientOptions = {}) {
-    super();
-    if (options.accessToken) {
-      this.accessToken = options.accessToken;
-    } else if (options.serviceAccountJson) {
-      this.serviceAccount = options.serviceAccountJson;
-    }
-    this.auth = options.auth;
+async function loadCredentials(
+  serviceAccountJson?: string,
+): Promise<AuthClient> {
+  if (serviceAccountJson) {
+    return resolveGoogleAuthClient(parseServiceAccountJson(serviceAccountJson));
   }
-
-  /**
-   * Retrieves the specification content from the API Hub for a given resource path or UI URL.
-   *
-   * - If the path identifies `/apis/{api}`, fetches the first version and its first spec.
-   * - If the path identifies `/apis/{api}/versions/{version}`, fetches the first spec of that version.
-   * - If the path identifies `/apis/{api}/versions/{version}/specs/{spec}`, fetches that spec directly.
-   *
-   * @param path The resource name or Cloud Console UI URL for an API, API Version, or API Spec.
-   * @returns The decoded specification content string.
-   */
-  override async getSpecContent(path: string): Promise<string> {
-    const [apihubResourceName, initialVersionName, initialSpecName] =
-      this.extractResourceName(path);
-    let apiVersionResourceName = initialVersionName;
-    let apiSpecResourceName = initialSpecName;
-
-    if (apihubResourceName && !apiVersionResourceName) {
-      const api = await this.getApi(apihubResourceName);
-      const versions = Array.isArray(api.versions) ? api.versions : [];
-      if (versions.length === 0) {
-        throw new Error(
-          `No versions found in API Hub resource: ${apihubResourceName}`,
-        );
-      }
-      apiVersionResourceName = String(versions[0]);
-    }
-
-    if (apiVersionResourceName && !apiSpecResourceName) {
-      const apiVersion = await this.getApiVersion(apiVersionResourceName);
-      const specResourceNames = Array.isArray(apiVersion.specs)
-        ? apiVersion.specs
-        : [];
-      if (specResourceNames.length === 0) {
-        throw new Error(
-          `No specs found in API Hub version: ${apiVersionResourceName}`,
-        );
-      }
-      apiSpecResourceName = String(specResourceNames[0]);
-    }
-
-    if (apiSpecResourceName) {
-      return this.fetchSpec(apiSpecResourceName);
-    }
-
-    throw new Error(`No API Hub resource found in path: ${path}`);
-  }
-
-  /**
-   * Lists all APIs in the specified Google Cloud project and location.
-   *
-   * @param project The Google Cloud project ID.
-   * @param location The API Hub location (for example, `'us-central1'`).
-   * @returns A list of API metadata objects.
-   */
-  async listApis(
-    project: string,
-    location: string,
-  ): Promise<Array<Record<string, unknown>>> {
-    const url = `${this.rootUrl}/projects/${project}/locations/${location}/apis`;
-    const headers = await this.createHeaders();
-    const data = await this.sendGetRequest(url, headers);
-    return Array.isArray(data.apis)
-      ? (data.apis as Array<Record<string, unknown>>)
-      : [];
-  }
-
-  /**
-   * Gets API details by resource name.
-   *
-   * @param apiResourceName Resource name such as `projects/xxx/locations/us-central1/apis/apiname`.
-   * @returns The API metadata dictionary.
-   */
-  async getApi(apiResourceName: string): Promise<Record<string, unknown>> {
-    const url = `${this.rootUrl}/${apiResourceName}`;
-    const headers = await this.createHeaders();
-    return this.sendGetRequest(url, headers);
-  }
-
-  /**
-   * Gets details of a specific API version.
-   *
-   * @param apiVersionName The resource name of the API version.
-   * @returns The API version metadata dictionary.
-   */
-  async getApiVersion(
-    apiVersionName: string,
-  ): Promise<Record<string, unknown>> {
-    const url = `${this.rootUrl}/${apiVersionName}`;
-    const headers = await this.createHeaders();
-    return this.sendGetRequest(url, headers);
-  }
-
-  /**
-   * Retrieves and decodes the content of a specific API specification.
-   *
-   * @param apiSpecResourceName The resource name of the API spec.
-   * @returns The UTF-8 decoded specification content, or an empty string if empty.
-   */
-  async fetchSpec(apiSpecResourceName: string): Promise<string> {
-    const url = `${this.rootUrl}/${apiSpecResourceName}:contents`;
-    const headers = await this.createHeaders();
-    const data = await this.sendGetRequest(url, headers);
-    const contentBase64 =
-      typeof data.contents === 'string' ? data.contents : '';
-    if (contentBase64) {
-      return Buffer.from(contentBase64, 'base64').toString('utf-8');
-    }
-    return '';
-  }
-
-  /**
-   * Extracts the resource names of an API, API Version, and API Spec from a URL or path.
-   */
-  extractResourceName(urlOrPath: string): ExtractedResourceNames {
-    return extractResourceName(urlOrPath);
-  }
-
-  /**
-   * Resolves the OAuth2 access token used for API Hub requests.
-   */
-  async getAccessToken(): Promise<string> {
-    if (this.accessToken) {
-      return this.accessToken;
-    }
-
-    if (this.credentialCache && !this.credentialCache.expired) {
-      return this.credentialCache.token;
-    }
-
-    let parsedCredentials: Record<string, unknown> | undefined;
-    if (this.serviceAccount) {
-      if (typeof this.serviceAccount === 'string') {
-        try {
-          parsedCredentials = JSON.parse(this.serviceAccount) as Record<
-            string,
-            unknown
-          >;
-        } catch (e: unknown) {
-          const message = e instanceof Error ? e.message : String(e);
-          throw new Error(`Invalid service account JSON: ${message}`);
-        }
-      } else {
-        parsedCredentials = this.serviceAccount;
-      }
-    }
-
-    let token: string | null | undefined;
-    try {
-      const authInstance =
-        this.auth ??
-        new GoogleAuth({
-          ...(parsedCredentials ? {credentials: parsedCredentials} : {}),
-          scopes: [CLOUD_PLATFORM_SCOPE],
-        });
-      token = await authInstance.getAccessToken();
-    } catch {
-      token = null;
-    }
-
-    if (!token) {
-      throw new Error(
-        'Please provide a service account or an access token to API Hub client.',
-      );
-    }
-
-    this.credentialCache = {
-      token,
-      expired: false,
-    };
-    return token;
-  }
-
-  private async createHeaders(): Promise<Record<string, string>> {
-    const token = await this.getAccessToken();
-    return {
-      accept: 'application/json, text/plain, */*',
-      Authorization: `Bearer ${token}`,
-    };
-  }
-
-  private async sendGetRequest(
-    url: string,
-    headers: Record<string, string>,
-  ): Promise<Record<string, unknown>> {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers,
-    });
-    if (!response.ok) {
-      throw new Error(
-        `API Hub request failed with status ${response.status}: ${response.statusText}`,
-      );
-    }
-    return (await response.json()) as Record<string, unknown>;
+  try {
+    return await resolveGoogleAuthClient();
+  } catch (e) {
+    throw new Error(NO_CREDENTIALS_MESSAGE, {cause: e});
   }
 }
-
-export {
-  BaseAPIHubClient as BaseApiHubClient,
-  APIHubClient as ApiHubClient,
-  type APIHubClientOptions as ApiHubClientOptions,
-};
