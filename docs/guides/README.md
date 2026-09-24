@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Telemetry
+
+- [Experimental GenAI semantic conventions](telemetry/experimental_semconv/index.md) - Emitting the experimental OpenTelemetry GenAI attributes and the completion-details log record.
+
 ### Tools
 
 #### Retrieval
