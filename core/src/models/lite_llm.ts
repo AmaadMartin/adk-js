@@ -6,6 +6,7 @@
 
 import {Content, FunctionDeclaration, Part, Schema} from '@google/genai';
 
+import {contentUnionToText} from '../utils/content_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseLlm} from './base_llm.js';
@@ -210,9 +211,7 @@ export function getContent(parts: Part[]): ChatCompletionContent {
 /**
  * Converts a `Content` to a chat-completions message.
  */
-export function contentToMessageParam(
-  content: Content,
-): ChatCompletionMessage {
+export function contentToMessageParam(content: Content): ChatCompletionMessage {
   const parts = content.parts ?? [];
   const functionResponse = parts[0]?.functionResponse;
   if (functionResponse) {
@@ -384,24 +383,6 @@ export function modelResponseToGenerateContentResponse(
   return messageToGenerateContentResponse(message);
 }
 
-function systemInstructionToText(
-  instruction: NonNullable<
-    NonNullable<LlmRequest['config']>['systemInstruction']
-  >,
-): string {
-  if (typeof instruction === 'string') {
-    return instruction;
-  }
-  const items = Array.isArray(instruction)
-    ? instruction
-    : 'parts' in instruction
-      ? (instruction.parts ?? [])
-      : [instruction];
-  return items
-    .map((item) => (typeof item === 'string' ? item : (item.text ?? '')))
-    .join('\n');
-}
-
 /**
  * Converts an {@link LlmRequest} to chat-completions messages and tools.
  */
@@ -415,7 +396,7 @@ export function getCompletionInputs(llmRequest: LlmRequest): {
   if (systemInstruction) {
     messages.unshift({
       role: 'developer',
-      content: systemInstructionToText(systemInstruction),
+      content: contentUnionToText(systemInstruction),
     });
   }
 

@@ -16,7 +16,6 @@ import {
   MAX_TOKEN,
   messageToGenerateContentResponse,
   partToMessageBlock,
-  systemInstructionToText,
   toClaudeRole,
   toGoogleGenaiFinishReason,
 } from '../../src/models/anthropic_llm.js';
@@ -297,20 +296,6 @@ describe('functionDeclarationToToolParam', () => {
   });
 });
 
-describe('systemInstructionToText', () => {
-  it('returns strings unchanged and undefined for no instruction', () => {
-    expect(systemInstructionToText('be brief')).toBe('be brief');
-    expect(systemInstructionToText(undefined)).toBeUndefined();
-  });
-
-  it('joins the text of content parts', () => {
-    expect(systemInstructionToText({parts: [{text: 'a'}, {text: 'b'}]})).toBe(
-      'a\nb',
-    );
-    expect(systemInstructionToText(['a', {text: 'b'}])).toBe('a\nb');
-  });
-});
-
 describe('Claude', () => {
   beforeEach(() => {
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
@@ -400,6 +385,24 @@ describe('Claude', () => {
     const llm = new Claude({model: 'claude-3-haiku@20240307'});
     await llm.generateContentAsync(createRequest()).next();
     expect(mockCreate.mock.calls[0][0].model).toBe('claude-3-haiku@20240307');
+  });
+
+  it('sends no system prompt when the request has no system instruction', async () => {
+    const llm = new Claude();
+    await llm.generateContentAsync(createRequest()).next();
+    expect(mockCreate.mock.calls[0][0].system).toBeUndefined();
+  });
+
+  it('sends the text of a content system instruction', async () => {
+    const llm = new Claude();
+    await llm
+      .generateContentAsync(
+        createRequest({
+          config: {systemInstruction: {parts: [{text: 'a'}, {text: 'b'}]}},
+        }),
+      )
+      .next();
+    expect(mockCreate.mock.calls[0][0].system).toBe('a\nb');
   });
 
   it('sends tools and auto tool choice when tools are present', async () => {

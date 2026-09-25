@@ -81,9 +81,7 @@ const STREAMING_MODEL_RESPONSE: ModelResponse[] = [
       {
         delta: {
           role: 'assistant',
-          tool_calls: [
-            {type: 'function', function: {arguments: 'value"}'}},
-          ],
+          tool_calls: [{type: 'function', function: {arguments: 'value"}'}}],
         },
       },
     ],
@@ -194,6 +192,19 @@ describe('LiteLlm', () => {
       content: 'Test system instruction',
     });
     expect(request.messages[1]).toEqual({role: 'user', content: 'Test prompt'});
+  });
+
+  it('sends the text of a content system instruction as the developer message', async () => {
+    const {client, acompletion} = createMockClient();
+    const liteLlm = new LiteLlm({model: 'test_model', llmClient: client});
+    const llmRequest = createRequest({
+      config: {systemInstruction: {parts: [{text: 'a'}, {text: 'b'}]}},
+    });
+
+    await collect(liteLlm.generateContentAsync(llmRequest));
+
+    const request = acompletion.mock.calls[0][0] as CompletionRequest;
+    expect(request.messages[0]).toEqual({role: 'developer', content: 'a\nb'});
   });
 
   it('test_generate_content_async_with_tool_response', async () => {
@@ -379,13 +390,17 @@ describe('lite_llm conversions', () => {
   it('test_get_content_image', () => {
     expect(
       getContent([{inlineData: {mimeType: 'image/png', data: 'dGVzdA=='}}]),
-    ).toEqual([{type: 'image_url', image_url: 'data:image/png;base64,dGVzdA=='}]);
+    ).toEqual([
+      {type: 'image_url', image_url: 'data:image/png;base64,dGVzdA=='},
+    ]);
   });
 
   it('test_get_content_video', () => {
     expect(
       getContent([{inlineData: {mimeType: 'video/mp4', data: 'dGVzdA=='}}]),
-    ).toEqual([{type: 'video_url', video_url: 'data:video/mp4;base64,dGVzdA=='}]);
+    ).toEqual([
+      {type: 'video_url', video_url: 'data:video/mp4;base64,dGVzdA=='},
+    ]);
   });
 
   it('throws for inline data that is neither image nor video', () => {

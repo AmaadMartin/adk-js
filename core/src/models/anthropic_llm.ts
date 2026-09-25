@@ -6,15 +6,9 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import {AnthropicVertex} from '@anthropic-ai/vertex-sdk';
-import {
-  Content,
-  ContentUnion,
-  FinishReason,
-  FunctionDeclaration,
-  Part,
-  PartUnion,
-} from '@google/genai';
+import {Content, FinishReason, FunctionDeclaration, Part} from '@google/genai';
 
+import {contentUnionToText} from '../utils/content_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseLlm} from './base_llm.js';
@@ -194,32 +188,6 @@ export function functionDeclarationToToolParam(
   };
 }
 
-/**
- * Extracts the text of a system instruction, which Claude accepts as a
- * string.
- */
-export function systemInstructionToText(
-  systemInstruction?: ContentUnion,
-): string | undefined {
-  if (systemInstruction === undefined) {
-    return undefined;
-  }
-  const items = Array.isArray(systemInstruction)
-    ? systemInstruction
-    : [systemInstruction];
-  return items.map(contentUnionItemText).join('\n');
-}
-
-function contentUnionItemText(item: PartUnion | Content): string {
-  if (typeof item === 'string') {
-    return item;
-  }
-  if ('parts' in item) {
-    return (item.parts ?? []).map((part) => part.text ?? '').join('\n');
-  }
-  return 'text' in item ? (item.text ?? '') : '';
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -270,10 +238,15 @@ export class Claude extends BaseLlm {
         ? {type: 'auto', disable_parallel_tool_use: true}
         : undefined;
 
+    const systemInstruction = llmRequest.config?.systemInstruction;
+
     const message = await this.anthropicClient.messages.create(
       {
         model: llmRequest.model ?? this.model,
-        system: systemInstructionToText(llmRequest.config?.systemInstruction),
+        system:
+          systemInstruction === undefined
+            ? undefined
+            : contentUnionToText(systemInstruction),
         messages,
         tools,
         tool_choice: toolChoice,
