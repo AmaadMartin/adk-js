@@ -491,7 +491,11 @@ describe('code_execution_utils', () => {
   it('convertCodeExecutionParts renders a part from buildCodeExecutionResultPart as delimited output', () => {
     const content: Content = {
       parts: [
-        buildCodeExecutionResultPart({stdout: '42', stderr: '', outputFiles: []}),
+        buildCodeExecutionResultPart({
+          stdout: '42',
+          stderr: '',
+          outputFiles: [],
+        }),
       ],
       role: 'model',
     };
