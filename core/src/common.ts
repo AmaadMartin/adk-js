@@ -237,8 +237,8 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
-export {BasePlanner} from './planners/base_planner.js';
-export {BuiltInPlanner} from './planners/built_in_planner.js';
+export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
+export {BuiltInPlanner, isBuiltInPlanner} from './planners/built_in_planner.js';
 export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
 export {
   GLOBAL_SCOPE_KEY,
@@ -308,6 +308,16 @@ export type {
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
+export {
+  BaseComputer,
+  ComputerEnvironment,
+  isComputerState,
+} from './tools/computer_use/base_computer.js';
+export type {
+  ComputerState,
+  ScreenSize,
+  ScrollDirection,
+} from './tools/computer_use/base_computer.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
   ENTERPRISE_WEB_SEARCH,
