@@ -5,12 +5,9 @@
  */
 
 import {context, trace} from '@opentelemetry/api';
-import {isLlmAgent} from '../agents/llm_agent.js';
 import {Event} from '../events/event.js';
-import {StateSchemaError} from '../sessions/state.js';
 import {tracer, traceWorkflowInvocation} from '../telemetry/tracing.js';
 import {experimental} from '../utils/experimental.js';
-import {objectSchemaFields, SchemaLike} from '../utils/schema.js';
 import {BaseNode, BaseNodeConfig, START} from './base_node.js';
 import {commonPrefixOf} from './branch_path.js';
 import {DynamicNodeScheduler} from './dynamic_node_scheduler.js';
@@ -37,6 +34,11 @@ import {
   createReplayedOutputEvent,
   WorkflowEventOrigin,
 } from './utils/checkpoint_utils.js';
+import {validateStateSchema} from './utils/graph_validation.js';
+import {
+  hasWaitingTaskAgent,
+  isolationScopeForNode,
+} from './utils/isolation_scope_utils.js';
 import {
   eventsForCurrentRun,
   isFastForwardable,
@@ -470,9 +472,11 @@ export class Workflow extends BaseNode {
     trigger: Trigger,
   ): void {
     const existing = loop.nodes.get(nodeName);
-    // Fresh NodeState for each run, preserving the run counter.
+    // Fresh NodeState for each run, preserving the run counter and the scope
+    // the node's earlier runs wrote their events under.
     const state = createNodeState({
       runCounter: existing?.runCounter ?? 0,
+      isolationScope: existing?.isolationScope,
     });
     state.input = trigger.input;
     state.status = NodeStatus.RUNNING;
@@ -563,7 +567,13 @@ export class Workflow extends BaseNode {
         runId,
         useSubBranch: trigger.useSubBranch,
         overrideBranch: trigger.branch,
-        overrideIsolationScope: trigger.isolationScope,
+        overrideIsolationScope: isolationScopeForNode(
+          node,
+          trigger,
+          nodeState,
+          childNodePath(ctx, nodeName),
+          runId,
+        ),
         useAsOutput: this.graph!.terminalNodeNames.has(nodeName),
       },
     }).then(
@@ -841,74 +851,9 @@ export function isWorkflow(value: unknown): value is Workflow {
   );
 }
 
-/**
- * Rejects a workflow whose graph writes a state key its `stateSchema` does not
- * declare, at construction rather than on the first run.
- *
- * Only keys a node declares statically are checkable, which today means an
- * agent node's `outputKey`. A node carrying its own `stateSchema` answers to
- * that instead, and a prefixed key (`app:`, `user:`, `temp:`) belongs to a
- * wider scope — both are exempt here exactly as they are at run time. A schema
- * that is not an object schema is left unenforced rather than rejected.
- *
- * adk-python checks a `FunctionNode`'s state parameters instead. adk-js's
- * `FunctionNodeHandler` signature is fixed at `(ctx, input)` and binds no state
- * parameters, so there is nothing there to check.
- */
-function validateStateSchema(
-  workflowName: string,
-  graph: Graph | undefined,
-  stateSchema: SchemaLike | undefined,
-): void {
-  if (!stateSchema || !graph) {
-    return;
-  }
-  const fields = objectSchemaFields(stateSchema);
-  if (!fields) {
-    return;
-  }
-  for (const graphNode of graph.nodes) {
-    if (graphNode.stateSchema) {
-      continue;
-    }
-    const key = isLlmAgent(graphNode) ? graphNode.outputKey : undefined;
-    if (!key || key.includes(':') || fields.has(key)) {
-      continue;
-    }
-    throw new StateSchemaError(
-      `Workflow ${workflowName} node '${graphNode.name}' writes state key ` +
-        `'${key}', which is not declared in the state schema. Declared ` +
-        `fields: ${JSON.stringify([...fields.keys()].sort())}`,
-    );
-  }
-}
-
-/**
- * Whether any task-mode agent node in the graph is currently `WAITING`.
- *
- * A task-mode agent may need several user turns to finish. While one is
- * mid-task the graph holds, so a peer node does not join a conversation that
- * is still in progress.
- */
-function hasWaitingTaskAgent(
-  graph: Graph,
-  nodes: ReadonlyMap<string, NodeState>,
-): boolean {
-  return graph.nodes.some(
-    (node) =>
-      isTaskModeNode(node) &&
-      nodes.get(node.name)?.status === NodeStatus.WAITING,
-  );
-}
-
 /** The path a direct child of `ctx` runs under. */
 function childNodePath(ctx: NodeContext, nodeName: string): string {
   return ctx.nodePath ? `${ctx.nodePath}.${nodeName}` : nodeName;
-}
-
-/** Whether `node` is an agent that runs as a multi-turn task. */
-function isTaskModeNode(node: BaseNode): boolean {
-  return isLlmAgent(node) && node.mode === 'task';
 }
 
 /**
