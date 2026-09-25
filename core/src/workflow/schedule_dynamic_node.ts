@@ -50,6 +50,8 @@ export interface DynamicNodeRun {
   state: NodeState;
   output?: unknown;
   task?: Promise<NodeContext>;
+  /** Whether {@link task} has settled. Set by the scheduler that awaits it. */
+  taskSettled?: boolean;
   transferToAgent?: string;
   /**
    * The result of a run that completed without executing its body, kept so a
@@ -73,9 +75,16 @@ export class DynamicNodeState {
   /** Union of unresolved interrupt ids across dynamic child nodes. */
   readonly interruptIds = new Set<string>();
 
-  /** All in-flight dynamic node tasks. */
+  /**
+   * The dynamic node tasks that have not settled yet.
+   *
+   * A settled run cannot be told apart from an awaited, handled one, so only
+   * in-flight tasks are reported — the same boundary adk-python's
+   * `get_dynamic_tasks()` draws with `not run.task.done()`.
+   */
   getDynamicTasks(): Array<Promise<NodeContext>> {
     return [...this.runs.values()]
+      .filter((run) => !run.taskSettled)
       .map((run) => run.task)
       .filter((task): task is Promise<NodeContext> => task !== undefined);
   }
