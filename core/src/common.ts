@@ -237,8 +237,8 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
-export {BasePlanner} from './planners/base_planner.js';
-export {BuiltInPlanner} from './planners/built_in_planner.js';
+export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
+export {BuiltInPlanner, isBuiltInPlanner} from './planners/built_in_planner.js';
 export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
 export {
   GLOBAL_SCOPE_KEY,
@@ -416,6 +416,22 @@ export type {SkillRegistry} from './skills/skill_registry.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
+
+export {EditFileTool} from './tools/environment/edit_file_tool.js';
+export {
+  EnvironmentToolset,
+  type EnvironmentToolsetOptions,
+} from './tools/environment/environment_toolset.js';
+export {
+  ExecuteTool,
+  ExecuteToolErrorCode,
+  type ExecuteToolOptions,
+} from './tools/environment/execute_tool.js';
+export {
+  ReadFileTool,
+  type ReadFileToolOptions,
+} from './tools/environment/read_file_tool.js';
+export {WriteFileTool} from './tools/environment/write_file_tool.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
