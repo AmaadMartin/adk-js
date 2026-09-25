@@ -5,13 +5,18 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {createEvent, Event} from '../../src/events/event.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
-import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/workflow/utils/hitl_utils.js';
+import {RequestInput} from '../../src/workflow/request_input.js';
+import {
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
+} from '../../src/workflow/utils/hitl_utils.js';
 import {createIc, driveNode} from './test_helpers.js';
 
 describe('FunctionNode result handling', () => {
@@ -81,6 +86,7 @@ describe('FunctionNode auth gate', () => {
   it('interrupts with a credential request when none is available', async () => {
     const node = new FunctionNode('needsAuth', () => 'ran', {
       authConfig: apiKeyConfig(),
+      rerunOnResume: true,
     });
     const {events, output} = await driveNode(node, 'x');
 
@@ -94,6 +100,7 @@ describe('FunctionNode auth gate', () => {
   it('proceeds when the credential is supplied via resumeInputs', async () => {
     const node = new FunctionNode('needsAuth', () => 'ran', {
       authConfig: apiKeyConfig(),
+      rerunOnResume: true,
     });
     const channel = new AsyncQueue<Event>();
     const root = new NodeContext({
@@ -105,5 +112,100 @@ describe('FunctionNode auth gate', () => {
     });
     const child = await root.runNode(node, 'x', {useAsOutput: true});
     expect(child.output).toBe('ran');
+  });
+});
+
+describe('FunctionNode RequestInput handling', () => {
+  it('emits an interrupt event for a returned RequestInput', async () => {
+    // `FunctionNodeResult` carries `RequestInput`, so a handler declaring a
+    // concrete output type can still return one without a cast. The type
+    // parameters matter: with the default `unknown` output, every value is
+    // assignable and the union member proves nothing.
+    const node = new FunctionNode<string, string>(
+      'ask',
+      () => new RequestInput({interruptId: 'ask-1', message: 'Approve?'}),
+    );
+
+    const {events} = await driveNode(node, 'x');
+
+    const fc = events[0]?.content?.parts?.[0]?.functionCall;
+    expect(fc?.name).toBe(REQUEST_INPUT_FUNCTION_CALL_NAME);
+    expect(fc?.id).toBe('ask-1');
+    expect(events[0].longRunningToolIds).toContain('ask-1');
+  });
+
+  it('keeps a pending state delta on the event after the interrupt', async () => {
+    // `BaseNode.run` converts the RequestInput without reaching `toEvent`, so
+    // the delta is not drained by it and still reaches the next event.
+    const node = new FunctionNode<string, string>('ask', function* (ctx) {
+      ctx.state.set('k', 1);
+      yield new RequestInput({interruptId: 'ask-2'});
+      yield 'after';
+    });
+
+    const {events} = await driveNode(node, 'x');
+
+    expect(events).toHaveLength(2);
+    expect(events[1].output).toBe('after');
+    expect(events[1].actions.stateDelta).toEqual({k: 1});
+  });
+});
+
+describe('FunctionNode construction', () => {
+  it('builds with a parameter JSON Schema cannot express', async () => {
+    // Rendering the whole schema as JSON Schema throws for `z.date()`, which
+    // used to abort construction with a raw Zod error naming neither the node
+    // nor the parameter.
+    const parameters = z.object({name: z.string(), when: z.date()});
+    const record = (
+      _ctx: NodeContext,
+      {name, when}: z.infer<typeof parameters>,
+    ) => `${name}@${when.toISOString()}`;
+    const node = new FunctionNode(record, {
+      parameters,
+      parameterBinding: 'nodeInput',
+    });
+
+    const {output} = await driveNode(node, {
+      name: 'ada',
+      when: new Date('2026-01-01T00:00:00Z'),
+    });
+
+    expect(output).toBe('ada@2026-01-01T00:00:00.000Z');
+  });
+
+  it('coerces a declared parameter with the field its schema declares', async () => {
+    const parameters = z.object({count: z.coerce.number()});
+    const twice = (_ctx: NodeContext, {count}: z.infer<typeof parameters>) =>
+      count * 2;
+    const node = new FunctionNode(twice, {
+      parameters,
+      parameterBinding: 'nodeInput',
+    });
+
+    expect((await driveNode(node, {count: '21'})).output).toBe(42);
+  });
+
+  it('takes its name from the wrapped function when none is given', () => {
+    const greet = () => 'hi';
+
+    expect(new FunctionNode(greet).name).toBe('greet');
+    expect(new FunctionNode(greet, {description: 'd'}).description).toBe('d');
+  });
+
+  it('prefers an explicit name over the function name', () => {
+    const greet = () => 'hi';
+
+    expect(new FunctionNode('welcome', greet).name).toBe('welcome');
+    expect(new FunctionNode(greet, {name: 'welcome'}).name).toBe('welcome');
+  });
+
+  it('rejects a handler with no resolvable name', () => {
+    // An arrow inside an array literal gets no inferred name, so `.name` is ''.
+    const [anonymous] = [() => 'hi'];
+
+    expect(() => new FunctionNode(anonymous)).toThrow(
+      'FunctionNode must have a name',
+    );
   });
 });
