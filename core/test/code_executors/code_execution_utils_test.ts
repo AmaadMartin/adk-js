@@ -43,10 +43,10 @@ describe('getEncodedFileContent', () => {
 // buildExecutableCodePart
 // ---------------------------------------------------------------------------
 describe('buildExecutableCodePart', () => {
-  it('builds a part with text and executableCode fields', () => {
+  it('builds a part with an executableCode field and no text', () => {
     const code = 'print("hello")';
     const part = buildExecutableCodePart(code);
-    expect(part.text).toBe(code);
+    expect(part.text).toBeUndefined();
     expect(part.executableCode).toBeDefined();
     expect(part.executableCode!.code).toBe(code);
   });
@@ -58,7 +58,7 @@ describe('buildExecutableCodePart', () => {
 
   it('handles empty code string', () => {
     const part = buildExecutableCodePart('');
-    expect(part.text).toBe('');
+    expect(part.text).toBeUndefined();
     expect(part.executableCode!.code).toBe('');
   });
 });
@@ -74,7 +74,7 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
-    expect(part.text).toBe('NameError: x');
+    expect(part.codeExecutionResult!.output).toBe('NameError: x');
   });
 
   it('returns OUTCOME_OK with stdout when no stderr', () => {
@@ -84,7 +84,7 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
-    expect(part.text).toContain('42');
+    expect(part.codeExecutionResult!.output).toContain('42');
   });
 
   it('includes output file names in successful result', () => {
@@ -97,8 +97,8 @@ describe('buildCodeExecutionResultPart', () => {
       ],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
-    expect(part.text).toContain('chart.png');
-    expect(part.text).toContain('data.csv');
+    expect(part.codeExecutionResult!.output).toContain('chart.png');
+    expect(part.codeExecutionResult!.output).toContain('data.csv');
   });
 
   it('includes both stdout and saved artifacts when both present', () => {
@@ -107,8 +107,8 @@ describe('buildCodeExecutionResultPart', () => {
       stderr: '',
       outputFiles: [{name: 'out.txt', content: '', mimeType: 'text/plain'}],
     });
-    expect(part.text).toContain('done');
-    expect(part.text).toContain('out.txt');
+    expect(part.codeExecutionResult!.output).toContain('done');
+    expect(part.codeExecutionResult!.output).toContain('out.txt');
   });
 
   it('prefers stderr over stdout when both are set', () => {
@@ -118,7 +118,7 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
-    expect(part.text).toBe('error occurred');
+    expect(part.codeExecutionResult!.output).toBe('error occurred');
   });
 });
 
