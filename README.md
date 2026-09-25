@@ -124,6 +124,7 @@ agents:
 - **Developer guides**: [docs/guides/README.md](./docs/guides/README.md)
 - **Samples in this repository**:
   [graph workflows](./samples/workflows/README.md),
+  [models](./samples/models/README.md),
   [tools](./samples/tools/README.md)
 
 ## 🤝 Contributing
