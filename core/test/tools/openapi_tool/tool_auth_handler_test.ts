@@ -692,12 +692,17 @@ describe('ToolAuthHandler collaborators', () => {
       'from-injected',
     );
     expect(exchanger.exchange).toHaveBeenCalledOnce();
-    // The exchanged credential landed in the store that was passed in.
+    // The exchanged credential landed in the store that was passed in. A
+    // credentialKey names the slot, so the read passes the same key.
     expect(
-      store.getCredential(API_KEY_SCHEME, {
-        authType: AuthCredentialTypes.API_KEY,
-        apiKey: 'k',
-      }),
+      store.getCredential(
+        API_KEY_SCHEME,
+        {
+          authType: AuthCredentialTypes.API_KEY,
+          apiKey: 'k',
+        },
+        'my-key',
+      ),
     ).toEqual(result.authCredential);
   });
 

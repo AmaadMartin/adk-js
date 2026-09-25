@@ -72,6 +72,54 @@ export type MCPConnectionParams =
   | StdioConnectionParams
   | StreamableHTTPConnectionParams;
 
+/** The request options the StreamableHTTP transport is configured with. */
+type TransportRequestInit = NonNullable<
+  StreamableHTTPClientTransportOptions['requestInit']
+>;
+
+/**
+ * Combines the headers configured on a connection with per-call headers.
+ *
+ * Only the StreamableHTTP transport takes headers, so this is not reachable
+ * for a stdio connection.
+ *
+ * With nothing to add, the configured headers pass through untouched, so a
+ * connection without auth reaches the transport exactly as it does today.
+ * Otherwise `Headers` does the merge: it accepts every shape the transport
+ * allows, and its overlay is case-insensitive, so a per-call `Authorization`
+ * replaces a configured `authorization` rather than joining it and sending
+ * both credentials. That merge lowercases the names, as they go on the wire.
+ *
+ * @param params The connection the session is created for.
+ * @param additionalHeaders Headers for this one call, such as the ones
+ *   carrying a resolved credential.
+ * @return The headers to send, or `undefined` when there are none.
+ */
+function mergeConnectionHeaders(
+  params: StreamableHTTPConnectionParams,
+  additionalHeaders?: Record<string, string>,
+): TransportRequestInit['headers'] {
+  const requestInit = params.transportOptions?.requestInit;
+  const configured = requestInit
+    ? requestInit.headers
+    : (params.header as Record<string, string> | undefined);
+
+  if (!additionalHeaders) {
+    return configured;
+  }
+
+  const merged = new Headers(configured);
+  for (const [name, value] of Object.entries(additionalHeaders)) {
+    merged.set(name, value);
+  }
+
+  const record: Record<string, string> = {};
+  merged.forEach((value, name) => {
+    record[name] = value;
+  });
+  return Object.keys(record).length > 0 ? record : undefined;
+}
+
 /**
  * Manages Model Context Protocol (MCP) client sessions.
  *
@@ -93,7 +141,14 @@ export class MCPSessionManager {
     this.connectionParams = connectionParams;
   }
 
-  async createSession(): Promise<Client> {
+  /**
+   * Opens a new MCP session.
+   *
+   * @param headers Headers for this session only, merged over the ones the
+   *   connection was configured with. Ignored by the stdio transport.
+   * @return A connected MCP client.
+   */
+  async createSession(headers?: Record<string, string>): Promise<Client> {
     const {Client} = await loadOptionalPeer(
       MCP_SDK,
       () => import('@modelcontextprotocol/sdk/client/index.js'),
@@ -115,16 +170,24 @@ export class MCPSessionManager {
           break;
         }
         case 'StreamableHTTPConnectionParams': {
-          const options = this.connectionParams.transportOptions ?? {};
-
-          if (
-            !options.requestInit &&
-            this.connectionParams.header !== undefined
-          ) {
-            options.requestInit = {
-              headers: this.connectionParams.header as Record<string, string>,
-            };
-          }
+          const mergedHeaders = mergeConnectionHeaders(
+            this.connectionParams,
+            headers,
+          );
+          // Built fresh rather than mutated in place: the caller owns
+          // `transportOptions`, and writing this call's credential into it
+          // would leak that credential into every later call.
+          const options: StreamableHTTPClientTransportOptions = {
+            ...this.connectionParams.transportOptions,
+            ...(mergedHeaders
+              ? {
+                  requestInit: {
+                    ...this.connectionParams.transportOptions?.requestInit,
+                    headers: mergedHeaders,
+                  },
+                }
+              : {}),
+          };
 
           const {StreamableHTTPClientTransport} = await loadOptionalPeer(
             MCP_SDK,

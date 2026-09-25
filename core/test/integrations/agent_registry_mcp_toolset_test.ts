@@ -4,13 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import {
   AgentRegistrySingleMCPToolset,
   GCP_MCP_SERVER_DESTINATION_ID,
 } from '../../src/index.js';
 import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
 import {logger} from '../../src/utils/logger.js';
+import {createToolContext} from '../agents/context_test_utils.js';
 
 const mockListTools = vi.fn().mockResolvedValue({
   tools: [
@@ -21,12 +24,14 @@ const mockListTools = vi.fn().mockResolvedValue({
 
 const mockConnect = vi.fn().mockResolvedValue(undefined);
 const mockClose = vi.fn().mockResolvedValue(undefined);
+const mockCallTool = vi.fn().mockResolvedValue({content: []});
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: vi.fn().mockImplementation(() => ({
     connect: mockConnect,
     close: mockClose,
     listTools: mockListTools,
+    callTool: mockCallTool,
   })),
 }));
 
@@ -240,6 +245,52 @@ describe('AgentRegistrySingleMCPToolset', () => {
         connectionParams: BASE_PARAMS,
       });
       await expect(toolset.close()).resolves.toBeUndefined();
+    });
+  });
+  describe('authentication', () => {
+    it('sends the configured credential as a header on a tool call', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+        authScheme: {type: 'http', scheme: 'bearer'},
+        authCredential: {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'registry-token'}},
+        },
+      });
+
+      const [tool] = await toolset.getTools();
+      await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {authorization: 'Bearer registry-token'}}},
+      );
+    });
+
+    it('caches the credential under the configured credentialKey', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+        authScheme: {type: 'http', scheme: 'bearer'},
+        credentialKey: 'registry_server_a',
+      });
+
+      const [tool] = await toolset.getTools();
+      const toolContext = createToolContext();
+      vi.spyOn(toolContext, 'getAuthResponse').mockReturnValue({
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'granted-token'}},
+      });
+
+      await tool.runAsync({args: {}, toolContext});
+
+      expect(
+        toolContext.state.get(
+          'registry_server_a_existing_exchanged_credential',
+        ),
+      ).toBeDefined();
+      expect(
+        toolContext.state.get('mcp_http_existing_exchanged_credential'),
+      ).toBeUndefined();
     });
   });
 });
