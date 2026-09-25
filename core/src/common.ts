@@ -237,8 +237,8 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
-export {BasePlanner} from './planners/base_planner.js';
-export {BuiltInPlanner} from './planners/built_in_planner.js';
+export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
+export {BuiltInPlanner, isBuiltInPlanner} from './planners/built_in_planner.js';
 export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
 export {
   GLOBAL_SCOPE_KEY,
@@ -313,6 +313,21 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {
+  MockStrategy,
+  createEnvironmentSimulationConfig,
+  createInjectedError,
+  createInjectionConfig,
+  createToolSimulationConfig,
+} from './tools/environment_simulation/environment_simulation_config.js';
+export type {
+  EnvironmentSimulationConfig,
+  EnvironmentSimulationConfigParams,
+  InjectedError,
+  InjectionConfig,
+  ToolSimulationConfig,
+  ToolSimulationConfigParams,
+} from './tools/environment_simulation/environment_simulation_config.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
