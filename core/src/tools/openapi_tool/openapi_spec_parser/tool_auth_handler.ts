@@ -65,9 +65,11 @@ export class ToolContextCredentialStore {
    * Returns the state key that holds the credential exchanged for this scheme
    * and credential pair.
    *
-   * Both operands are hashed into the key, so two tools configured with
-   * different schemes, or with different credentials under one scheme, never
-   * share a slot.
+   * A caller that supplies a `credentialKey` names the slot itself, so two
+   * tools that authenticate against different servers with the same scheme and
+   * credential still keep separate slots. Otherwise both operands are hashed
+   * into the key, so two tools configured with different schemes, or with
+   * different credentials under one scheme, never share a slot.
    *
    * The key deliberately carries no `temp:` prefix. Session state is a copy and
    * only the delta is persisted, and `temp:` is cleared at the end of a run,
@@ -76,7 +78,11 @@ export class ToolContextCredentialStore {
   getCredentialKey(
     authScheme?: AuthScheme,
     authCredential?: AuthCredential,
+    credentialKey?: string,
   ): string {
+    if (credentialKey) {
+      return `${credentialKey}_existing_exchanged_credential`;
+    }
     const schemeName = authScheme
       ? `${authScheme.type}_${stableHash(authScheme)}`
       : '';
@@ -96,8 +102,13 @@ export class ToolContextCredentialStore {
   getCredential(
     authScheme?: AuthScheme,
     authCredential?: AuthCredential,
+    credentialKey?: string,
   ): AuthCredential | undefined {
-    const key = this.getCredentialKey(authScheme, authCredential);
+    const key = this.getCredentialKey(
+      authScheme,
+      authCredential,
+      credentialKey,
+    );
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
     // bracket access would bypass its value/delta store and always miss.
@@ -181,6 +192,7 @@ export class ToolAuthHandler {
     const existingCredential = this.credentialStore.getCredential(
       this.authScheme,
       this.authCredential,
+      this.credentialKey,
     );
 
     if (existingCredential) {
@@ -227,6 +239,7 @@ export class ToolAuthHandler {
       const key = this.credentialStore.getCredentialKey(
         this.authScheme,
         this.authCredential,
+        this.credentialKey,
       );
       this.credentialStore.storeCredential(key, exchanged.credential);
     }

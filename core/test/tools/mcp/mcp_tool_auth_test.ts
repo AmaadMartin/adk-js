@@ -278,7 +278,7 @@ describe('MCPTool authentication', () => {
       expect(client.callTool).not.toHaveBeenCalled();
     });
 
-    it('propagates an exchange failure instead of calling unauthenticated', async () => {
+    it('asks for consent on an exchange failure instead of calling unauthenticated', async () => {
       const {manager} = createSessionManager();
       const tool = createTool(
         {
@@ -295,9 +295,18 @@ describe('MCPTool authentication', () => {
         manager,
       );
 
-      await expect(
-        tool.runAsync({args: {}, toolContext: createToolContext()}),
-      ).rejects.toThrow(/Authorization code not found/);
+      // The exchange cannot find an authorization code in the error callback, so
+      // the handler restarts the consent flow rather than failing the call. The
+      // server is never reached without a credential either way.
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: createToolContext(),
+      });
+
+      expect(result).toEqual({
+        pending: true,
+        message: 'Needs your authorization to access your data.',
+      });
       expect(manager.createSession).not.toHaveBeenCalled();
     });
 
