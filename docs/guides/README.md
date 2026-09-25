@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Models
+
+- [Models](models/index.md) - Running an agent on Claude on Vertex AI with `Claude`, or on any OpenAI-compatible chat-completions server with `LiteLlm` and a client you supply.
+
 ### Tools
 
 #### Retrieval
