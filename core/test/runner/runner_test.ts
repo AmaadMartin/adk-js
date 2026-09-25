@@ -16,6 +16,7 @@ import {
   InMemorySessionService,
   InvocationContext,
   isRoutableLlmAgent,
+  isRunnerConfig,
   LlmAgent,
   Runner,
   ScopedArtifactService,
@@ -1915,5 +1916,51 @@ describe('Runner artifactService handling', () => {
     expect(capturedInvocationContext!.artifactService).not.toBeInstanceOf(
       ScopedArtifactService,
     );
+  });
+});
+
+describe('isRunnerConfig', () => {
+  it('accepts a config carrying a session service', () => {
+    expect(
+      isRunnerConfig({
+        appName: TEST_APP_ID,
+        sessionService: new InMemorySessionService(),
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects a value that is not an object', () => {
+    expect(isRunnerConfig('invalid')).toBe(false);
+    expect(isRunnerConfig(7)).toBe(false);
+    expect(isRunnerConfig(undefined)).toBe(false);
+  });
+
+  it('rejects null', () => {
+    expect(isRunnerConfig(null)).toBe(false);
+  });
+
+  it('rejects an array', () => {
+    expect(isRunnerConfig([])).toBe(false);
+  });
+
+  it('rejects an object with no session service', () => {
+    expect(isRunnerConfig({})).toBe(false);
+    expect(isRunnerConfig({appName: TEST_APP_ID})).toBe(false);
+  });
+
+  it('rejects a session service that is not an object', () => {
+    expect(isRunnerConfig({sessionService: 'in-memory'})).toBe(false);
+    expect(isRunnerConfig({sessionService: null})).toBe(false);
+  });
+
+  it('accepts a real Runner, which also carries a session service', () => {
+    // `getAdkRunner` checks `isRunner` first, so the overlap is harmless.
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('root'),
+      sessionService: new InMemorySessionService(),
+    });
+
+    expect(isRunnerConfig(runner)).toBe(true);
   });
 });
