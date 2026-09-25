@@ -242,3 +242,42 @@ describe('CodeExecutorContext', () => {
     });
   });
 });
+
+describe('code_executor_context', () => {
+  it('seeds an empty context into session state when the key is missing', () => {
+    const state = new State();
+    new CodeExecutorContext(state);
+    expect(state.has('_code_execution_context')).toBe(true);
+    expect(state.get('_code_execution_context')).toEqual({});
+    expect(state.hasDelta()).toBe(true);
+  });
+
+  it('writes setExecutionId and addProcessedFileNames into the live session state context', () => {
+    const state = new State();
+    const ctx = new CodeExecutorContext(state);
+    ctx.setExecutionId('exec-1');
+    ctx.addProcessedFileNames(['a.csv']);
+    expect(state.get('_code_execution_context')).toEqual({
+      execution_session_id: 'exec-1',
+      processed_input_files: ['a.csv'],
+    });
+  });
+
+  it('returns the same live context object from getCodeExecutionContext when the key was missing', () => {
+    const state = new State();
+    const ctx = new CodeExecutorContext(state);
+    const first = ctx.getCodeExecutionContext();
+    ctx.setExecutionId('exec-2');
+    expect(ctx.getCodeExecutionContext()).toBe(first);
+    expect(first).toEqual({execution_session_id: 'exec-2'});
+  });
+
+  it('keeps an existing context object without replacing it', () => {
+    const existing = {execution_session_id: 'kept'};
+    const state = new State({_code_execution_context: existing});
+    const ctx = new CodeExecutorContext(state);
+    expect(state.hasDelta()).toBe(false);
+    expect(ctx.getCodeExecutionContext()).toBe(existing);
+    expect(ctx.getExecutionId()).toBe('kept');
+  });
+});

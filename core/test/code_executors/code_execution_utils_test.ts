@@ -43,10 +43,10 @@ describe('getEncodedFileContent', () => {
 // buildExecutableCodePart
 // ---------------------------------------------------------------------------
 describe('buildExecutableCodePart', () => {
-  it('builds a part with text and executableCode fields', () => {
+  it('builds a part with an executableCode field and no text', () => {
     const code = 'print("hello")';
     const part = buildExecutableCodePart(code);
-    expect(part.text).toBe(code);
+    expect(part.text).toBeUndefined();
     expect(part.executableCode).toBeDefined();
     expect(part.executableCode!.code).toBe(code);
   });
@@ -58,7 +58,7 @@ describe('buildExecutableCodePart', () => {
 
   it('handles empty code string', () => {
     const part = buildExecutableCodePart('');
-    expect(part.text).toBe('');
+    expect(part.text).toBeUndefined();
     expect(part.executableCode!.code).toBe('');
   });
 });
@@ -74,7 +74,7 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
-    expect(part.text).toBe('NameError: x');
+    expect(part.codeExecutionResult!.output).toBe('NameError: x');
   });
 
   it('returns OUTCOME_OK with stdout when no stderr', () => {
@@ -84,7 +84,7 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
-    expect(part.text).toContain('42');
+    expect(part.codeExecutionResult!.output).toContain('42');
   });
 
   it('includes output file names in successful result', () => {
@@ -97,8 +97,8 @@ describe('buildCodeExecutionResultPart', () => {
       ],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
-    expect(part.text).toContain('chart.png');
-    expect(part.text).toContain('data.csv');
+    expect(part.codeExecutionResult!.output).toContain('chart.png');
+    expect(part.codeExecutionResult!.output).toContain('data.csv');
   });
 
   it('includes both stdout and saved artifacts when both present', () => {
@@ -107,8 +107,8 @@ describe('buildCodeExecutionResultPart', () => {
       stderr: '',
       outputFiles: [{name: 'out.txt', content: '', mimeType: 'text/plain'}],
     });
-    expect(part.text).toContain('done');
-    expect(part.text).toContain('out.txt');
+    expect(part.codeExecutionResult!.output).toContain('done');
+    expect(part.codeExecutionResult!.output).toContain('out.txt');
   });
 
   it('prefers stderr over stdout when both are set', () => {
@@ -118,7 +118,7 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
-    expect(part.text).toBe('error occurred');
+    expect(part.codeExecutionResult!.output).toBe('error occurred');
   });
 });
 
@@ -414,5 +414,105 @@ describe('CodeExecutionLanguage', () => {
     expect(CodeExecutionLanguage.SHELL).toBe('shell');
     expect(CodeExecutionLanguage.POWERSHELL).toBe('powershell');
     expect(CodeExecutionLanguage.WINDOWS_CMD).toBe('cmd');
+  });
+});
+
+describe('code_execution_utils', () => {
+  const CODE_DELIM: [string, string] = ['```python\n', '\n```'];
+  const RESULT_DELIM: [string, string] = ['```tool_output\n', '\n```'];
+
+  it('buildExecutableCodePart sets only executableCode, with no text field', () => {
+    expect(buildExecutableCodePart('x = 1')).toEqual({
+      executableCode: {code: 'x = 1', language: Language.PYTHON},
+    });
+  });
+
+  it('buildCodeExecutionResultPart puts stderr in codeExecutionResult.output', () => {
+    expect(
+      buildCodeExecutionResultPart({
+        stdout: 'ignored',
+        stderr: 'NameError: x',
+        outputFiles: [],
+      }),
+    ).toEqual({
+      codeExecutionResult: {
+        outcome: Outcome.OUTCOME_FAILED,
+        output: 'NameError: x',
+      },
+    });
+  });
+
+  it('buildCodeExecutionResultPart puts stdout in codeExecutionResult.output', () => {
+    expect(
+      buildCodeExecutionResultPart({stdout: '42', stderr: '', outputFiles: []}),
+    ).toEqual({
+      codeExecutionResult: {
+        outcome: Outcome.OUTCOME_OK,
+        output: 'Code execution result:\n42\n',
+      },
+    });
+  });
+
+  it('buildCodeExecutionResultPart emits the result block and no artifacts block for empty stdout and an empty outputFiles array', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: '',
+      stderr: '',
+      outputFiles: [],
+    });
+    expect(part.codeExecutionResult!.output).toBe('Code execution result:\n\n');
+  });
+
+  it('buildCodeExecutionResultPart lists only saved artifacts, backtick-quoted and comma-joined, for empty stdout with files', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: '',
+      stderr: '',
+      outputFiles: [
+        {name: 'a.csv', content: '', mimeType: 'text/csv'},
+        {name: 'b.png', content: '', mimeType: 'image/png'},
+      ],
+    });
+    expect(part.codeExecutionResult!.output).toBe(
+      'Saved artifacts:\n`a.csv`,`b.png`',
+    );
+  });
+
+  it('buildCodeExecutionResultPart joins the result and artifacts blocks with a blank line', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: 'done',
+      stderr: '',
+      outputFiles: [{name: 'out.txt', content: '', mimeType: 'text/plain'}],
+    });
+    expect(part.codeExecutionResult!.output).toBe(
+      'Code execution result:\ndone\n\n\nSaved artifacts:\n`out.txt`',
+    );
+    expect(part.text).toBeUndefined();
+  });
+
+  it('convertCodeExecutionParts renders a part from buildCodeExecutionResultPart as delimited output', () => {
+    const content: Content = {
+      parts: [
+        buildCodeExecutionResultPart({
+          stdout: '42',
+          stderr: '',
+          outputFiles: [],
+        }),
+      ],
+      role: 'model',
+    };
+    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+    expect(content.parts![0]).toEqual({
+      text: '```tool_output\nCode execution result:\n42\n\n```',
+    });
+    expect(content.role).toBe('user');
+  });
+
+  it('extractCodeAndTruncateContent appends an executable code part with no duplicate text', () => {
+    const parts: Part[] = [{text: 'Run this:\n```python\nx = 1\n```'}];
+    const content: Content = {parts, role: 'model'};
+    extractCodeAndTruncateContent(content, [CODE_DELIM]);
+    expect(content.parts).toEqual([
+      {text: 'Run this:\n'},
+      {executableCode: {code: 'x = 1', language: Language.PYTHON}},
+    ]);
   });
 });

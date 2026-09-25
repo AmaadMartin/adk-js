@@ -71,7 +71,10 @@ import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
-import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
+import {
+  CODE_EXECUTION_REQUEST_PROCESSOR,
+  responseProcessor as CODE_EXECUTION_RESPONSE_PROCESSOR,
+} from './processors/code_execution_request_processor.js';
 import {CONTENT_REQUEST_PROCESSOR} from './processors/content_request_processor.js';
 import {ContextCompactorRequestProcessor} from './processors/context_compactor_request_processor.js';
 import {IDENTITY_LLM_REQUEST_PROCESSOR} from './processors/identity_llm_request_processor.js';
@@ -576,7 +579,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
     }
 
-    this.responseProcessors = config.responseProcessors ?? [];
+    this.responseProcessors = config.responseProcessors ?? [
+      CODE_EXECUTION_RESPONSE_PROCESSOR,
+    ];
 
     // Preserve the agent transfer behavior.
     const agentTransferDisabled =

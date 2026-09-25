@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Code executors
+
+- [Code executors](code_executors/index.md) - How an agent runs the code its model writes, the loop that feeds the output back, and how to choose between the built-in, local, container and Vertex AI executors.
+
 ### Tools
 
 #### Retrieval

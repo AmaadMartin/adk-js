@@ -197,7 +197,6 @@ export function extractCodeAndTruncateContent(
  */
 export function buildExecutableCodePart(code: string): Part {
   return {
-    text: code,
     executableCode: {
       code,
       language: Language.PYTHON,
@@ -216,28 +215,28 @@ export function buildCodeExecutionResultPart(
 ): Part {
   if (codeExecutionResult.stderr) {
     return {
-      text: codeExecutionResult.stderr,
       codeExecutionResult: {
         outcome: Outcome.OUTCOME_FAILED,
+        output: codeExecutionResult.stderr,
       },
     };
   }
 
+  const outputFiles = codeExecutionResult.outputFiles;
   const finalResult = [];
-  if (codeExecutionResult.stdout || !codeExecutionResult.outputFiles) {
+  if (codeExecutionResult.stdout || !outputFiles?.length) {
     finalResult.push(`Code execution result:\n${codeExecutionResult.stdout}\n`);
   }
-  if (codeExecutionResult.outputFiles) {
+  if (outputFiles?.length) {
     finalResult.push(
-      `Saved artifacts:\n` +
-        codeExecutionResult.outputFiles.map((f) => f.name).join(', '),
+      `Saved artifacts:\n` + outputFiles.map((f) => `\`${f.name}\``).join(','),
     );
   }
 
   return {
-    text: finalResult.join('\n\n'),
     codeExecutionResult: {
       outcome: Outcome.OUTCOME_OK,
+      output: finalResult.join('\n\n'),
     },
   };
 }
