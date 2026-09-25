@@ -232,6 +232,10 @@ export const MAX_INSTANCES_OPTION = new Option(
   '--max_instances [number]',
   'Optional. The maximum number of application instances that can be launched to handle increased traffic. Default: 10.',
 );
+const DEPLOY_AGENT_ARGUMENT = new Argument(
+  '[agent]',
+  'The path to the agent source code folder, or a single agent file.',
+).default(process.cwd(), 'the current directory');
 
 /**
  * Creates the ADK CLI program.
@@ -514,7 +518,7 @@ export function createProgram(): Command {
 
   const registerAgentEngineCommand = (cmd: Command) => {
     cmd
-      .addArgument(AGENT_DIR_ARGUMENT)
+      .addArgument(DEPLOY_AGENT_ARGUMENT)
       .allowUnknownOption()
       .allowExcessArguments()
       .addOption(PROJECT_DEPLOY_OPTION)
@@ -541,6 +545,12 @@ export function createProgram(): Command {
       .addOption(AGENT_ENGINE_ID_OPTION)
       .addOption(MIN_INSTANCES_OPTION)
       .addOption(MAX_INSTANCES_OPTION)
+      .addHelpText(
+        'after',
+        `\nExample:\n` +
+          `  adk deploy ${cmd.name()} --project=[project] --region=[region] \\\n` +
+          `    --repository=[repository] path/to/my_agent\n`,
+      )
       .action(async (agentPath: string, options: Record<string, string>) => {
         try {
           await deployToAgentEngine({
@@ -580,8 +590,16 @@ export function createProgram(): Command {
       });
   };
 
-  registerAgentEngineCommand(DEPLOY_COMMAND.command('agent_engine'));
-  registerAgentEngineCommand(DEPLOY_COMMAND.command('reasoning_engine'));
+  registerAgentEngineCommand(
+    DEPLOY_COMMAND.command('agent_engine').description(
+      'Deploys an agent to Agent Engine.',
+    ),
+  );
+  registerAgentEngineCommand(
+    DEPLOY_COMMAND.command('reasoning_engine').description(
+      'Deploys an agent to Agent Engine. Alias of `deploy agent_engine`.',
+    ),
+  );
 
   const CONFORMANCE_COMMAND = program
     .command('integration')
