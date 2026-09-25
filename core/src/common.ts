@@ -199,6 +199,36 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {
+  AntigravityAgent,
+  PARENT_REQUIRES_SINGLE_TURN_MESSAGE,
+} from './labs/antigravity/antigravity_agent.js';
+export type {
+  AntigravityAgentMode,
+  AntigravityAgentOptions,
+} from './labs/antigravity/antigravity_agent.js';
+export {
+  isAntigravityToolExecutionError,
+  isLocalAntigravityConfig,
+} from './labs/antigravity/sdk_types.js';
+export type {
+  AntigravityAgentConfig,
+  AntigravityHook,
+  AntigravityStep,
+  AntigravityStepSource,
+  AntigravityStepStatus,
+  AntigravityStepType,
+  AntigravityTool,
+  AntigravityToolCall,
+  AntigravityToolExecutionError,
+  AntigravityToolResult,
+  LocalAntigravityAgentConfig,
+  OnToolErrorHook,
+  PostToolCallHook,
+  SdkAgent,
+  SdkConversation,
+  SessionContinuationMode,
+} from './labs/antigravity/sdk_types.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
@@ -237,8 +267,8 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
-export {BasePlanner} from './planners/base_planner.js';
-export {BuiltInPlanner} from './planners/built_in_planner.js';
+export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
+export {BuiltInPlanner, isBuiltInPlanner} from './planners/built_in_planner.js';
 export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
 export {
   GLOBAL_SCOPE_KEY,

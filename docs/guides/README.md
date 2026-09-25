@@ -1,12 +1,20 @@
 # ADK Developer Guides
 
-This directory contains specific developer guides for the ADK TypeScript implementation. For the official ADK documentation, visit [adk.dev](https://adk.dev/). For the generated API reference, run `npm run docs`.
+This directory contains specific developer guides for the ADK TypeScript implementation. For the official ADK documentation, visit [adk.dev](https://adk.dev/), built from [google/adk-docs](https://github.com/google/adk-docs). For the generated API reference, run `npm run docs`.
+
+These pages are the exception: per-feature guides kept beside the code. Maintainers may prefer these on adk.dev instead, and moving them is a file move.
 
 A guide covers one code unit in more depth than the published documentation carries, for a developer calling it from their own application. Guides mirror the source path under `core/src/`, so `core/src/tools/retrieval/files_retrieval.ts` is documented at `tools/retrieval/files_retrieval/index.md`.
 
 This index is the only table of contents. A guide that is not listed here is unreachable, so add the entry in the same change that adds the guide.
 
 ## Index
+
+### Artifacts
+
+Versioned binary and text storage (`Part` payloads) scoped to an individual session or shared across a user's sessions via the `user:` prefix.
+
+- [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
 
 ### Tools
 
@@ -21,3 +29,9 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Labs
+
+Experimental integrations that live under `core/src/labs/`.
+
+- [AntigravityAgent](labs/antigravity/index.md) - Run a Google Antigravity agent as an ADK agent node.
