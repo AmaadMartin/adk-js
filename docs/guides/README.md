@@ -8,6 +8,18 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Artifacts
+
+Versioned binary and text storage (`Part` payloads) scoped to an individual session or shared across a user's sessions via the `user:` prefix.
+
+- [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
+
+### Planners
+
+Planning for an `LlmAgent` through its `planner` option: the model's built-in thinking, or a Plan-ReAct instruction for a model without it.
+
+- [Planners](planners/index.md) - `BasePlanner`, `BuiltInPlanner`, `PlanReActPlanner`, and the `isBasePlanner` and `isBuiltInPlanner` type guards.
+
 ### Tools
 
 #### Retrieval
@@ -21,3 +33,8 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Workflow
+
+- [BaseNode names and serialization](workflow/base_node/index.md) - The node
+  name rule and the flattening applied to schema-validated data.
