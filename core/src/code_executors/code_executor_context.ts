@@ -43,7 +43,11 @@ export class CodeExecutorContext {
   };
 
   constructor(private readonly sessionState: State) {
-    this.context = sessionState.get(CONTEXT_KEY) ?? {};
+    // Seed the key so the context is the live object held in session state.
+    if (!sessionState.has(CONTEXT_KEY)) {
+      sessionState.set(CONTEXT_KEY, {});
+    }
+    this.context = sessionState.get(CONTEXT_KEY)!;
     this.sessionState = sessionState;
   }
 
