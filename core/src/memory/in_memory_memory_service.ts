@@ -15,9 +15,15 @@ import {
 import {MemoryEntry} from './memory_entry.js';
 
 /**
+ * The maximum number of memories a search returns.
+ */
+const MAX_SEARCH_RESULTS = 10;
+
+/**
  * An in-memory memory service for prototyping purpose only.
  *
- * Uses keyword matching instead of semantic search.
+ * Uses keyword matching instead of semantic search. A search returns at most
+ * ten memories, the ones sharing the most words with the query.
  */
 export class InMemoryMemoryService implements BaseMemoryService {
   private readonly memories: MemoryEntry[] = [];
@@ -52,8 +58,15 @@ export class InMemoryMemoryService implements BaseMemoryService {
       return Promise.resolve({memories: []});
     }
 
-    const wordsInQuery = req.query.toLowerCase().split(/\s+/);
-    const response: SearchMemoryResponse = {memories: []};
+    const wordsInQuery = [...extractWordsLower(req.query)];
+    // A non-ASCII query word also matches as a substring, because scripts such
+    // as Japanese have no word delimiters and tokenize to one run. Only such a
+    // word reads the lowercased event text, so only then is it built.
+    const substringWords = new Set(
+      wordsInQuery.filter((word) => !isAscii(word)),
+    );
+    const scoredMemories: Array<{matchedWords: number; memory: MemoryEntry}> =
+      [];
 
     for (const sessionEvents of Object.values(this.sessionEvents[userKey])) {
       for (const event of sessionEvents) {
@@ -70,20 +83,38 @@ export class InMemoryMemoryService implements BaseMemoryService {
           continue;
         }
 
-        const matchQuery = wordsInQuery.some((queryWord) =>
-          wordsInEvent.has(queryWord),
-        );
-        if (matchQuery) {
-          response.memories.push({
-            content: event.content,
-            author: event.author,
-            timestamp: formatTimestamp(event.timestamp),
+        const eventTextLower = substringWords.size
+          ? joinedText.toLowerCase()
+          : '';
+        const matchedWords = wordsInQuery.filter(
+          (word) =>
+            wordsInEvent.has(word) ||
+            (substringWords.has(word) && eventTextLower.includes(word)),
+        ).length;
+        if (matchedWords) {
+          scoredMemories.push({
+            matchedWords,
+            memory: {
+              content: event.content,
+              author: event.author,
+              timestamp: formatTimestamp(event.timestamp),
+            },
           });
         }
       }
     }
 
-    return response;
+    // Almost any two sentences share a word, so returning every event that
+    // matches at least one query word returns most of the store, and callers
+    // such as `PreloadMemoryTool` put all of it in the prompt. Keep the events
+    // matching the most query words. The sort key reads only the count, so the
+    // stable sort leaves events matching equally in insertion order.
+    scoredMemories.sort((a, b) => b.matchedWords - a.matchedWords);
+    return {
+      memories: scoredMemories
+        .slice(0, MAX_SEARCH_RESULTS)
+        .map((scored) => scored.memory),
+    };
   }
 }
 
@@ -101,13 +132,27 @@ function getUserKey(appName: string, userId: string): string {
 /**
  * Extracts the words from the text.
  *
+ * A word is a run of Unicode letters, digits and underscores.
+ *
  * @param text The text to extract the words from.
- * @return A set of words.
+ * @return A set of lowercase words.
  */
 function extractWordsLower(text: string): Set<string> {
   return new Set(
-    [...text.matchAll(/[A-Za-z]+/g)].map((match) => match[0].toLowerCase()),
+    [...text.matchAll(/[\p{L}\p{N}_]+/gu)].map((match) =>
+      match[0].toLowerCase(),
+    ),
   );
+}
+
+/**
+ * Reports whether the text holds only ASCII characters.
+ *
+ * @param text The text to test.
+ * @return True when every character is ASCII.
+ */
+function isAscii(text: string): boolean {
+  return /^\p{ASCII}*$/u.test(text);
 }
 
 /**
