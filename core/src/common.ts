@@ -200,6 +200,7 @@ export {
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
 export type {
+  AddEventsToMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
