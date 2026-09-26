@@ -8,6 +8,9 @@ import {describe, expect, it} from 'vitest';
 
 import {
   Context,
+  createEvent,
+  createSession,
+  InMemoryMemoryService,
   LlmRequest,
   MemoryEntry,
   PRELOAD_MEMORY,
@@ -18,6 +21,7 @@ import {
 // We mock the logger.warn since we test a failing case
 import {vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
+import {createMemoryToolContext} from './test_helpers.js';
 
 class StubToolContext {
   private memories: MemoryEntry[];
@@ -123,6 +127,96 @@ describe('PreloadMemoryTool', () => {
     expect(instructions).toContain('user: My dog is Fido.');
     expect(instructions).toContain('model: I will remember that.');
     expect(instructions).toContain('<PAST_CONVERSATIONS>');
+  });
+
+  it('does not append instruction if every memory is text-free and untimestamped', async () => {
+    const toolContext = createMemoryToolContext([
+      {
+        content: {
+          role: 'user',
+          parts: [
+            {functionCall: {name: 'f'}},
+            {inlineData: {mimeType: 'audio/wav', data: 'AAAA'}},
+          ],
+        },
+        author: 'user',
+      },
+    ]);
+
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {},
+    };
+    const tool = new PreloadMemoryTool();
+    await tool.processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.config?.systemInstruction).toBeUndefined();
+  });
+
+  it('joins mixed text and text-free parts with a single space', async () => {
+    const toolContext = createMemoryToolContext([
+      {
+        content: {
+          role: 'user',
+          parts: [
+            {text: 'hello'},
+            {functionCall: {name: 'f'}},
+            {text: 'world'},
+          ],
+        },
+        author: 'user',
+      },
+    ]);
+
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {},
+    };
+    const tool = new PreloadMemoryTool();
+    await tool.processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.config?.systemInstruction).toContain(
+      '<PAST_CONVERSATIONS>\nuser: hello world\n</PAST_CONVERSATIONS>',
+    );
+  });
+
+  it('keeps a session recorded through InMemoryMemoryService at one space', async () => {
+    const memoryService = new InMemoryMemoryService();
+    const session = createSession({
+      id: 'past-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      events: [
+        createEvent({
+          author: 'user',
+          content: {
+            role: 'user',
+            parts: [
+              {text: 'hello'},
+              {functionCall: {name: 'f'}},
+              {text: 'world'},
+            ],
+          },
+        }),
+      ],
+    });
+    await memoryService.addSessionToMemory(session);
+    const toolContext = createMemoryToolContext([], memoryService);
+
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {},
+    };
+    const tool = new PreloadMemoryTool();
+    await tool.processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.config?.systemInstruction).toContain('user: hello world');
   });
 
   it('handles searchMemory throwing an error gracefully', async () => {
