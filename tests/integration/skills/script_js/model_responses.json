@@ -40,7 +40,7 @@
               "functionCall": {
                 "name": "load_skill",
                 "args": {
-                  "name": "algorithmic-art"
+                  "skill_name": "algorithmic-art"
                 },
                 "id": "es1j7exc"
               },
