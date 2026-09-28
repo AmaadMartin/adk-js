@@ -151,3 +151,33 @@ describe('toSnakeCase', () => {
     expect(toSnakeCase(undefined)).toBe(undefined);
   });
 });
+
+describe('preserveKeysAtAnyDepth', () => {
+  const OPAQUE = new Set(['state_delta', 'stateDelta']);
+
+  it('preserves a key nested below a path the caller cannot enumerate', () => {
+    const obj = {
+      outer_list: [{inner_item: {state_delta: {user_name: 'Ada'}}}],
+    };
+
+    expect(toCamelCase(obj, [], OPAQUE)).toEqual({
+      outerList: [{innerItem: {stateDelta: {user_name: 'Ada'}}}],
+    });
+  });
+
+  it('preserves the same key on the way back to snake_case', () => {
+    const obj = {outerList: [{innerItem: {stateDelta: {user_name: 'Ada'}}}]};
+
+    expect(toSnakeCase(obj, [], OPAQUE)).toEqual({
+      outer_list: [{inner_item: {state_delta: {user_name: 'Ada'}}}],
+    });
+  });
+
+  it('converts a key that is not listed', () => {
+    const obj = {other_map: {user_name: 'Ada'}};
+
+    expect(toCamelCase(obj, [], OPAQUE)).toEqual({
+      otherMap: {userName: 'Ada'},
+    });
+  });
+});
