@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OAuthGrantType} from '@google/adk';
+import {
+  AuthScheme,
+  CustomAuthScheme,
+  isCustomAuthScheme,
+  OAuthGrantType,
+  OpenIdConnectWithConfig,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {getOAuthGrantTypeFromFlow} from '../../src/auth/auth_schemes.js';
 
@@ -58,6 +64,58 @@ describe('auth_schemes', () => {
     it('returns undefined when no flow matches', () => {
       const flow = {};
       expect(getOAuthGrantTypeFromFlow(flow)).toBeUndefined();
+    });
+  });
+
+  describe('isCustomAuthScheme', () => {
+    it('rejects an apiKey scheme', () => {
+      const scheme: AuthScheme = {type: 'apiKey', name: 'key', in: 'header'};
+      expect(isCustomAuthScheme(scheme)).toBe(false);
+    });
+
+    it('rejects an http scheme', () => {
+      const scheme: AuthScheme = {type: 'http', scheme: 'bearer'};
+      expect(isCustomAuthScheme(scheme)).toBe(false);
+    });
+
+    it('rejects an oauth2 scheme', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          implicit: {authorizationUrl: 'https://example.com/auth', scopes: {}},
+        },
+      };
+      expect(isCustomAuthScheme(scheme)).toBe(false);
+    });
+
+    it('rejects an openIdConnect scheme', () => {
+      const scheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+      };
+      expect(isCustomAuthScheme(scheme)).toBe(false);
+    });
+
+    it('rejects an OpenIdConnectWithConfig scheme', () => {
+      const scheme: OpenIdConnectWithConfig = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
+      };
+      expect(isCustomAuthScheme(scheme)).toBe(false);
+    });
+
+    it('accepts the Agent Registry gcpAuthProviderScheme', () => {
+      const scheme: CustomAuthScheme = {type: 'gcpAuthProviderScheme'};
+      expect(isCustomAuthScheme(scheme)).toBe(true);
+    });
+
+    it('accepts an arbitrary unknown scheme type', () => {
+      const scheme: CustomAuthScheme = {type: 'myTokenScheme'};
+      expect(isCustomAuthScheme(scheme)).toBe(true);
     });
   });
 });

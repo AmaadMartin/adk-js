@@ -15,7 +15,7 @@ import {GoogleAuth} from 'google-auth-library';
 import {RemoteA2AAgent} from '../../a2a/a2a_remote_agent.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
-import {AuthScheme} from '../../auth/auth_schemes.js';
+import {AuthScheme, CustomAuthScheme} from '../../auth/auth_schemes.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
 import {logger} from '../../utils/logger.js';
 import {AgentRegistrySingleMCPToolset} from './agent_registry_mcp_toolset.js';
@@ -252,7 +252,7 @@ export class AgentRegistry {
   async getMcpToolset(
     mcpServerName: string,
     options?: {
-      authScheme?: AuthScheme;
+      authScheme?: AuthScheme | CustomAuthScheme;
       authCredential?: AuthCredential;
       continueUri?: string;
     },
@@ -289,11 +289,12 @@ export class AgentRegistry {
           if (targetId.endsWith(mcpServerId)) {
             const authProvider = b.authProviderBinding?.authProvider;
             if (authProvider) {
-              authScheme = {
+              const bindingScheme: GcpAuthProviderScheme = {
                 type: 'gcpAuthProviderScheme',
                 name: authProvider,
                 continueUri: options?.continueUri,
-              } as GcpAuthProviderScheme as unknown as AuthScheme;
+              };
+              authScheme = bindingScheme;
               break;
             }
           }

@@ -7,7 +7,14 @@
 import type {ListToolsResult} from '@modelcontextprotocol/sdk/types.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
-import {AuthScheme} from '../../auth/auth_schemes.js';
+import {toAuthHeaders} from '../../auth/auth_credential_utils.js';
+import {
+  AuthScheme,
+  CustomAuthScheme,
+  isCustomAuthScheme,
+} from '../../auth/auth_schemes.js';
+import {CustomAuthConfig} from '../../auth/auth_tool.js';
+import {getCustomSchemeCredential} from '../../auth/credential_manager.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
 import {
@@ -34,7 +41,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
   readonly headerProvider?: (
     context?: ReadonlyContext,
   ) => Promise<Record<string, string>> | Record<string, string>;
-  readonly authScheme?: AuthScheme;
+  readonly authScheme?: AuthScheme | CustomAuthScheme;
   readonly authCredential?: AuthCredential;
 
   /**
@@ -47,8 +54,9 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
    * @param options.prefix - Optional prefix prepended to each tool name (e.g. `myServer_toolName`).
    * @param options.headerProvider - Optional async function called immediately before each
    *   {@link getTools} invocation to supply or refresh request headers (e.g. GCP auth tokens).
-   * @param options.authScheme - Optional auth scheme forwarded to each resolved tool.
-   * @param options.authCredential - Optional credential forwarded to each resolved tool.
+   * @param options.authScheme - Optional auth scheme. A {@link CustomAuthScheme} is
+   *   resolved through its registered auth provider before each connection.
+   * @param options.authCredential - Optional raw credential handed to that provider.
    */
   constructor(options: {
     destinationResourceId?: string;
@@ -58,7 +66,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     headerProvider?: (
       context?: ReadonlyContext,
     ) => Promise<Record<string, string>> | Record<string, string>;
-    authScheme?: AuthScheme;
+    authScheme?: AuthScheme | CustomAuthScheme;
     authCredential?: AuthCredential;
   }) {
     super(options.toolFilter || [], options.prefix);
@@ -70,11 +78,51 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
   }
 
   /**
+   * Resolves a {@link CustomAuthScheme} into request headers through its
+   * registered auth provider.
+   *
+   * A scheme with no registered provider, or a provider that fails to mint,
+   * yields no headers and a warning naming the scheme type. Tool listing must
+   * not fail on auth, matching how adk-python's toolset auth resolution treats
+   * a credential-manager error.
+   *
+   * @returns The credential headers, or an empty record.
+   */
+  private async resolveAuthHeaders(
+    context?: ReadonlyContext,
+  ): Promise<Record<string, string>> {
+    if (!this.authScheme || !isCustomAuthScheme(this.authScheme)) {
+      return {};
+    }
+
+    const authConfig: CustomAuthConfig = {
+      authScheme: this.authScheme,
+      rawAuthCredential: this.authCredential,
+      credentialKey: `${this.authScheme.type}_${
+        this.destinationResourceId ?? this.prefix ?? 'default'
+      }`,
+    };
+
+    try {
+      return toAuthHeaders(
+        await getCustomSchemeCredential(authConfig, context),
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.warn(
+        `Failed to resolve the credential for auth scheme ${this.authScheme.type}: ${msg}`,
+      );
+      return {};
+    }
+  }
+
+  /**
    * Connects to the underlying MCP server, retrieves tool definitions, prefixes
    * tool names, and injects destination telemetry metadata into each tool.
    *
-   * The `headerProvider`, if configured, is invoked immediately before the
-   * connection is established so that tokens are always fresh.
+   * The `headerProvider` and the auth provider, if configured, are invoked
+   * immediately before the connection is established so that tokens are always
+   * fresh. Credential headers take precedence over `headerProvider` headers.
    *
    * @param context - Optional readonly agent context passed to the header provider.
    * @returns The resolved and optionally filtered list of {@link MCPTool} instances.
@@ -87,6 +135,8 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
       const providerHeaders = await this.headerProvider(context);
       Object.assign(headers, providerHeaders);
     }
+
+    Object.assign(headers, await this.resolveAuthHeaders(context));
 
     // Merge resolved headers into transport request options
     const connectionParamsCopy: StreamableHTTPConnectionParams = {
