@@ -8,6 +8,7 @@ import {FunctionDeclaration, Type} from '@google/genai';
 import {Context} from '../../agents/context.js';
 import {isLlmAgent} from '../../agents/llm_agent.js';
 import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.js';
+import {CodeExecutorContext} from '../../code_executors/code_executor_context.js';
 import {experimental} from '../../utils/experimental.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
@@ -129,9 +130,12 @@ export class RunSkillInlineScriptTool extends BaseTool {
       return confirmationResult;
     }
 
+    const codeExecutorContext = new CodeExecutorContext(toolContext.state);
+
     try {
       const result = await codeExecutor.executeCode({
         invocationContext: toolContext.invocationContext,
+        codeExecutorContext,
         codeExecutionInput: {
           code: inlineScriptContent,
           inputFiles: [],
@@ -156,6 +160,11 @@ export class RunSkillInlineScriptTool extends BaseTool {
         error: `Failed to execute inline script: ${(e as Error).message}`,
         errorCode: RunSkillInlineScriptErrorCode.EXECUTION_ERROR,
       };
+    } finally {
+      Object.assign(
+        toolContext.actions.stateDelta,
+        codeExecutorContext.getStateDelta(),
+      );
     }
   }
 

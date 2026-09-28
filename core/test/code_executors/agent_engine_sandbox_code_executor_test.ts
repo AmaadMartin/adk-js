@@ -8,9 +8,14 @@ import {Client} from '@google-cloud/vertexai';
 import {
   AgentEngineSandboxCodeExecutor,
   CodeExecutionLanguage,
+  CodeExecutorContext,
   InvocationContext,
+  State,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+
+const SANDBOX_NAME =
+  'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
 
 describe('AgentEngineSandboxCodeExecutor', () => {
   let executor: AgentEngineSandboxCodeExecutor;
@@ -178,12 +183,93 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(result.stdout).toBe('hello world');
     });
 
-    it('reuses existing sandbox from session state', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
-        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+    it('publishes the created sandbox name as a state delta', async () => {
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
 
       await executor.executeCode({
         invocationContext,
+        codeExecutorContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(codeExecutorContext.getStateDelta()).toEqual({
+        _code_execution_context: {
+          sandbox_names: {language_python: SANDBOX_NAME},
+        },
+      });
+    });
+
+    it('leaves the caller session state untouched', async () => {
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutorContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(invocationContext.session?.state).toEqual({});
+    });
+
+    it('records sandbox names per language', async () => {
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+
+      for (const language of [
+        CodeExecutionLanguage.PYTHON,
+        CodeExecutionLanguage.JAVASCRIPT,
+      ]) {
+        await executor.executeCode({
+          invocationContext,
+          codeExecutorContext,
+          codeExecutionInput: {code: 'noop', language, inputFiles: []},
+        });
+      }
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).toHaveBeenCalledTimes(2);
+      expect(codeExecutorContext.getStateDelta()).toEqual({
+        _code_execution_context: {
+          sandbox_names: {
+            language_python: SANDBOX_NAME,
+            language_javascript: SANDBOX_NAME,
+          },
+        },
+      });
+    });
+
+    it('creates a sandbox without persisting it when no context is supplied', async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).toHaveBeenCalled();
+      expect(result.stdout).toBe('hello world');
+      expect(invocationContext.session?.state).toEqual({});
+    });
+
+    it('reuses existing sandbox from the code executor context', async () => {
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+      codeExecutorContext.setSandboxName('LANGUAGE_PYTHON', SANDBOX_NAME);
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutorContext,
         codeExecutionInput: {
           code: 'print("hello")',
           language: CodeExecutionLanguage.PYTHON,
@@ -193,19 +279,23 @@ describe('AgentEngineSandboxCodeExecutor', () => {
 
       expect(mockClient.agentEnginesInternal.createInternal).toHaveBeenCalled();
       expect(
+        mockClient.agentEnginesInternal.sandboxes.getInternal,
+      ).toHaveBeenCalledWith({name: SANDBOX_NAME});
+      expect(
         mockClient.agentEnginesInternal.sandboxes.createInternal,
       ).not.toHaveBeenCalled();
     });
 
     it('creates new sandbox if existing one is not running', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
-        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+      codeExecutorContext.setSandboxName('LANGUAGE_PYTHON', SANDBOX_NAME);
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
         state: 'STATE_EXPIRED',
       });
 
       await executor.executeCode({
         invocationContext,
+        codeExecutorContext,
         codeExecutionInput: {
           code: 'print("hello")',
           language: CodeExecutionLanguage.PYTHON,
@@ -487,7 +577,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       vi.useRealTimers();
     });
 
-    it('initializes session state if missing', async () => {
+    it('creates a sandbox for a session with no state', async () => {
       const contextWithoutState = {
         session: {
           id: 'session-1',
@@ -497,9 +587,11 @@ describe('AgentEngineSandboxCodeExecutor', () => {
           lastUpdateTime: Date.now(),
         },
       } as unknown as InvocationContext;
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
 
       await executor.executeCode({
         invocationContext: contextWithoutState,
+        codeExecutorContext,
         codeExecutionInput: {
           code: 'print("hello")',
           language: CodeExecutionLanguage.PYTHON,
@@ -507,10 +599,12 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         },
       });
 
-      expect(contextWithoutState.session?.state).toEqual({
-        sandbox_name_language_python:
-          'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+      expect(codeExecutorContext.getStateDelta()).toEqual({
+        _code_execution_context: {
+          sandbox_names: {language_python: SANDBOX_NAME},
+        },
       });
+      expect(contextWithoutState.session?.state).toBeUndefined();
     });
 
     it('uses provided sandboxResourceName directly', async () => {
@@ -538,14 +632,15 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
 
     it('creates new sandbox if getInternal throws error', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
-        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+      codeExecutorContext.setSandboxName('LANGUAGE_PYTHON', SANDBOX_NAME);
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockRejectedValue(
         new Error('API Error'),
       );
 
       await executor.executeCode({
         invocationContext,
+        codeExecutorContext,
         codeExecutionInput: {
           code: 'print("hello")',
           language: CodeExecutionLanguage.PYTHON,
@@ -633,8 +728,11 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(result.stderr).toBe('');
     });
     it('creates sandbox with LANGUAGE_JAVASCRIPT for JAVASCRIPT language', async () => {
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+
       await executor.executeCode({
         invocationContext,
+        codeExecutorContext,
         codeExecutionInput: {
           code: 'console.log("hello")',
           language: CodeExecutionLanguage.JAVASCRIPT,
@@ -654,9 +752,10 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         }),
       );
 
-      expect(invocationContext.session?.state).toEqual({
-        sandbox_name_language_javascript:
-          'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+      expect(codeExecutorContext.getStateDelta()).toEqual({
+        _code_execution_context: {
+          sandbox_names: {language_javascript: SANDBOX_NAME},
+        },
       });
     });
   });

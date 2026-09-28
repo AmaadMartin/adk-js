@@ -57,6 +57,76 @@ describe('CodeExecutorContext', () => {
     });
   });
 
+  describe('getSandboxName / setSandboxName', () => {
+    const sandboxName =
+      'projects/p/locations/us-central1/reasoningEngines/1/sandboxEnvironments/2';
+
+    it('returns undefined when no sandbox name has been recorded', () => {
+      const {ctx} = makeContext();
+      expect(ctx.getSandboxName('LANGUAGE_PYTHON')).toBeUndefined();
+    });
+
+    it('returns the sandbox name after setting it', () => {
+      const {ctx} = makeContext();
+      ctx.setSandboxName('LANGUAGE_PYTHON', sandboxName);
+      expect(ctx.getSandboxName('LANGUAGE_PYTHON')).toBe(sandboxName);
+    });
+
+    it('normalizes the language key to lower case', () => {
+      const {ctx} = makeContext();
+      ctx.setSandboxName('LANGUAGE_PYTHON', sandboxName);
+      expect(ctx.getSandboxName('language_python')).toBe(sandboxName);
+      expect(ctx.getStateDelta()).toEqual({
+        _code_execution_context: {
+          sandbox_names: {language_python: sandboxName},
+        },
+      });
+    });
+
+    it('keeps sandbox names for different languages separate', () => {
+      const {ctx} = makeContext();
+      ctx.setSandboxName('LANGUAGE_PYTHON', 'python-sandbox');
+      ctx.setSandboxName('LANGUAGE_JAVASCRIPT', 'javascript-sandbox');
+      expect(ctx.getSandboxName('LANGUAGE_PYTHON')).toBe('python-sandbox');
+      expect(ctx.getSandboxName('LANGUAGE_JAVASCRIPT')).toBe(
+        'javascript-sandbox',
+      );
+    });
+
+    it('overwrites an existing sandbox name for the same language', () => {
+      const {ctx} = makeContext();
+      ctx.setSandboxName('LANGUAGE_PYTHON', 'first');
+      ctx.setSandboxName('LANGUAGE_PYTHON', 'second');
+      expect(ctx.getSandboxName('LANGUAGE_PYTHON')).toBe('second');
+    });
+
+    it('reads a sandbox name seeded in the session state', () => {
+      const {ctx} = makeContext({
+        '_code_execution_context': {
+          sandbox_names: {language_python: sandboxName},
+        },
+      });
+      expect(ctx.getSandboxName('LANGUAGE_PYTHON')).toBe(sandboxName);
+    });
+
+    it('includes sandbox names in the state delta', () => {
+      const {ctx} = makeContext();
+      ctx.setSandboxName('LANGUAGE_PYTHON', sandboxName);
+      expect(ctx.getStateDelta()).toEqual({
+        _code_execution_context: {
+          sandbox_names: {language_python: sandboxName},
+        },
+      });
+    });
+
+    it('does not write the sandbox name to the session state', () => {
+      const {ctx, state} = makeContext();
+      ctx.setSandboxName('LANGUAGE_PYTHON', sandboxName);
+      expect(state.hasDelta()).toBe(false);
+      expect(state.get('_code_execution_context')).toBeUndefined();
+    });
+  });
+
   describe('getProcessedFileNames / addProcessedFileNames', () => {
     it('returns an empty array when no file names have been added', () => {
       const {ctx} = makeContext();

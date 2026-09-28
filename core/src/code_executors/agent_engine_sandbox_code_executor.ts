@@ -22,7 +22,6 @@ const SANDBOX_PATTERN =
 const ENGINE_PATTERN =
   /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
 
-import {InvocationContext} from '../agents/invocation_context.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
@@ -31,6 +30,7 @@ import {
   CodeExecutionResult,
   File,
 } from './code_execution_utils.js';
+import {CodeExecutorContext} from './code_executor_context.js';
 
 const DEFAULT_MAX_ATTEMPTS = 180;
 const DEFAULT_SANDBOX_TTL = '31536000s';
@@ -142,13 +142,13 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
   override async executeCode(
     params: ExecuteCodeParams,
   ): Promise<CodeExecutionResult> {
-    const {invocationContext, codeExecutionInput} = params;
+    const {codeExecutionInput, codeExecutorContext} = params;
 
     const language = mapLanguage(codeExecutionInput.language);
 
     const agentEngineName = await this.getOrCreateAgentEngine();
     const sandboxName = await this.getOrCreateSandbox(
-      invocationContext,
+      codeExecutorContext,
       agentEngineName,
       language,
     );
@@ -285,7 +285,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
   }
 
   private async getOrCreateSandbox(
-    invocationContext: InvocationContext,
+    codeExecutorContext: CodeExecutorContext | undefined,
     agentEngineName: string,
     language: Language,
   ): Promise<string> {
@@ -293,11 +293,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
       return this.sandboxResourceName;
     }
 
-    // Try to get from session state with language-specific key
-    const stateKey = `sandbox_name_${language.toLowerCase()}`;
-    let sandboxName = invocationContext.session?.state?.[stateKey] as
-      | string
-      | undefined;
+    let sandboxName = codeExecutorContext?.getSandboxName(language);
     let createNewSandbox = false;
 
     if (!sandboxName) {
@@ -358,12 +354,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
       const response = apiResponse.response as {name?: string};
       sandboxName = response.name!;
 
-      if (invocationContext.session) {
-        if (!invocationContext.session.state) {
-          invocationContext.session.state = {};
-        }
-        invocationContext.session.state[stateKey] = sandboxName;
-      }
+      codeExecutorContext?.setSandboxName(language, sandboxName);
     }
 
     return sandboxName!;

@@ -12,6 +12,7 @@ import {File} from './code_execution_utils.js';
 const CONTEXT_KEY = '_code_execution_context';
 const SESSION_ID_KEY = 'execution_session_id';
 const PROCESSED_FILE_NAMES_KEY = 'processed_input_files';
+const SANDBOX_NAMES_KEY = 'sandbox_names';
 const INPUT_FILE_KEY = '_code_executor_input_files';
 const ERROR_COUNT_KEY = '_code_executor_error_counts';
 const CODE_EXECUTION_RESULTS_KEY = '_code_execution_results';
@@ -40,6 +41,7 @@ export class CodeExecutorContext {
   private readonly context: {
     [SESSION_ID_KEY]?: string;
     [PROCESSED_FILE_NAMES_KEY]?: string[];
+    [SANDBOX_NAMES_KEY]?: Record<string, string>;
   };
 
   constructor(private readonly sessionState: State) {
@@ -75,6 +77,25 @@ export class CodeExecutorContext {
    */
   setExecutionId(executionId: string) {
     this.context[SESSION_ID_KEY] = executionId;
+  }
+
+  /**
+   * Gets the code execution sandbox resource name for a language.
+   * @param language The code execution language the sandbox was created for.
+   * @return The sandbox resource name, or undefined if none is recorded.
+   */
+  getSandboxName(language: string): string | undefined {
+    return this.context[SANDBOX_NAMES_KEY]?.[language.toLowerCase()];
+  }
+
+  /**
+   * Sets the code execution sandbox resource name for a language.
+   * @param language The code execution language the sandbox was created for.
+   * @param sandboxName The sandbox resource name to record.
+   */
+  setSandboxName(language: string, sandboxName: string) {
+    this.context[SANDBOX_NAMES_KEY] ??= {};
+    this.context[SANDBOX_NAMES_KEY][language.toLowerCase()] = sandboxName;
   }
 
   /**
@@ -187,11 +208,7 @@ export class CodeExecutorContext {
 
   /**
    * Updates the code execution result.
-   * @param invocationId The invocation ID to update the code execution result
-   *     for.
-   * @param code The code to execute.
-   * @param resultStdout The standard output of the code execution.
-   * @param resultStderr The standard error of the code execution.
+   * @param params The code execution result to record.
    */
   updateCodeExecutionResult({
     invocationId,

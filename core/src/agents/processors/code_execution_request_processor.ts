@@ -259,6 +259,7 @@ async function* runPreProcessor(
     );
     const codeExecutionResult = await codeExecutor.executeCode({
       invocationContext,
+      codeExecutorContext,
       codeExecutionInput: {
         code: codeStr,
         language: CodeExecutionLanguage.PYTHON,
@@ -360,6 +361,7 @@ async function* runPostProcessor(
   );
   const codeExecutionResult = await codeExecutor.executeCode({
     invocationContext,
+    codeExecutorContext,
     codeExecutionInput: {
       code: codeStr,
       language: CodeExecutionLanguage.PYTHON,

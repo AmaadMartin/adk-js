@@ -11,6 +11,7 @@ import {
   CodeExecutionLanguage,
   File,
 } from '../../code_executors/code_execution_utils.js';
+import {CodeExecutorContext} from '../../code_executors/code_executor_context.js';
 import {Script, Skill} from '../../skills/skill.js';
 import {experimental} from '../../utils/experimental.js';
 import {
@@ -129,10 +130,13 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
+    const codeExecutorContext = new CodeExecutorContext(toolContext.state);
+
     try {
       const language = getScriptLanguageByExtension(path.extname(scriptPath));
       const result = await codeExecutor.executeCode({
         invocationContext: toolContext.invocationContext,
+        codeExecutorContext,
         codeExecutionInput: {
           code: buildWrapperCode(scriptPath, language),
           inputFiles: getSkillResourceFiles(skill),
@@ -157,6 +161,11 @@ export class RunSkillScriptTool extends BaseTool {
         error: `Failed to execute script '${scriptPath}': ${(e as Error).message}`,
         errorCode: 'EXECUTION_ERROR',
       };
+    } finally {
+      Object.assign(
+        toolContext.actions.stateDelta,
+        codeExecutorContext.getStateDelta(),
+      );
     }
   }
 }
