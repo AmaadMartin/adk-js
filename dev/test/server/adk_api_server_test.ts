@@ -228,6 +228,7 @@ describe('AdkWebServer', () => {
   beforeEach(async () => {
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
+      loadAgent: () => Promise.resolve(TEST_AGENT),
       getAgentFile: () =>
         Promise.resolve({
           load() {
