@@ -63,6 +63,10 @@ function build({
     // directly; bare specifiers like '@google/genai' are not resolvable there.
     packages: platform === 'browser' ? 'bundle' : 'external',
     logLevel: 'info',
+    // The node target predates dynamic `import()`, so esbuild downlevels it to
+    // `require()`. `AgentEvaluator` imports a caller-supplied agent module that
+    // way, and `require()` loads neither a `file://` URL nor an ES module.
+    ...(platform === 'node' ? {supported: {'dynamic-import': true}} : {}),
   };
 
   // esbuild rejects `alias` unless bundling, so these only take effect on the
