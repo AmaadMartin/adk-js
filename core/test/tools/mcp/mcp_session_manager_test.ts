@@ -8,6 +8,10 @@ import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+  CreateMessageRequestSchema,
+  ElicitRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
@@ -296,6 +300,189 @@ describe('MCPSessionManager', () => {
       );
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('per-request headers', () => {
+    it('puts the headers on the HTTP transport requestInit', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession({Authorization: 'Bearer token'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {authorization: 'Bearer token'}}},
+      );
+    });
+
+    it('merges the headers over the configured transport headers', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: {'x-static': 'static-value'}},
+        },
+      });
+
+      await manager.createSession({'x-tenant': 'tenant-a'});
+
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {
+          requestInit: {
+            headers: {'x-static': 'static-value', 'x-tenant': 'tenant-a'},
+          },
+        },
+      );
+    });
+
+    it('does not leak one session headers into the next', async () => {
+      const transportOptions = {requestInit: {}};
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions,
+      });
+
+      await manager.createSession({'x-tenant': 'tenant-a'});
+      await manager.createSession({'x-tenant': 'tenant-b'});
+
+      expect(transportOptions).toEqual({requestInit: {}});
+      expect(StreamableHTTPClientTransport).toHaveBeenLastCalledWith(
+        expect.any(URL),
+        {requestInit: {headers: {'x-tenant': 'tenant-b'}}},
+      );
+    });
+
+    it('ignores the headers for a stdio transport', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      const client = await manager.createSession({'x-tenant': 'tenant-a'});
+
+      expect(StdioClientTransport).toHaveBeenLastCalledWith({
+        command: 'test-command',
+      });
+      expect(client.connect).toHaveBeenCalled();
+    });
+  });
+
+  describe('server-to-client callbacks', () => {
+    const stdioParams: MCPConnectionParams = {
+      type: 'StdioConnectionParams',
+      serverParams: {command: 'test-command'},
+    };
+
+    /** A handler the manager registered, so this test can call it back. */
+    type RecordedHandler = (request: unknown, extra: unknown) => unknown;
+
+    /**
+     * A client stub that records the handlers the manager registers on it.
+     *
+     * The stub is cast rather than built with `clientStub`: the SDK ties
+     * `setRequestHandler`'s handler parameter to the Zod schema passed
+     * alongside it, so a recorder that accepts any schema cannot satisfy that
+     * signature.
+     */
+    function stubClient(): {
+      client: Client;
+      handlers: Map<unknown, RecordedHandler>;
+    } {
+      const handlers = new Map<unknown, RecordedHandler>();
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+        setRequestHandler: (schema: unknown, handler: RecordedHandler) => {
+          handlers.set(schema, handler);
+        },
+      } as unknown as Client;
+      vi.mocked(Client).mockImplementationOnce(() => client);
+      return {client, handlers};
+    }
+
+    it('declares no capability and registers no handler by default', async () => {
+      const {handlers} = stubClient();
+
+      await new MCPSessionManager(stdioParams).createSession();
+
+      expect(Client).toHaveBeenLastCalledWith({
+        name: 'MCPClient',
+        version: '1.0.0',
+      });
+      expect(handlers.size).toBe(0);
+    });
+
+    it('answers a sampling request with the sampling callback', async () => {
+      const {handlers} = stubClient();
+      const samplingCallback = vi.fn().mockResolvedValue({
+        model: 'test-model',
+        role: 'assistant',
+        content: {type: 'text', text: 'sampled'},
+      });
+
+      await new MCPSessionManager(stdioParams, {
+        samplingCallback,
+      }).createSession();
+
+      expect(Client).toHaveBeenLastCalledWith(
+        {name: 'MCPClient', version: '1.0.0'},
+        {capabilities: {sampling: {}}},
+      );
+
+      const handler = handlers.get(CreateMessageRequestSchema);
+      if (!handler) {
+        expect.fail('no sampling/createMessage handler was registered');
+      }
+      const params = {messages: [], maxTokens: 10};
+      await expect(handler({params}, undefined)).resolves.toMatchObject({
+        content: {text: 'sampled'},
+      });
+      expect(samplingCallback).toHaveBeenCalledWith(params);
+    });
+
+    it('declares the configured sampling capabilities', async () => {
+      stubClient();
+
+      await new MCPSessionManager(stdioParams, {
+        samplingCallback: vi.fn(),
+        samplingCapabilities: {tools: {}},
+      }).createSession();
+
+      expect(Client).toHaveBeenLastCalledWith(
+        {name: 'MCPClient', version: '1.0.0'},
+        {capabilities: {sampling: {tools: {}}}},
+      );
+    });
+
+    it('answers an elicitation request with the elicitation callback', async () => {
+      const {handlers} = stubClient();
+      const elicitationCallback = vi
+        .fn()
+        .mockResolvedValue({action: 'accept', content: {answer: 'yes'}});
+
+      await new MCPSessionManager(stdioParams, {
+        elicitationCallback,
+      }).createSession();
+
+      expect(Client).toHaveBeenLastCalledWith(
+        {name: 'MCPClient', version: '1.0.0'},
+        {capabilities: {elicitation: {}}},
+      );
+
+      const handler = handlers.get(ElicitRequestSchema);
+      if (!handler) {
+        expect.fail('no elicitation/create handler was registered');
+      }
+      const params = {message: 'pick one', requestedSchema: {type: 'object'}};
+      await expect(handler({params}, undefined)).resolves.toMatchObject({
+        action: 'accept',
+      });
+      expect(elicitationCallback).toHaveBeenCalledWith(params);
     });
   });
 });
