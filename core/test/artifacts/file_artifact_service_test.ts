@@ -8,7 +8,7 @@ import {FileArtifactService} from '@google/adk';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   assertInsideRoot,
   getSessionArtifactsDir,
@@ -183,6 +183,120 @@ describe('FileArtifactService', () => {
           assertInsideRoot('/tmp/root/users/alice', '/tmp/root', 'test'),
         ).not.toThrow();
       });
+    });
+  });
+  describe('reserved metadata filename', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+    const sessionId = 'test-session';
+    let dir: string;
+    let service: FileArtifactService;
+
+    beforeEach(async () => {
+      dir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-reserved-name-test-'));
+      service = new FileArtifactService(dir);
+    });
+
+    afterEach(async () => {
+      await fs.rm(dir, {recursive: true, force: true});
+    });
+
+    it.each([
+      'metadata.json',
+      'Metadata.json',
+      'METADATA.JSON',
+      'nested/metadata.json',
+      'nested/dir/Metadata.JSON',
+      'user:metadata.json',
+      'metadata.json/',
+    ])('rejects %s and stores nothing', async (filename) => {
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: 'payload'},
+        }),
+      ).rejects.toThrow(`Artifact filename ${filename} is reserved`);
+
+      const userRoot = getUserRoot(dir, userId);
+      const sessionScope = getSessionArtifactsDir(userRoot, sessionId);
+      const userScope = path.join(userRoot, 'artifacts');
+      await expect(fs.readdir(sessionScope).catch(() => [])).resolves.toEqual(
+        [],
+      );
+      await expect(fs.readdir(userScope).catch(() => [])).resolves.toEqual([]);
+      await expect(
+        service.listVersions({appName, userId, sessionId, filename}),
+      ).resolves.toEqual([]);
+    });
+
+    it.each([
+      'metadata.json.txt',
+      'my-metadata.json',
+      'metadata/json',
+      'metadata.json/report.txt',
+    ])('saves %s and reads the payload back', async (filename) => {
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: 'payload'},
+        }),
+      ).resolves.toBe(0);
+
+      const loaded = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+      });
+      expect(loaded?.text).toBe('payload');
+    });
+
+    it('keeps an artifact already stored under the reserved name usable', async () => {
+      const filename = 'metadata.json';
+      const artifactDir = path.join(
+        getSessionArtifactsDir(getUserRoot(dir, userId), sessionId),
+        filename,
+      );
+      const versionDir = path.join(artifactDir, 'versions', '0');
+      await fs.mkdir(versionDir, {recursive: true});
+      await fs.writeFile(
+        path.join(versionDir, filename),
+        JSON.stringify({fileName: filename, version: 0}),
+        'utf-8',
+      );
+
+      await expect(
+        service.loadArtifact({appName, userId, sessionId, filename}),
+      ).resolves.toBeDefined();
+      await expect(
+        service.listVersions({appName, userId, sessionId, filename}),
+      ).resolves.toEqual([0]);
+
+      const versions = await service.listArtifactVersions({
+        appName,
+        userId,
+        sessionId,
+        filename,
+      });
+      expect(versions).toHaveLength(1);
+      expect(versions[0].version).toBe(0);
+
+      const version = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+      });
+      expect(version?.version).toBe(0);
+
+      await service.deleteArtifact({appName, userId, sessionId, filename});
+      await expect(fs.access(artifactDir)).rejects.toThrow();
     });
   });
 });
