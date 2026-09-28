@@ -63,7 +63,11 @@ export interface ArtifactVersion {
   version: number;
   /** The canonical URI of the artifact. */
   canonicalUri?: string;
-  /** Custom metadata associated with the artifact. */
+  /**
+   * Custom metadata associated with the artifact. The built-in artifact
+   * services always populate this, defaulting to an empty object when the
+   * artifact was saved without custom metadata.
+   */
   customMetadata?: Record<string, unknown>;
   /** The MIME type of the artifact. */
   mimeType?: string;

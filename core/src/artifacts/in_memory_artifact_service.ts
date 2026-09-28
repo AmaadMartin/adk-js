@@ -54,7 +54,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     const version = this.artifacts[path].length;
     const metadata: ArtifactVersion = {
       version,
-      customMetadata,
+      customMetadata: customMetadata ?? {},
     };
 
     if (!artifact.inlineData && artifact.text === undefined) {

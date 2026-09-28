@@ -280,7 +280,7 @@ export class GcsArtifactService implements BaseArtifactService {
       return {
         version,
         mimeType: metadata.contentType,
-        customMetadata: metadata.metadata as Record<string, unknown>,
+        customMetadata: (metadata.metadata ?? {}) as Record<string, unknown>,
         canonicalUri: file.publicUrl(),
       };
     } catch (e) {

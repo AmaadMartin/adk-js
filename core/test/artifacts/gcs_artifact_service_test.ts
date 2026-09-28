@@ -44,7 +44,15 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
       if (!file) {
         throw new Error(`File not found: ${this.name}`);
       }
-      return [{contentType: file.contentType, metadata: file.metadata}];
+      // Real GCS omits the custom metadata map when the blob has no custom
+      // metadata, so the fake must omit it too.
+      const hasCustomMetadata = Object.keys(file.metadata).length > 0;
+      return [
+        {
+          contentType: file.contentType,
+          metadata: hasCustomMetadata ? file.metadata : undefined,
+        },
+      ];
     }
 
     async delete(): Promise<void> {
