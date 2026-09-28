@@ -6,6 +6,7 @@
 
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
+  ArtifactVersion,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
@@ -610,6 +611,164 @@ describe('AdkWebServer', () => {
           filename: 'artifact.txt',
         }),
       ).toBeUndefined();
+    });
+
+    describe('save', () => {
+      const ARTIFACTS_URL =
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts';
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      it('should save a text artifact and serve it back', async () => {
+        const response = await client.post<ArtifactVersion>(ARTIFACTS_URL, {
+          filename: 'greeting.txt',
+          artifact: {text: 'hello world'},
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.data?.version).toBe(0);
+
+        const listed = await client.get<string[]>(ARTIFACTS_URL);
+        expect(listed.data).toEqual(['greeting.txt']);
+
+        const loaded = await client.get(`${ARTIFACTS_URL}/greeting.txt`);
+        expect(loaded.data).toEqual({text: 'hello world'});
+      });
+
+      it('should save a file reference artifact with its mime type', async () => {
+        const artifact = {
+          fileData: {
+            fileUri: 'artifact://testApp/testUser/sessionId/report.txt',
+            mimeType: 'text/plain',
+          },
+        };
+
+        const response = await client.post<ArtifactVersion>(ARTIFACTS_URL, {
+          filename: 'report.txt',
+          artifact,
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.data?.version).toBe(0);
+        expect(response.data?.mimeType).toBe('text/plain');
+        expect(
+          await artifactService.loadArtifact({
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            filename: 'report.txt',
+          }),
+        ).toEqual(artifact);
+      });
+
+      it('should persist customMetadata on the saved version', async () => {
+        const response = await client.post<ArtifactVersion>(ARTIFACTS_URL, {
+          filename: 'greeting.txt',
+          artifact: {text: 'hello world'},
+          customMetadata: {rev: 'one'},
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.data?.customMetadata).toEqual({rev: 'one'});
+        expect(
+          await artifactService.getArtifactVersion({
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            filename: 'greeting.txt',
+            version: 0,
+          }),
+        ).toMatchObject({version: 0, customMetadata: {rev: 'one'}});
+      });
+
+      it('should append a new version for a repeated filename', async () => {
+        const first = await client.post<ArtifactVersion>(ARTIFACTS_URL, {
+          filename: 'greeting.txt',
+          artifact: {text: 'hello world'},
+        });
+        const second = await client.post<ArtifactVersion>(ARTIFACTS_URL, {
+          filename: 'greeting.txt',
+          artifact: {text: 'hello again'},
+        });
+
+        expect(first.data?.version).toBe(0);
+        expect(second.data?.version).toBe(1);
+
+        const versions = await client.get<number[]>(
+          `${ARTIFACTS_URL}/greeting.txt/versions`,
+        );
+        expect(versions.data).toEqual([0, 1]);
+      });
+
+      it('should return 400 when filename is missing', async () => {
+        const saveArtifact = vi.spyOn(artifactService, 'saveArtifact');
+
+        await expect(
+          client.post(ARTIFACTS_URL, {artifact: {text: 'hello world'}}),
+        ).rejects.toMatchObject({response: {status: 400}});
+        expect(saveArtifact).not.toHaveBeenCalled();
+      });
+
+      it('should return 400 when filename is empty', async () => {
+        const saveArtifact = vi.spyOn(artifactService, 'saveArtifact');
+
+        await expect(
+          client.post(ARTIFACTS_URL, {
+            filename: '',
+            artifact: {text: 'hello world'},
+          }),
+        ).rejects.toMatchObject({response: {status: 400}});
+        expect(saveArtifact).not.toHaveBeenCalled();
+      });
+
+      it('should return 400 when the artifact is missing', async () => {
+        const saveArtifact = vi.spyOn(artifactService, 'saveArtifact');
+
+        await expect(
+          client.post(ARTIFACTS_URL, {filename: 'greeting.txt'}),
+        ).rejects.toMatchObject({response: {status: 400}});
+        expect(saveArtifact).not.toHaveBeenCalled();
+      });
+
+      it('should return 500 when the artifact service rejects', async () => {
+        vi.spyOn(artifactService, 'saveArtifact').mockRejectedValue(
+          new Error('boom'),
+        );
+
+        await expect(
+          client.post(ARTIFACTS_URL, {
+            filename: 'greeting.txt',
+            artifact: {text: 'hello world'},
+          }),
+        ).rejects.toMatchObject({
+          response: {
+            status: 500,
+            data: {error: expect.stringContaining('boom')},
+          },
+        });
+      });
+
+      it('should return 500 when the saved version cannot be read back', async () => {
+        vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue(
+          undefined,
+        );
+
+        await expect(
+          client.post(ARTIFACTS_URL, {
+            filename: 'greeting.txt',
+            artifact: {text: 'hello world'},
+          }),
+        ).rejects.toMatchObject({
+          response: {
+            status: 500,
+            data: {
+              error: 'Artifact metadata unavailable: greeting.txt',
+            },
+          },
+        });
+      });
     });
   });
 
