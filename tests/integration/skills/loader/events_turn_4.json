@@ -17,7 +17,7 @@
           "functionCall": {
             "name": "load_skill_resource",
             "args": {
-              "path": "references/company_newsletter_guideline.md",
+              "file_path": "references/company_newsletter_guideline.md",
               "skill_name": "internal-comms"
             },
             "id": "adk-2a07e84b-8df6-4521-9a3b-1f4255090b3e"
