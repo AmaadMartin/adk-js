@@ -420,7 +420,6 @@ export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
-export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
 
 // Workflow (parity port of google/adk-python `google/adk/workflow`). Named
@@ -500,5 +499,4 @@ export type {AppOptions} from './apps/app.js';
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
-export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
