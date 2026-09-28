@@ -97,6 +97,35 @@ describe.each(Object.entries(dialects))(
   },
 );
 
+describe('State schema — plain JSON Schema', () => {
+  // A state schema parsed from JSON or YAML is written in JSON Schema, not in
+  // the genai dialect, and the cast below is how it reaches State.
+  const document: Record<string, unknown> = {
+    type: 'object',
+    properties: {
+      counter: {type: 'number'},
+      label: {type: 'string'},
+      note: {type: ['string', 'null']},
+    },
+  };
+
+  const stateWithSchema = () => new State({}, {}, document as Schema);
+
+  it('rejects a value of the wrong type', () => {
+    expect(() => stateWithSchema().set('counter', 'seven')).toThrow(
+      /does not match the type declared/,
+    );
+  });
+
+  it('accepts a declared key and a nullable field', () => {
+    const state = stateWithSchema();
+    state.set('counter', 7);
+    state.set('note', null);
+    expect(state.get('counter')).toBe(7);
+    expect(state.get('note')).toBeNull();
+  });
+});
+
 describe('State schema — dialect-independent behaviour', () => {
   it('allows anything when no schema is declared', () => {
     const state = new State({}, {});

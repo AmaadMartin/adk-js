@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Schema} from '@google/genai';
+import {Schema, Type} from '@google/genai';
 
 /**
  * Keys of a genai `Schema` that carry a count/length bound. The genai (OpenAPI)
@@ -36,6 +36,80 @@ const TYPE_NAMES: Record<string, string> = {
   NULL: 'null',
 };
 
+/** The same type names as {@link TYPE_NAMES}, in their JSON Schema spelling. */
+const JSON_SCHEMA_TYPE_NAMES = new Set(Object.values(TYPE_NAMES));
+
+/**
+ * The JSON Schema name for a declared type, in whichever dialect it was
+ * written: a genai `Type` enum member (`STRING`), or a JSON Schema name that is
+ * already correct (`string`).
+ *
+ * Returns `undefined` for `TYPE_UNSPECIFIED`, for a type union
+ * (`['string', 'null']`) and for anything unrecognised — all of which mean
+ * "no type constraint to carry over".
+ */
+function jsonSchemaTypeName(type: unknown): string | undefined {
+  if (typeof type !== 'string') {
+    return undefined;
+  }
+  if (Object.hasOwn(TYPE_NAMES, type)) {
+    return TYPE_NAMES[type];
+  }
+  return JSON_SCHEMA_TYPE_NAMES.has(type) ? type : undefined;
+}
+
+/** Whether `type` is spelled the way the genai `Type` enum spells it. */
+function isGenaiTypeName(type: unknown): boolean {
+  return (
+    typeof type === 'string' &&
+    (type === Type.TYPE_UNSPECIFIED || Object.hasOwn(TYPE_NAMES, type))
+  );
+}
+
+/**
+ * Whether any value of `container` is written in the genai dialect.
+ *
+ * Takes both an array (`anyOf`) and a record of schemas (`properties`), since
+ * `Object.values` reads the members of either.
+ */
+function hasGenaiDialectValue(container: unknown): boolean {
+  if (container === null || typeof container !== 'object') {
+    return false;
+  }
+  return Object.values(container).some(isGenaiDialect);
+}
+
+/**
+ * Whether any node of `schema` is written in the genai/OpenAPI dialect, which
+ * is to say whether {@link convertGenaiSchema} would change it.
+ *
+ * Each marker below stands for one transformation the conversion performs, so
+ * a document carrying none of them needs no conversion — and must not be given
+ * one. `convertGenaiSchema` walks a document as the genai `Schema` shape and
+ * corrupts any JSON Schema construct that shape has no room for: it turns a
+ * tuple `items: [A, B]` into `items: {0: A, 1: B}`, and a boolean subschema
+ * (`properties: {x: true}`) into `{}`.
+ *
+ * A schema can arrive from JSON or YAML, so a node of any shape has to answer
+ * `false` rather than throw.
+ */
+function isGenaiDialect(schema: unknown): boolean {
+  if (schema === null || typeof schema !== 'object') {
+    return false;
+  }
+  const node = schema as Record<string, unknown>;
+  return (
+    isGenaiTypeName(node['type']) ||
+    node['nullable'] !== undefined ||
+    [...NON_JSON_SCHEMA_KEYS].some((key) => node[key] !== undefined) ||
+    node['format'] === 'enum' ||
+    NUMERIC_STRING_KEYS.some((key) => typeof node[key] === 'string') ||
+    isGenaiDialect(node['items']) ||
+    hasGenaiDialectValue(node['properties']) ||
+    hasGenaiDialectValue(node['anyOf'])
+  );
+}
+
 /**
  * Converts a genai `Schema` into a standard JSON Schema object.
  *
@@ -53,10 +127,22 @@ const TYPE_NAMES: Record<string, string> = {
  * Everything else (`description`, `title`, `default`, `pattern`, `required`,
  * `minimum`, `maximum`, `format`) is already JSON-Schema-shaped and passes
  * through, with `items`, `properties` and `anyOf` converted recursively.
+ *
+ * A document that carries no genai marker is already JSON Schema and is
+ * returned as it was given — the caller's own object, not a copy — so that a
+ * construct this conversion cannot represent survives. See
+ * {@link isGenaiDialect}.
  */
 export function genaiSchemaToJsonSchema(
   schema: Schema,
 ): Record<string, unknown> {
+  return isGenaiDialect(schema)
+    ? convertGenaiSchema(schema)
+    : (schema as Record<string, unknown>);
+}
+
+/** Rewrites every node of a genai `Schema` into JSON Schema. */
+function convertGenaiSchema(schema: Schema): Record<string, unknown> {
   const source = schema as Record<string, unknown>;
   const out: Record<string, unknown> = {};
 
@@ -71,20 +157,20 @@ export function genaiSchemaToJsonSchema(
         // Handled together below, since `nullable` widens `type`.
         break;
       case 'items':
-        out['items'] = genaiSchemaToJsonSchema(value as Schema);
+        out['items'] = convertGenaiSchema(value as Schema);
         break;
       case 'properties': {
         const properties: Record<string, unknown> = {};
         for (const [name, property] of Object.entries(
           value as Record<string, Schema>,
         )) {
-          properties[name] = genaiSchemaToJsonSchema(property);
+          properties[name] = convertGenaiSchema(property);
         }
         out['properties'] = properties;
         break;
       }
       case 'anyOf':
-        out['anyOf'] = (value as Schema[]).map(genaiSchemaToJsonSchema);
+        out['anyOf'] = (value as Schema[]).map(convertGenaiSchema);
         break;
       case 'format':
         // `enum` is a genai marker for "this string field is an enumeration",
@@ -102,8 +188,7 @@ export function genaiSchemaToJsonSchema(
     }
   }
 
-  const typeName =
-    typeof schema.type === 'string' ? TYPE_NAMES[schema.type] : undefined;
+  const typeName = jsonSchemaTypeName(schema.type);
   if (typeName) {
     out['type'] = schema.nullable ? [typeName, 'null'] : typeName;
   }
