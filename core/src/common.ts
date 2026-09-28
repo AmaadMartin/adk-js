@@ -356,6 +356,12 @@ export type {
   LlamaIndexRetriever,
 } from './tools/retrieval/llama_index_retrieval.js';
 export {
+  baseToolConfigSchema,
+  toolArgsConfigSchema,
+  toolConfigSchema,
+} from './tools/tool_configs.js';
+export type {ToolArgsConfig, ToolConfig} from './tools/tool_configs.js';
+export {
   IntentMismatchError,
   ToolConfirmation,
   isIntentMismatchError,
