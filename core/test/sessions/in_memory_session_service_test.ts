@@ -100,6 +100,73 @@ describe('InMemorySessionService', () => {
       expect(session.state).toHaveProperty('normalKey', 'value');
       expect(session.state).not.toHaveProperty(`${State.TEMP_PREFIX}tempKey`);
     });
+
+    it('trims a provided sessionId', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: '  padded-id  ',
+      });
+
+      expect(session.id).toBe('padded-id');
+      expect(
+        await service.getSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 'padded-id',
+        }),
+      ).toBeDefined();
+      expect(
+        await service.getSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: '  padded-id  ',
+        }),
+      ).toBeUndefined();
+    });
+
+    it('generates an id when the provided sessionId is only whitespace', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: '   ',
+      });
+
+      expect(session.id).not.toBe('   ');
+      expect(session.id.trim()).not.toBe('');
+      expect(
+        await service.getSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: session.id,
+        }),
+      ).toBeDefined();
+      expect(
+        await service.getSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: '   ',
+        }),
+      ).toBeUndefined();
+    });
+
+    it('generates an id when the provided sessionId is an empty string', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: '',
+      });
+
+      expect(session.id).toBeDefined();
+      expect(session.id).not.toBe('');
+      expect(
+        await service.getSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: session.id,
+        }),
+      ).toBeDefined();
+    });
   });
 
   describe('getSession', () => {
