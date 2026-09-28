@@ -10,9 +10,11 @@ import {
   GenerateContentConfig,
   LiveConnectConfig,
   SchemaUnion,
+  Tool,
+  ToolUnion,
 } from '@google/genai';
 
-import {BaseTool} from '../tools/base_tool.js';
+import type {BaseTool} from '../tools/base_tool.js';
 
 /**
  * LLM request class that allows passing in tools, output schema and system
@@ -72,6 +74,37 @@ export function appendInstructions(
   }
 }
 
+/** A `Tool` that carries at least one function declaration. */
+export type ToolWithFunctionDeclarations = Tool & {
+  functionDeclarations: FunctionDeclaration[];
+};
+
+function hasFunctionDeclarations(
+  tool: ToolUnion,
+): tool is ToolWithFunctionDeclarations {
+  return (
+    'functionDeclarations' in tool &&
+    Array.isArray(tool.functionDeclarations) &&
+    tool.functionDeclarations.length > 0
+  );
+}
+
+/**
+ * Finds the request's tool that carries function declarations.
+ *
+ * The Gemini API accepts at most one such tool, so a caller adding
+ * declarations merges them into this one when it exists. A tool whose
+ * declaration list is empty or absent is not a match: it is some other kind of
+ * tool entry, and appending to it would be a different request.
+ *
+ * @returns The tool carrying function declarations, if the request has one.
+ */
+export function findToolWithFunctionDeclarations(
+  llmRequest: LlmRequest,
+): ToolWithFunctionDeclarations | undefined {
+  return (llmRequest.config?.tools ?? []).find(hasFunctionDeclarations);
+}
+
 /**
  * Appends tools to the request.
  * @param tools The tools to append.
@@ -90,15 +123,23 @@ export function appendTools(llmRequest: LlmRequest, tools: BaseTool[]): void {
     }
   }
 
-  if (functionDeclarations.length) {
-    if (!llmRequest.config) {
-      llmRequest.config = {};
-    }
-    if (!llmRequest.config.tools) {
-      llmRequest.config.tools = [];
-    }
-    llmRequest.config.tools.push({functionDeclarations});
+  if (!functionDeclarations.length) {
+    return;
   }
+
+  if (!llmRequest.config) {
+    llmRequest.config = {};
+  }
+  if (!llmRequest.config.tools) {
+    llmRequest.config.tools = [];
+  }
+
+  const existingTool = findToolWithFunctionDeclarations(llmRequest);
+  if (existingTool) {
+    existingTool.functionDeclarations.push(...functionDeclarations);
+    return;
+  }
+  llmRequest.config.tools.push({functionDeclarations});
 }
 
 /**
