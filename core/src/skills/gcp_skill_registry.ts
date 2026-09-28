@@ -10,6 +10,16 @@ import {loadSkillFromZipBuffer} from './loader.js';
 import {Frontmatter, Skill} from './skill.js';
 import {SkillRegistry} from './skill_registry.js';
 
+/**
+ * Ceiling on the base64-encoded skill archive: the encoded size of the 32 MiB
+ * uncompressed ceiling adk-python applies in src/google/adk/skills/_utils.py
+ * (`_MAX_ZIP_UNCOMPRESSED_BYTES`). Checked on the encoded field so an oversized
+ * payload is rejected before the decoded buffer is allocated; base64 padding or
+ * line breaks only make this a more conservative bound.
+ */
+export const MAX_ENCODED_FILESYSTEM_LENGTH =
+  Math.ceil((32 * 1024 * 1024) / 3) * 4;
+
 export interface GCPSkillRegistryOptions {
   projectId?: string;
   location?: string;
@@ -59,6 +69,14 @@ export class GCPSkillRegistry implements SkillRegistry {
 
     if (!zippedFilesystem) {
       throw new Error(`Skill '${name}' does not contain zipped filesystem.`);
+    }
+
+    if (zippedFilesystem.length > MAX_ENCODED_FILESYSTEM_LENGTH) {
+      throw new Error(
+        `Skill '${name}' zipped filesystem is too large: ` +
+          `${zippedFilesystem.length} base64 characters exceeds the limit of ` +
+          `${MAX_ENCODED_FILESYSTEM_LENGTH}.`,
+      );
     }
 
     const zipBuffer = Buffer.from(zippedFilesystem, 'base64');
