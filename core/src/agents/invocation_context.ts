@@ -274,6 +274,7 @@ export class InvocationContext {
     this.artifactService = params.artifactService;
     this.sessionService = params.sessionService;
     this.memoryService = params.memoryService;
+    this.credentialService = params.credentialService;
     this.invocationId = params.invocationId;
     this.branch = params.branch;
     this.agent = params.agent;
