@@ -8,6 +8,7 @@ import {FileArtifactService} from '@google/adk';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import {pathToFileURL} from 'url';
 import {describe, expect, it} from 'vitest';
 import {
   assertInsideRoot,
@@ -72,6 +73,125 @@ describe('FileArtifactService', () => {
         });
         expect(loaded?.fileData?.fileUri).toBe('gs://my-bucket/report.pdf');
         expect(loaded?.fileData?.mimeType).toBe('application/pdf');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
+
+  describe('metadata tampering', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+    const sessionId = 'test-session';
+    const artifactName = 'poisoned.txt';
+
+    /**
+     * Writes a version directory that holds a tampered metadata document and
+     * no payload, which is the state a delete between listing and reading
+     * leaves behind. Returns that version directory.
+     */
+    async function writeTamperedMetadata(
+      root: string,
+      canonicalUri: string,
+    ): Promise<string> {
+      const versionDir = path.join(
+        getSessionArtifactsDir(getUserRoot(root, userId), sessionId),
+        artifactName,
+        'versions',
+        '0',
+      );
+      await fs.mkdir(versionDir, {recursive: true});
+      await fs.writeFile(
+        path.join(versionDir, 'metadata.json'),
+        JSON.stringify({
+          fileName: artifactName,
+          version: 0,
+          canonicalUri,
+          customMetadata: {},
+        }),
+        'utf-8',
+      );
+      return versionDir;
+    }
+
+    it('loadArtifact ignores canonicalUri from metadata', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const outsideDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'adk-artifacts-secret-'),
+      );
+
+      try {
+        const secretPath = path.join(outsideDir, 'secret.txt');
+        await fs.writeFile(secretPath, 'TOP-SECRET', 'utf-8');
+        await writeTamperedMetadata(
+          rootDir,
+          pathToFileURL(secretPath).toString(),
+        );
+
+        const service = new FileArtifactService(rootDir);
+        const loaded = await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: artifactName,
+        });
+
+        expect(loaded).toBeUndefined();
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+        await fs.rm(outsideDir, {recursive: true, force: true});
+      }
+    });
+
+    it('getArtifactVersion ignores canonicalUri from metadata', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+
+      try {
+        const versionDir = await writeTamperedMetadata(
+          rootDir,
+          'file:///etc/passwd',
+        );
+
+        const service = new FileArtifactService(rootDir);
+        const artifactVersion = await service.getArtifactVersion({
+          appName,
+          userId,
+          sessionId,
+          filename: artifactName,
+          version: 0,
+        });
+
+        expect(artifactVersion?.version).toBe(0);
+        expect(artifactVersion?.canonicalUri).toBe(
+          pathToFileURL(path.join(versionDir, artifactName)).toString(),
+        );
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('listArtifactVersions ignores canonicalUri from metadata', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+
+      try {
+        const versionDir = await writeTamperedMetadata(
+          rootDir,
+          'file:///etc/passwd',
+        );
+
+        const service = new FileArtifactService(rootDir);
+        const artifactVersions = await service.listArtifactVersions({
+          appName,
+          userId,
+          sessionId,
+          filename: artifactName,
+        });
+
+        expect(artifactVersions).toHaveLength(1);
+        expect(artifactVersions[0].version).toBe(0);
+        expect(artifactVersions[0].canonicalUri).toBe(
+          pathToFileURL(path.join(versionDir, artifactName)).toString(),
+        );
       } finally {
         await fs.rm(rootDir, {recursive: true, force: true});
       }
