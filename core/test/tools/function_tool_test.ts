@@ -251,16 +251,9 @@ describe('FunctionTool', () => {
           throw new Error('Test error');
         },
       });
-      try {
-        await tool.runAsync({
-          args: {},
-          toolContext: emptyContext,
-        });
-      } catch (e) {
-        expect((e as Error).message).toContain(
-          "Error in tool 'errorTool': Test error",
-        );
-      }
+      await expect(
+        tool.runAsync({args: {}, toolContext: emptyContext}),
+      ).rejects.toThrow("Error in tool 'errorTool': Test error");
     });
   });
 
@@ -478,16 +471,9 @@ describe('FunctionTool', () => {
           throw new Error('Test error');
         },
       });
-      try {
-        await tool.runAsync({
-          args: {},
-          toolContext: emptyContext,
-        });
-      } catch (e) {
-        expect((e as Error).message).toContain(
-          "Error in tool 'errorTool': Test error",
-        );
-      }
+      await expect(
+        tool.runAsync({args: {}, toolContext: emptyContext}),
+      ).rejects.toThrow("Error in tool 'errorTool': Test error");
     });
   });
 });
