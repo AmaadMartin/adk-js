@@ -7,9 +7,17 @@
 import {
   InMemoryMemoryService,
   InMemorySessionService,
+  SearchMemoryResponse,
   createEvent,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
+
+/** Returns the text of every memory, so assertions can ignore result order. */
+function memoryTexts(response: SearchMemoryResponse): string[] {
+  return response.memories.map(
+    (memory) => memory.content.parts?.[0]?.text ?? '',
+  );
+}
 
 describe('InMemoryMemoryService', () => {
   let service: InMemoryMemoryService;
@@ -95,6 +103,251 @@ describe('InMemoryMemoryService', () => {
 
       expect(aliceResult.memories).toHaveLength(1);
       expect(bobResult.memories).toHaveLength(0);
+    });
+  });
+
+  describe('addEventsToMemory', () => {
+    it('appends a delta alongside the events of the same session', async () => {
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'hello world'}]},
+        }),
+      });
+      await service.addSessionToMemory(session);
+
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        sessionId: session.id,
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'a new fact'}]},
+          }),
+        ],
+      });
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'hello fact',
+      });
+
+      expect(new Set(memoryTexts(result))).toEqual(
+        new Set(['hello world', 'a new fact']),
+      );
+    });
+
+    it('keeps the stored event when the delta repeats its id', async () => {
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          id: 'event-1a',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'hello world'}]},
+        }),
+      });
+      await service.addSessionToMemory(session);
+
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        sessionId: session.id,
+        events: [
+          createEvent({
+            id: 'event-1a',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'updated duplicate text'}]},
+          }),
+        ],
+      });
+
+      const stored = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'hello',
+      });
+      const replaced = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'updated',
+      });
+
+      expect(memoryTexts(stored)).toEqual(['hello world']);
+      expect(replaced.memories).toHaveLength(0);
+    });
+
+    it('skips an event with no content parts so its id stays free', async () => {
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        sessionId: 'session-1',
+        events: [createEvent({id: 'e1', author: 'user'})],
+      });
+
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        sessionId: 'session-1',
+        events: [
+          createEvent({
+            id: 'e1',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello world'}]},
+          }),
+        ],
+      });
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'hello',
+      });
+
+      expect(memoryTexts(result)).toEqual(['hello world']);
+    });
+
+    it('collects deltas with no sessionId in one bucket', async () => {
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        events: [
+          createEvent({
+            id: 'e1',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello world'}]},
+          }),
+        ],
+      });
+
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        events: [
+          createEvent({
+            id: 'e1',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello again'}]},
+          }),
+          createEvent({
+            id: 'e2',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello there'}]},
+          }),
+        ],
+      });
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'hello',
+      });
+
+      // Both deltas share one bucket, so the repeated `e1` is deduped against
+      // the first delta rather than stored a second time.
+      expect(new Set(memoryTexts(result))).toEqual(
+        new Set(['hello world', 'hello there']),
+      );
+    });
+
+    it('treats an empty sessionId as no sessionId', async () => {
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        sessionId: '',
+        events: [
+          createEvent({
+            id: 'e1',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello world'}]},
+          }),
+        ],
+      });
+
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        events: [
+          createEvent({
+            id: 'e1',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello again'}]},
+          }),
+        ],
+      });
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'hello',
+      });
+
+      expect(memoryTexts(result)).toEqual(['hello world']);
+    });
+
+    it('scopes the delta to the app name and user ID', async () => {
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello world'}]},
+          }),
+        ],
+      });
+
+      const alice = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'hello',
+      });
+      const bob = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'bob',
+        query: 'hello',
+      });
+      const otherApp = await service.searchMemory({
+        appName: 'appB',
+        userId: 'alice',
+        query: 'hello',
+      });
+
+      expect(alice.memories).toHaveLength(1);
+      expect(bob.memories).toHaveLength(0);
+      expect(otherApp.memories).toHaveLength(0);
+    });
+
+    it('indexes a delta whose sessionId is __proto__', async () => {
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        sessionId: '__proto__',
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello world'}]},
+          }),
+        ],
+      });
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'hello',
+      });
+
+      expect(result.memories).toHaveLength(1);
     });
   });
 
