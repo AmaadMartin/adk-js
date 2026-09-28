@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Event} from '@google/adk';
+import type {Event, RunConfig} from '@google/adk';
 import {
   BaseAgent,
   BasePlugin,
@@ -129,11 +129,14 @@ export class GeminiWithMockResponses extends Gemini {
 /**
  * Creates a runner for the given agent.
  * @param agent The agent to create a runner for.
+ * @param plugins The plugins to install on the runner.
+ * @param runConfig The run config to apply to every `run()` call.
  * @returns A runner for the given agent.
  */
 export async function createRunner(
   agent: BaseAgent,
   plugins: BasePlugin[] = [],
+  runConfig?: RunConfig,
 ) {
   const userId = 'test_user';
   const appName = agent.name;
@@ -149,6 +152,7 @@ export async function createRunner(
         userId,
         sessionId: session.id,
         newMessage: createUserContent(prompt),
+        runConfig,
       });
     },
   };
