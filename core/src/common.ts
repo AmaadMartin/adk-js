@@ -164,11 +164,17 @@ export {
   generateClientFunctionCallId,
   getFunctionCalls,
   getFunctionResponses,
+  getNodeName,
+  getNodePathName,
+  getNodeRunId,
+  getParentNodeRunId,
   hasThoughts,
   hasTrailingCodeExecutionResult,
+  isDefaultNodeInfo,
   isFinalResponse,
   populateClientFunctionCallId,
   pruneThoughts,
+  setEventMessage,
   stringifyContent,
 } from './events/event.js';
 export type {

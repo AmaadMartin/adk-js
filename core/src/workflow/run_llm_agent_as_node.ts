@@ -20,8 +20,8 @@ import {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
 } from '../tools/finish_task_tool.js';
+import {isContent} from '../utils/content_utils.js';
 import {logger} from '../utils/logger.js';
-import {isContent} from './base_node.js';
 import {NodeContext} from './node_context.js';
 
 /**

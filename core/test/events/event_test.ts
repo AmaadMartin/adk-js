@@ -8,15 +8,23 @@ import {
   AuthConfig,
   createEvent,
   createEventActions,
+  Event,
   getFunctionCalls,
   getFunctionResponses,
+  getNodeName,
+  getNodePathName,
+  getNodeRunId,
+  getParentNodeRunId,
   hasThoughts,
   hasTrailingCodeExecutionResult,
+  InputValidationError,
+  isDefaultNodeInfo,
   isFinalResponse,
   pruneThoughts,
+  setEventMessage,
   stringifyContent,
 } from '@google/adk';
-import {Outcome} from '@google/genai';
+import {Content, Outcome} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   createNewEventId,
@@ -463,5 +471,289 @@ describe('Event Utils', () => {
       populateClientFunctionCallId(event);
       expect(event.content!.parts![0].text).toBe('hello');
     });
+  });
+});
+
+describe('node info accessors', () => {
+  it('reads the run id off an event node path', () => {
+    const event = createEvent({nodePath: 'wf@1.reviewer@2'});
+    expect(getNodeRunId(event.nodeInfo)).toBe('2');
+  });
+
+  it('reads the parent run id off an event node path', () => {
+    const event = createEvent({nodePath: 'wf@1.reviewer@2'});
+    expect(getParentNodeRunId(event.nodeInfo)).toBe('1');
+  });
+
+  it('reads the clean node name off an event node path', () => {
+    const event = createEvent({nodePath: 'wf@1.reviewer@2'});
+    expect(getNodePathName(event.nodeInfo)).toBe('reviewer');
+  });
+
+  it('returns the defaults for an absent node info', () => {
+    expect(getNodeRunId(undefined)).toBe('');
+    expect(getParentNodeRunId(undefined)).toBeUndefined();
+    expect(getNodePathName(undefined)).toBe('');
+  });
+});
+
+describe('getNodeName', () => {
+  it('returns the leaf node name', () => {
+    const event = createEvent({nodePath: 'wf@1.reviewer@2'});
+    expect(getNodeName(event)).toBe('reviewer');
+  });
+
+  it('returns an empty string when the event ends an agent', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.reviewer@2',
+      actions: {endOfAgent: true},
+    });
+    expect(getNodeName(event)).toBe('');
+  });
+
+  it('returns an empty string when the event carries an agent state', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.reviewer@2',
+      actions: {agentState: {cursor: 3}},
+    });
+    expect(getNodeName(event)).toBe('');
+  });
+
+  it('returns the name when the agent state is empty', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.reviewer@2',
+      actions: {agentState: {}},
+    });
+    expect(getNodeName(event)).toBe('reviewer');
+  });
+});
+
+describe('createEvent message parameter', () => {
+  it('converts a string to content', () => {
+    const event = createEvent({message: 'Hello!'});
+    expect(event.content!.parts![0].text).toBe('Hello!');
+  });
+
+  it('passes a Content through by identity', () => {
+    const content: Content = {role: 'model', parts: [{text: 'from Content'}]};
+    const event = createEvent({message: content});
+    expect(event.content).toBe(content);
+  });
+
+  it('converts a part to content', () => {
+    const event = createEvent({message: {text: 'from Part'}});
+    expect(event.content!.parts![0].text).toBe('from Part');
+  });
+
+  it('converts a list of parts to content', () => {
+    const event = createEvent({message: [{text: 'part1'}, {text: 'part2'}]});
+    expect(event.content!.parts).toHaveLength(2);
+    expect(event.content!.parts![1].text).toBe('part2');
+  });
+
+  it('rejects message and content together', () => {
+    expect(() =>
+      createEvent({message: 'hello', content: {parts: [{text: 'world'}]}}),
+    ).toThrow(InputValidationError);
+    expect(() =>
+      createEvent({message: 'hello', content: {parts: [{text: 'world'}]}}),
+    ).toThrow(/mutually exclusive/);
+  });
+
+  it('still accepts content on its own', () => {
+    const content: Content = {role: 'model', parts: [{text: 'via content'}]};
+    const event = createEvent({content});
+    expect(event.content).toBe(content);
+  });
+
+  it('leaves content undefined when neither is given', () => {
+    expect(createEvent().content).toBeUndefined();
+  });
+});
+
+describe('setEventMessage', () => {
+  it('sets a Content unchanged', () => {
+    const event = createEvent();
+    const content: Content = {role: 'model', parts: [{text: 'updated'}]};
+    setEventMessage(event, content);
+    expect(event.content).toBe(content);
+  });
+
+  it('converts a string', () => {
+    const event = createEvent();
+    setEventMessage(event, 'updated via setter');
+    expect(event.content!.parts![0].text).toBe('updated via setter');
+  });
+
+  it('clears the content when set to undefined', () => {
+    const event = createEvent({message: 'hello'});
+    setEventMessage(event, undefined);
+    expect(event.content).toBeUndefined();
+  });
+
+  it('clears the content when set to null', () => {
+    const event = createEvent({message: 'hello'});
+    setEventMessage(event, null);
+    expect(event.content).toBeUndefined();
+  });
+});
+
+describe('event message serialization', () => {
+  it('keeps the value under content, never under message', () => {
+    const event = createEvent({message: 'Hello!'});
+    expect('message' in event).toBe(false);
+
+    const snake = transformToSnakeCaseEvent(event);
+    expect(snake['message']).toBeUndefined();
+    expect(snake['content']).toEqual({role: 'user', parts: [{text: 'Hello!'}]});
+  });
+
+  it('preserves the text across a snake-case round trip', () => {
+    const event = createEvent({message: 'Hello!'});
+    const restored = transformToCamelCaseEvent(
+      transformToSnakeCaseEvent(event),
+    );
+    expect(restored.content!.parts![0].text).toBe('Hello!');
+  });
+});
+
+describe('createEvent convenience kwargs', () => {
+  it('routes state to the state delta', () => {
+    const event = createEvent({state: {key: 'value'}});
+    expect(event.actions.stateDelta).toEqual({key: 'value'});
+  });
+
+  it('keeps the other action fields alongside state', () => {
+    const event = createEvent({
+      state: {key: 'value'},
+      actions: {escalate: true},
+    });
+    expect(event.actions.stateDelta).toEqual({key: 'value'});
+    expect(event.actions.escalate).toBe(true);
+  });
+
+  it('leaves the state delta empty without state', () => {
+    expect(createEvent().actions.stateDelta).toEqual({});
+  });
+
+  it('routes nodePath to the node info path', () => {
+    const event = createEvent({nodePath: 'root.node'});
+    expect(event.nodeInfo).toEqual({path: 'root.node'});
+  });
+
+  it('preserves the other node info fields alongside nodePath', () => {
+    const event = createEvent({
+      nodePath: 'root.node',
+      nodeInfo: {outputFor: ['root']},
+    });
+    expect(event.nodeInfo).toEqual({outputFor: ['root'], path: 'root.node'});
+  });
+
+  it('still passes route through to the event', () => {
+    expect(createEvent({route: 'next'}).route).toBe('next');
+  });
+
+  it('accepts message and state together', () => {
+    const event = createEvent({message: 'hello', state: {key: 'val'}});
+    expect(event.content!.parts![0].text).toBe('hello');
+    expect(event.actions.stateDelta).toEqual({key: 'val'});
+  });
+
+  it('does not mutate the params it was given', () => {
+    const params = {
+      message: 'Hello!',
+      state: {key: 'value'},
+      route: 'next',
+      nodePath: 'root.node',
+      actions: {escalate: true},
+      nodeInfo: {outputFor: ['root']},
+    };
+    const original = structuredClone(params);
+
+    const event = createEvent(params);
+
+    expect(params).toEqual(original);
+    expect(event.content!.parts![0].text).toBe('Hello!');
+    expect(event.actions.stateDelta).toEqual({key: 'value'});
+    expect(event.route).toBe('next');
+    expect(event.nodeInfo!.path).toBe('root.node');
+  });
+});
+
+describe('long running tool id serialization', () => {
+  it('emits the ids deduplicated and sorted', () => {
+    const event = createEvent({
+      author: 'user',
+      longRunningToolIds: ['zzz', 'aaa', 'mmm', 'aaa'],
+    });
+
+    expect(transformToSnakeCaseEvent(event)['long_running_tool_ids']).toEqual([
+      'aaa',
+      'mmm',
+      'zzz',
+    ]);
+  });
+
+  it('serializes the same event identically every time', () => {
+    const event = createEvent({
+      author: 'user',
+      longRunningToolIds: ['call_2', 'call_1'],
+    });
+
+    expect(JSON.stringify(transformToSnakeCaseEvent(event))).toBe(
+      JSON.stringify(transformToSnakeCaseEvent(event)),
+    );
+  });
+
+  it('leaves an undefined field out of the output', () => {
+    const event: Event = {
+      id: 'e1',
+      invocationId: 'inv',
+      actions: createEventActions(),
+      timestamp: 1,
+    };
+
+    expect('long_running_tool_ids' in transformToSnakeCaseEvent(event)).toBe(
+      false,
+    );
+  });
+
+  it('keeps an empty list empty', () => {
+    const event = createEvent({author: 'user', longRunningToolIds: []});
+
+    expect(transformToSnakeCaseEvent(event)['long_running_tool_ids']).toEqual(
+      [],
+    );
+  });
+});
+
+describe('nodeInfo default', () => {
+  it('defaults nodeInfo on a created event', () => {
+    expect(createEvent().nodeInfo).toEqual({path: ''});
+  });
+
+  it('preserves an explicit nodeInfo verbatim', () => {
+    const nodeInfo = {path: 'wf.node', messageAsOutput: true};
+    expect(createEvent({nodeInfo}).nodeInfo).toBe(nodeInfo);
+  });
+
+  it('reports the default nodeInfo as default', () => {
+    expect(isDefaultNodeInfo(createEvent().nodeInfo!)).toBe(true);
+  });
+
+  it('reports a nodeInfo with a path as non-default', () => {
+    expect(isDefaultNodeInfo({path: 'wf.node'})).toBe(false);
+  });
+
+  it('reports a nodeInfo with an outputFor as non-default', () => {
+    expect(isDefaultNodeInfo({outputFor: ['wf.node']})).toBe(false);
+  });
+
+  it('reports a nodeInfo with messageAsOutput as non-default', () => {
+    expect(isDefaultNodeInfo({messageAsOutput: false})).toBe(false);
+  });
+
+  it('reports an empty outputFor as default', () => {
+    expect(isDefaultNodeInfo({path: '', outputFor: []})).toBe(true);
   });
 });

@@ -1578,6 +1578,16 @@ describe('VertexAiSessionService', () => {
       expect(sent.config.eventMetadata.customMetadata).toBeUndefined();
     });
 
+    it('writes no workflow metadata for the default nodeInfo', async () => {
+      const event = createEvent({author: 'user'});
+
+      await service.appendEvent({session: appendSession(), event});
+
+      expect(event.nodeInfo).toEqual({path: ''});
+      const sent = mockClient.events.append.mock.calls.at(-1)![0];
+      expect(sent.config.eventMetadata.customMetadata).toBeUndefined();
+    });
+
     it('restores workflow fields when rawEvent is absent', async () => {
       const original = createEvent({
         timestamp: 1620000000000,

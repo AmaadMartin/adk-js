@@ -8,7 +8,8 @@ import type {FunctionCall} from '@google/genai';
 import {handleFunctionCallList} from '../../agents/functions.js';
 import {Event, getFunctionResponses} from '../../events/event.js';
 import {BaseTool} from '../../tools/base_tool.js';
-import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
+import {isContent} from '../../utils/content_utils.js';
+import {BaseNode, BaseNodeConfig} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 
 /** Options for a {@link ToolNode}. */
