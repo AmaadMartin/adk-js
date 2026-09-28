@@ -20,6 +20,7 @@ import {
   GroundingMetadata,
 } from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
+import {isNotFoundError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 
 import {AuthConfig} from '../auth/auth_tool.js';
@@ -46,8 +47,6 @@ import {
 import {createSession, Session} from './session.js';
 
 const DEFAULT_MAX_ATTEMPTS = 30;
-const GRPC_NOT_FOUND = 5;
-const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
 
 /**
@@ -299,20 +298,11 @@ export class VertexAiSessionService extends BaseSessionService {
 
       return session;
     } catch (error: unknown) {
-      const err = error as {code?: number; status?: number; message?: string};
-      // gRPC transports report NOT_FOUND as a numeric `code`; the
-      // `@google/genai` `ApiClient` behind the Sessions client throws an
-      // `ApiError` carrying a numeric `status` instead. Matched structurally,
-      // not with `instanceof`: `@google-cloud/vertexai` resolves its own copy
-      // of `@google/genai`, so its `ApiError` is a different class object.
-      if (
-        err.code === GRPC_NOT_FOUND ||
-        err.code === HTTP_NOT_FOUND ||
-        err.status === HTTP_NOT_FOUND
-      ) {
+      if (isNotFoundError(error)) {
         return undefined;
       }
-      logger.error(`Error getting session from Vertex AI: ${err.message}`);
+      const {message} = error as {message?: string};
+      logger.error(`Error getting session from Vertex AI: ${message}`);
       throw error;
     }
   }
