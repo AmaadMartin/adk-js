@@ -20,6 +20,13 @@ describe('InputValidationError', () => {
     expect(new InputValidationError('').message).toBe('');
   });
 
+  it('carries a supplied cause', () => {
+    const cause = new Error('the schema rejected the value');
+
+    expect(new InputValidationError('boom', {cause}).cause).toBe(cause);
+    expect(new InputValidationError('boom').cause).toBeUndefined();
+  });
+
   it('sets name', () => {
     expect(new InputValidationError().name).toBe('InputValidationError');
   });
