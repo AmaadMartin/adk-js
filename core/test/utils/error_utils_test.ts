@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, isAbortError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,53 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('isAbortError', () => {
+  /** An error carrying one of the cancellation `name` values. */
+  function named(name: string, message = 'stopped'): Error {
+    const error = new Error(message);
+    error.name = name;
+    return error;
+  }
+
+  it('reports an AbortError', () => {
+    expect(isAbortError(named('AbortError'))).toBe(true);
+  });
+
+  it('reports a TimeoutError, which AbortSignal.timeout produces', () => {
+    expect(isAbortError(named('TimeoutError'))).toBe(true);
+  });
+
+  it('reports a cancellation wrapped in a cause chain', () => {
+    const wrapped = new Error('transport closed', {
+      cause: new Error('mid', {cause: named('AbortError')}),
+    });
+    expect(isAbortError(wrapped)).toBe(true);
+  });
+
+  it('reports a cancellation inside an AggregateError', () => {
+    const aggregate = new AggregateError([
+      new Error('other'),
+      named('AbortError'),
+    ]);
+    expect(isAbortError(aggregate)).toBe(true);
+  });
+
+  it('rejects an ordinary error', () => {
+    expect(isAbortError(new Error('boom'))).toBe(false);
+  });
+
+  it('rejects null, undefined and primitives', () => {
+    expect(isAbortError(null)).toBe(false);
+    expect(isAbortError(undefined)).toBe(false);
+    expect(isAbortError('AbortError')).toBe(false);
+  });
+
+  it('terminates on a cyclic cause graph', () => {
+    const cyclic: Error & {cause?: unknown} = new Error('loop');
+    cyclic.cause = cyclic;
+    expect(isAbortError(cyclic)).toBe(false);
   });
 });
