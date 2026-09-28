@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {VertexAiSessionService} from '@google/adk';
+import {createEvent, Session, VertexAiSessionService} from '@google/adk';
+import {createAgentEngineSessions} from '@google/adk/utils/vertex_ai_utils.js';
 import {
   ApiClient,
   Auth,
@@ -19,23 +19,6 @@ import {json} from 'node:stream/consumers';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 
 const AGENT_ENGINE_ID = '12345';
-
-/**
- * Builds the Agent Engine `Sessions` client from an `ApiClient`.
- *
- * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
- * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
- * `ApiClient` this test constructs is a structurally distinct class (its
- * private fields make the two nominally incompatible) from the one `Sessions`
- * declares. The instances are interchangeable at runtime -- the mismatch is a
- * duplicate-dependency artifact, not a real API difference -- so the cast is
- * confined to this one boundary.
- */
-function createSessionsClient(apiClient: ApiClient): Sessions {
-  return new Sessions(
-    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
-  );
-}
 
 /**
  * Exercises `getSession`'s NOT_FOUND handling against an error the SDK builds
@@ -73,7 +56,7 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: createAgentEngineSessions(apiClient),
     });
   });
 
@@ -138,7 +121,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: createAgentEngineSessions(apiClient),
     });
   });
 
@@ -171,3 +154,141 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     ]);
   });
 });
+
+/**
+ * Covers the two behaviours whose unit tests can only see the mock client: that
+ * getSession follows a nextPageToken the server really sent, and that the real
+ * client turns an HTTP 429 into an error the rate-limit guard recognizes.
+ *
+ * The unit tests build an `ApiError` by hand, so they pin its shape but not the
+ * translation of the HTTP status into it.
+ */
+describe('VertexAiSessionService pagination and rate limits over the wire', () => {
+  let server: http.Server;
+  let service: VertexAiSessionService;
+  let requestPaths: string[];
+  let rateLimitOnce: boolean;
+
+  const eventsPage = (invocationIds: string[], nextPageToken?: string) => ({
+    sessionEvents: invocationIds.map((invocationId, index) => ({
+      name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-1/events/e${index}`,
+      author: 'user',
+      invocationId,
+      timestamp: '2026-01-01T00:00:00Z',
+    })),
+    ...(nextPageToken ? {nextPageToken} : {}),
+  });
+
+  beforeAll(async () => {
+    server = http.createServer(async (request, response) => {
+      const url = new URL(request.url!, 'http://127.0.0.1');
+      requestPaths.push(`${request.method} ${request.url}`);
+
+      if (url.pathname.endsWith(':appendEvent')) {
+        await json(request);
+        if (rateLimitOnce) {
+          rateLimitOnce = false;
+          response.writeHead(429, {'content-type': 'application/json'});
+          response.end(
+            JSON.stringify({
+              error: {code: 429, message: 'quota exceeded', status: 'ABORTED'},
+            }),
+          );
+          return;
+        }
+        response.writeHead(200, {'content-type': 'application/json'});
+        response.end('{}');
+        return;
+      }
+
+      response.writeHead(200, {'content-type': 'application/json'});
+      if (url.pathname.endsWith('/events')) {
+        response.end(
+          JSON.stringify(
+            url.searchParams.get('pageToken') === 'page-2'
+              ? eventsPage(['invocation_2'])
+              : eventsPage(['invocation_0', 'invocation_1'], 'page-2'),
+          ),
+        );
+        return;
+      }
+      response.end(
+        JSON.stringify({userId: 'user-1', updateTime: '2026-01-01T00:00:00Z'}),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+
+    const apiClient = new ApiClient({
+      auth: unauthenticated,
+      uploader: new NodeUploader(),
+      downloader: new NodeDownloader(),
+      project: 'test-project',
+      location: 'us-central1',
+      vertexai: true,
+      httpOptions: {
+        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      },
+    });
+    service = new VertexAiSessionService({
+      agentEngineId: AGENT_ENGINE_ID,
+      sessions: createAgentEngineSessions(apiClient),
+    });
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  beforeEach(() => {
+    requestPaths = [];
+    rateLimitOnce = false;
+  });
+
+  it('follows the nextPageToken the server sent and returns both pages', async () => {
+    const session = await service.getSession({
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+      sessionId: 'session-1',
+    });
+
+    expect(session?.events.map((event) => event.invocationId)).toEqual([
+      'invocation_0',
+      'invocation_1',
+      'invocation_2',
+    ]);
+    expect(
+      requestPaths.filter((path) => path.includes('pageToken=page-2')),
+    ).toHaveLength(1);
+  });
+
+  it('retries the append after the server answers 429', async () => {
+    rateLimitOnce = true;
+
+    await service.appendEvent({
+      session: await createLiveSession(service),
+      event: createEvent({
+        timestamp: 1620000000000,
+        content: {role: 'user', parts: [{text: 'hello'}]},
+      }),
+    });
+
+    expect(
+      requestPaths.filter((path) => path.includes(':appendEvent')),
+    ).toHaveLength(2);
+  });
+});
+
+/** Loads session-1 from the loopback server so appendEvent has a real session. */
+async function createLiveSession(
+  service: VertexAiSessionService,
+): Promise<Session> {
+  const session = await service.getSession({
+    appName: AGENT_ENGINE_ID,
+    userId: 'user-1',
+    sessionId: 'session-1',
+  });
+  if (!session) {
+    expect.fail('the loopback server should have returned session-1');
+  }
+  return session;
+}
