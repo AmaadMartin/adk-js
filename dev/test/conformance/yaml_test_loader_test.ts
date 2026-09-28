@@ -50,6 +50,16 @@ recordings:
             - text: hi
 `;
 
+// Plural typo of `tool_recording`, which camelizes to `toolRecordings`.
+const UNKNOWN_KEY_RECORDINGS_YAML = `
+recordings:
+  - user_message_index: 0
+    agent_name: test-agent
+    tool_recordings:
+      tool_call:
+        name: roll_die
+`;
+
 describe('batchLoadYamlTestDefs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -145,6 +155,25 @@ describe('batchLoadYamlTestDefs', () => {
     expect(test).toBeDefined();
     expect(test?.name).toBe(expectedKey);
     expect(test?.spec.agent).toBe('test-agent');
+  });
+
+  it('should reject a recordings file with an unknown key', async () => {
+    const rootDir = '/root/tests';
+    (fg.stream as unknown as Mock).mockReturnValue([
+      '/root/tests/t1/spec.yaml',
+    ]);
+
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
+      if (filePath.endsWith('generated-session.yaml')) return SESSION_YAML;
+      if (filePath.endsWith('generated-recordings.yaml'))
+        return UNKNOWN_KEY_RECORDINGS_YAML;
+      throw new Error(`File not found: ${filePath}`);
+    });
+
+    await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(
+      'toolRecordings',
+    );
   });
 
   it('should throw an error if a required file is missing', async () => {
