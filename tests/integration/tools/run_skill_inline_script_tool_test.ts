@@ -295,4 +295,21 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     // The pre-existing file must be left untouched rather than clobbered.
     expect(await fs.readFile(targetFile, 'utf-8')).toBe('existing content');
   });
+
+  it('reports a missing argument under error_code', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createMockContext(),
+    });
+
+    expect(result).toEqual({
+      error:
+        "Argument 'script_content' is required.\nArgument 'language' is required.",
+      error_code: 'INVALID_ARGUMENTS',
+    });
+  });
 });
