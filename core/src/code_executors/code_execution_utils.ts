@@ -3,7 +3,13 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {Content, Language, Outcome, Part} from '@google/genai';
+import {
+  Content,
+  Language,
+  Outcome,
+  Part,
+  createPartFromExecutableCode,
+} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
 import {base64Encode, isBase64Encoded} from '../utils/env_aware_utils.js';
@@ -196,13 +202,7 @@ export function extractCodeAndTruncateContent(
  * @return The constructed executable code part.
  */
 export function buildExecutableCodePart(code: string): Part {
-  return {
-    text: code,
-    executableCode: {
-      code,
-      language: Language.PYTHON,
-    },
-  };
+  return createPartFromExecutableCode(code, Language.PYTHON);
 }
 
 /**
