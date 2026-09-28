@@ -20,6 +20,7 @@ import {
   Event,
   FunctionTool,
   InMemorySessionService,
+  INTERACTIONS_REQUEST_PROCESSOR,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -43,6 +44,7 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {responseProcessor as CODE_EXECUTION_RESPONSE_PROCESSOR} from '../../src/agents/processors/code_execution_request_processor.js';
 import {logger} from '../../src/utils/logger.js';
 
 class MockLlmConnection implements BaseLlmConnection {
@@ -1026,6 +1028,48 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+describe('LlmAgent Single Flow Defaults', () => {
+  it('runs INTERACTIONS_REQUEST_PROCESSOR before CONTENT_REQUEST_PROCESSOR', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    const interactionsIndex = agent.requestProcessors.indexOf(
+      INTERACTIONS_REQUEST_PROCESSOR,
+    );
+    const contentIndex = agent.requestProcessors.indexOf(
+      CONTENT_REQUEST_PROCESSOR,
+    );
+    expect(interactionsIndex).toBeGreaterThanOrEqual(0);
+    expect(interactionsIndex).toBeLessThan(contentIndex);
+  });
+
+  it('defaults responseProcessors to the code execution response processor', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.responseProcessors).toContain(
+      CODE_EXECUTION_RESPONSE_PROCESSOR,
+    );
+  });
+
+  it('keeps an explicitly empty responseProcessors list empty', () => {
+    const agent = new LlmAgent({name: 'test_agent', responseProcessors: []});
+
+    expect(agent.responseProcessors).toEqual([]);
+  });
+
+  it('gives each agent its own requestProcessors array', () => {
+    const first = new LlmAgent({name: 'first_agent'});
+    const second = new LlmAgent({name: 'second_agent'});
+
+    expect(first.requestProcessors).not.toBe(second.requestProcessors);
+    first.requestProcessors.push(CONTENT_REQUEST_PROCESSOR);
+    expect(
+      second.requestProcessors.filter(
+        (processor) => processor === CONTENT_REQUEST_PROCESSOR,
+      ),
+    ).toHaveLength(1);
   });
 });
 
