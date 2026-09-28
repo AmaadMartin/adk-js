@@ -6,7 +6,6 @@
 
 import {Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
-import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
 import {injectSessionState} from '../instructions.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
@@ -61,16 +60,6 @@ export class InstructionsLlmRequestProcessor extends BaseLlmRequestProcessor {
         );
       }
       appendInstructions(llmRequest, [instructionWithState]);
-    }
-
-    if (
-      agent.outputSchema &&
-      agent.tools?.length &&
-      !canUseOutputSchemaWithTools(agent.canonicalModel.model)
-    ) {
-      appendInstructions(llmRequest, [
-        'To output the final result, you must call the "set_model_response" function with the appropriate values. Do not output anything else.',
-      ]);
     }
   }
 }
