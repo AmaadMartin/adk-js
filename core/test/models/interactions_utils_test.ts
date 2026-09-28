@@ -12,6 +12,7 @@ import {
   FunctionCall,
   FunctionResponse,
   GenerateContentConfig,
+  GoogleGenAI,
   Interactions,
   Language,
   Outcome,
@@ -19,6 +20,8 @@ import {
 } from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
+  ExtendedInteraction,
+  ExtendedInteractionSSEEvent,
   convertContentToSteps,
   convertInteractionEventToLlmResponse,
   convertInteractionToLlmResponse,
@@ -28,6 +31,51 @@ import {
   generateContentViaInteractions,
   getLatestUserContents,
 } from '../../src/models/interactions_utils.js';
+import {LlmRequest} from '../../src/models/llm_request.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
+
+/**
+ * Build a stand-in API client that resolves `interactions.create` to `payload`.
+ *
+ * `GoogleGenAI` declares private members and reaches `interactions` through a
+ * getter, so a structural fake cannot satisfy the class type. `@google/genai`
+ * also declares but does not export the `Stream` class that the streaming
+ * `create` overload returns, so that value cannot be built either.
+ */
+function fakeInteractionsClient(
+  payload: AsyncIterable<ExtendedInteractionSSEEvent> | ExtendedInteraction,
+): GoogleGenAI {
+  return {
+    interactions: {create: vi.fn().mockResolvedValue(payload)},
+  } as unknown as GoogleGenAI;
+}
+
+async function* asStream(
+  events: ExtendedInteractionSSEEvent[],
+): AsyncGenerator<ExtendedInteractionSSEEvent> {
+  yield* events;
+}
+
+async function collectResponses(
+  payload: AsyncIterable<ExtendedInteractionSSEEvent> | ExtendedInteraction,
+  stream: boolean,
+): Promise<LlmResponse[]> {
+  const llmRequest: LlmRequest = {
+    model: 'gemini-2.5-flash',
+    contents: [{role: 'user', parts: [{text: 'Hello'}]}],
+    liveConnectConfig: {},
+    toolsDict: {},
+  };
+  const responses: LlmResponse[] = [];
+  for await (const response of generateContentViaInteractions(
+    fakeInteractionsClient(payload),
+    llmRequest,
+    stream,
+  )) {
+    responses.push(response);
+  }
+  return responses;
+}
 
 describe('interactions_utils', () => {
   describe('getLatestUserContents', () => {
@@ -2193,6 +2241,112 @@ describe('interactions_utils', () => {
         responses.push(res);
       }
       expect(responses[0].interactionId).toBe('int-camel-case');
+    });
+  });
+
+  describe('generateContentViaInteractions environmentId propagation', () => {
+    it('should stamp the environment id reported by interaction.completed', async () => {
+      const responses = await collectResponses(
+        asStream([
+          {
+            event_type: 'interaction.created',
+            interaction: {id: 'interaction_env'},
+          },
+          {event_type: 'step.delta', delta: {type: 'text', text: 'hi'}},
+          {
+            event_type: 'interaction.completed',
+            interaction: {id: 'interaction_env', environment_id: 'env_xyz'},
+          },
+        ]),
+        true,
+      );
+
+      expect(responses.length).toBe(3);
+      expect(responses[0].environmentId).toBeUndefined();
+      expect(responses[1].environmentId).toBe('env_xyz');
+      expect(responses[2].environmentId).toBe('env_xyz');
+      expect(responses[2].content?.parts).toEqual([{text: 'hi'}]);
+    });
+
+    it('should stamp a top-level environment id reported by a stream event', async () => {
+      const responses = await collectResponses(
+        asStream([
+          {
+            event_type: 'interaction',
+            id: 'int-legacy',
+            environment_id: 'env_legacy',
+          },
+          {event_type: 'step.delta', delta: {type: 'text', text: 'hi'}},
+        ]),
+        true,
+      );
+
+      expect(responses[0].environmentId).toBe('env_legacy');
+      expect(responses[0].interactionId).toBe('int-legacy');
+    });
+
+    it('should leave environmentId absent when the stream reports none', async () => {
+      const responses = await collectResponses(
+        asStream([
+          {event_type: 'step.delta', delta: {type: 'text', text: 'hi'}},
+          {event_type: 'interaction.completed', interaction: {id: 'int-none'}},
+        ]),
+        true,
+      );
+
+      expect(responses.length).toBe(3);
+      for (const response of responses) {
+        expect(Object.keys(response)).not.toContain('environmentId');
+      }
+    });
+
+    it('should surface the environment id of a non-streaming interaction', async () => {
+      const responses = await collectResponses(
+        {
+          id: 'interaction_ns',
+          status: 'completed',
+          environment_id: 'env_ns',
+          steps: [
+            {type: 'model_output', content: [{type: 'text', text: 'hi'}]},
+          ],
+        },
+        false,
+      );
+
+      expect(responses.length).toBe(1);
+      expect(responses[0].environmentId).toBe('env_ns');
+      expect(responses[0].interactionId).toBe('interaction_ns');
+    });
+
+    it('should leave environmentId absent when a non-streaming interaction reports none', async () => {
+      const responses = await collectResponses(
+        {
+          id: 'interaction_ns_none',
+          status: 'completed',
+          steps: [
+            {type: 'model_output', content: [{type: 'text', text: 'hi'}]},
+          ],
+        },
+        false,
+      );
+
+      expect(Object.keys(responses[0])).not.toContain('environmentId');
+    });
+
+    it('should surface the environment id of a failed non-streaming interaction', async () => {
+      const responses = await collectResponses(
+        {
+          id: 'interaction_err',
+          status: 'failed',
+          environment_id: 'env_err',
+          error: {code: 'INTERNAL', message: 'boom'},
+        },
+        false,
+      );
+
+      expect(responses[0].errorCode).toBe('INTERNAL');
+      expect(responses[0].errorMessage).toBe('boom');
+      expect(responses[0].environmentId).toBe('env_err');
     });
   });
 });
