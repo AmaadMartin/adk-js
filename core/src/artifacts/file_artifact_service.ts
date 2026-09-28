@@ -131,6 +131,7 @@ export class FileArtifactService implements BaseArtifactService {
       version: nextVersion,
       canonicalUri,
       customMetadata,
+      createTime: Date.now() / 1000,
     };
 
     await writeMetadata(path.join(versionDir, 'metadata.json'), metadata);

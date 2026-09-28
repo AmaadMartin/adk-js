@@ -78,6 +78,84 @@ describe('FileArtifactService', () => {
     });
   });
 
+  describe('createTime persistence', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+    const sessionId = 'test-session';
+
+    const metadataPathOf = (root: string, filename: string, version: number) =>
+      path.join(
+        getSessionArtifactsDir(getUserRoot(root, userId), sessionId),
+        filename,
+        'versions',
+        version.toString(),
+        'metadata.json',
+      );
+
+    it('writes createTime into the persisted metadata document', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        const before = Date.now() / 1000;
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'persisted.txt',
+          artifact: {text: 'hello'},
+        });
+        const after = Date.now() / 1000;
+
+        const document = JSON.parse(
+          await fs.readFile(
+            metadataPathOf(rootDir, 'persisted.txt', 0),
+            'utf-8',
+          ),
+        );
+
+        expect(typeof document.createTime).toBe('number');
+        expect(document.createTime).toBeGreaterThanOrEqual(before - 1);
+        expect(document.createTime).toBeLessThanOrEqual(after + 1);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('reports an undefined createTime for a document written before this field existed', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'legacy.txt',
+          artifact: {text: 'hello'},
+        });
+
+        const metadataPath = metadataPathOf(rootDir, 'legacy.txt', 0);
+        const document = JSON.parse(await fs.readFile(metadataPath, 'utf-8'));
+        delete document.createTime;
+        await fs.writeFile(metadataPath, JSON.stringify(document), 'utf-8');
+
+        const version = await service.getArtifactVersion({
+          appName,
+          userId,
+          sessionId,
+          filename: 'legacy.txt',
+          version: 0,
+        });
+
+        expect(version?.version).toBe(0);
+        expect(version?.createTime).toBeUndefined();
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
+
   describe('path security', () => {
     it('rejects traversal attempts', async () => {
       rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
