@@ -273,6 +273,8 @@ export function trimTempState(
 /**
  * Merges app state, user state, and session state.
  *
+ * The top-level result is a null-prototype map; nested values are unchanged.
+ *
  * @param appState The application state.
  * @param userState The user state.
  * @param sessionState The session state.
@@ -283,7 +285,12 @@ export function mergeStates(
   userState: Record<string, unknown> = {},
   sessionState: Record<string, unknown> = {},
 ) {
-  const merged = cloneDeep(sessionState);
+  // `cloneDeep` drops the null prototype: lodash's `initCloneObject` falls
+  // back to a bare `{}` when `constructor` is not a function.
+  const merged: Record<string, unknown> = Object.assign(
+    Object.create(null),
+    cloneDeep(sessionState),
+  );
   for (const [k, v] of Object.entries(appState)) {
     merged[State.APP_PREFIX + k] = v;
   }
