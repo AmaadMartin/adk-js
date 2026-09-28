@@ -763,14 +763,29 @@ export class Runner {
 
             const eventToProcess = modifiedEvent ?? event;
 
-            if (
-              !eventToProcess.partial &&
-              !isLiveModelMediaEventWithInlineData(eventToProcess)
-            ) {
-              await this.sessionService.appendEvent({
-                session,
-                event: eventToProcess,
-              });
+            // An event carrying inline audio, video or image data is persisted
+            // only when `saveLiveBlob` is on, and then its blobs go to the
+            // artifact service first, so the session holds a placeholder and a
+            // `fileData` reference instead of the raw bytes.
+            if (!eventToProcess.partial) {
+              const isMedia =
+                isLiveModelMediaEventWithInlineData(eventToProcess);
+              if (!isMedia || runConfig.saveLiveBlob) {
+                await this.sessionService.appendEvent({
+                  session,
+                  event: isMedia
+                    ? {
+                        ...eventToProcess,
+                        content: await this.saveArtifacts(
+                          invocationContext.invocationId,
+                          session.userId,
+                          session.id,
+                          eventToProcess.content,
+                        ),
+                      }
+                    : eventToProcess,
+                });
+              }
             }
 
             yield eventToProcess;
@@ -795,7 +810,9 @@ export class Runner {
  * and all non-media events (transcriptions, tool calls, usage) are persisted
  * as in `runAsync`.
  */
-function isLiveModelMediaEventWithInlineData(event: Event): boolean {
+function isLiveModelMediaEventWithInlineData(
+  event: Event,
+): event is Event & {content: Content} {
   const parts = event.content?.parts;
   if (!parts?.length) {
     return false;
