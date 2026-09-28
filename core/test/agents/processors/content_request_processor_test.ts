@@ -8,13 +8,13 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createSession,
   Event,
   EventActions,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   PluginManager,
-  Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -53,12 +53,12 @@ function createCompactedEvent(
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
-  const session = {
+  const session = createSession({
     id: 'test-session',
     events,
     appName: 'test-app',
     userId: 'test-user',
-  } as unknown as Session;
+  });
 
   const agent = new LlmAgent({
     name: 'test_agent',
