@@ -65,9 +65,18 @@ export interface Recordings {
   recordings: Recording[];
 }
 
-export interface TestInfo {
+// A test case on disk, before its recorded fixtures are read.
+export interface TestCaseSpec {
   name: string;
+  // Absolute POSIX path of the directory holding spec.yaml.
+  dir: string;
+  // First path segment of `name`, or '' for a case at the root of the
+  // searched directory.
+  category: string;
   spec: TestSpec;
+}
+
+export interface TestInfo extends TestCaseSpec {
   session: Session;
   recordings: Recordings;
 }
