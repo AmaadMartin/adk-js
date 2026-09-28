@@ -5,11 +5,13 @@
  */
 
 import {
+  FeatureName,
   Gemini,
   GeminiParams,
   LlmRequest,
   LlmResponse,
   geminiInitParams,
+  overrideFeatureEnabled,
   version,
 } from '@google/adk';
 import {
@@ -154,6 +156,17 @@ describe('GoogleLlm', () => {
   });
 
   describe('generateContentAsync streaming thoughtSignature propagation', () => {
+    // These tests assert the exact response sequence of the non-progressive
+    // aggregator, so they pin the mode instead of following the registry
+    // default for PROGRESSIVE_SSE_STREAMING.
+    beforeEach(() => {
+      overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, false);
+    });
+
+    afterEach(() => {
+      overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, undefined);
+    });
+
     function makeStreamingChunk(
       parts: Record<string, unknown>[],
     ): GenerateContentResponse {
@@ -463,6 +476,17 @@ describe('GoogleLlm', () => {
   });
 
   describe('generateContentAsync streaming', () => {
+    // These tests assert the exact response sequence of the non-progressive
+    // aggregator, so they pin the mode instead of following the registry
+    // default for PROGRESSIVE_SSE_STREAMING.
+    beforeEach(() => {
+      overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, false);
+    });
+
+    afterEach(() => {
+      overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, undefined);
+    });
+
     /**
      * Creates a Gemini instance with a mock apiClient whose
      * generateContentStream yields the given raw responses as individual
