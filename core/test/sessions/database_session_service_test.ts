@@ -9,6 +9,8 @@ import {
   createEventActions,
   DatabaseSessionService,
   Event,
+  resetTimeProvider,
+  setTimeProvider,
   State,
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
@@ -21,6 +23,9 @@ import {
   StorageMetadata,
   StorageSession,
 } from '../../src/sessions/db/schema.js';
+
+/** A fixed instant used by the time-provider case. */
+const FROZEN_TIME_MS = 1_700_000_000_000;
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -35,6 +40,7 @@ describe('DatabaseSessionService', () => {
   });
 
   afterEach(async () => {
+    resetTimeProvider();
     // MikroORM closing
     const orm = (service as unknown as {orm: MikroORM}).orm;
     if (orm) {
@@ -54,6 +60,17 @@ describe('DatabaseSessionService', () => {
     expect(session.appName).toBe('test-app');
     expect(session.userId).toBe('test-user');
     expect(session.state['foo']).toBe('bar');
+  });
+
+  it('should stamp the create time from the installed time provider', async () => {
+    setTimeProvider(() => FROZEN_TIME_MS);
+
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+
+    expect(session.lastUpdateTime).toBe(FROZEN_TIME_MS);
   });
 
   it('should filter out temporary state keys prefixed with temp: on creation', async () => {
