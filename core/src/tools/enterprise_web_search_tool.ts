@@ -7,7 +7,6 @@ import {GenerateContentConfig} from '@google/genai';
 
 import {LlmRequest} from '../models/llm_request.js';
 import {
-  isGemini1Model,
   isGeminiModel,
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
@@ -32,15 +31,6 @@ export function applyEnterpriseWebSearch(llmRequest: LlmRequest): void {
   llmRequest.config.tools = llmRequest.config.tools || [];
 
   if (isGeminiModel(llmRequest.model) || modelCheckDisabled) {
-    if (
-      isGemini1Model(llmRequest.model) &&
-      llmRequest.config.tools.length > 0
-    ) {
-      throw new Error(
-        'Enterprise Web Search tool cannot be used with other tools in Gemini 1.x.',
-      );
-    }
-
     llmRequest.config.tools.push({enterpriseWebSearch: {}});
 
     return;
@@ -52,7 +42,7 @@ export function applyEnterpriseWebSearch(llmRequest: LlmRequest): void {
 }
 
 /**
- * A Gemini 2+ built-in tool that grounds responses on public web data via
+ * A Gemini built-in tool that grounds responses on public web data via
  * Vertex AI Search with Enterprise (Sec4) compliance.
  *
  * This tool operates internally within the model and does not require or

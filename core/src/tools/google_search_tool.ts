@@ -5,13 +5,13 @@
  */
 import {GenerateContentConfig} from '@google/genai';
 
-import {isGemini1Model, isGeminiModel} from '../utils/model_name.js';
+import {isGeminiModel} from '../utils/model_name.js';
 
 import {ToolProcessLlmRequest} from './base_tool.js';
 import {BuiltInTool} from './built_in_tool.js';
 
 /**
- * A built-in tool that is automatically invoked by Gemini 2 models to retrieve
+ * A built-in tool that is automatically invoked by Gemini models to retrieve
  * search results from Google Search.
  *
  * This tool operates internally within the model and does not require or
@@ -31,20 +31,6 @@ export class GoogleSearchTool extends BuiltInTool {
 
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
     llmRequest.config.tools = llmRequest.config.tools || [];
-
-    if (isGemini1Model(llmRequest.model)) {
-      if (llmRequest.config.tools.length > 0) {
-        throw new Error(
-          'Google search tool can not be used with other tools in Gemini 1.x.',
-        );
-      }
-
-      llmRequest.config.tools.push({
-        googleSearchRetrieval: {},
-      });
-
-      return;
-    }
 
     if (isGeminiModel(llmRequest.model)) {
       llmRequest.config.tools.push({
