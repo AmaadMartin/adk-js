@@ -39,6 +39,20 @@ describe('FeatureRegistry', () => {
     expect(config?.defaultOn).toBe(false);
   });
 
+  it('registers AGENT_CONFIG as experimental and default on', () => {
+    const config = getFeatureConfig(FeatureName.AGENT_CONFIG);
+
+    expect(config?.stage).toBe(FeatureStage.EXPERIMENTAL);
+    expect(config?.defaultOn).toBe(true);
+    expect(isFeatureEnabled(FeatureName.AGENT_CONFIG)).toBe(true);
+  });
+
+  it('lets ADK_DISABLE_AGENT_CONFIG turn AGENT_CONFIG off', () => {
+    process.env.ADK_DISABLE_AGENT_CONFIG = 'true';
+
+    expect(isFeatureEnabled(FeatureName.AGENT_CONFIG)).toBe(false);
+  });
+
   it('should return defaultOn value when no overrides or env vars', () => {
     delete process.env.ADK_ENABLE_PROGRESSIVE_SSE_STREAMING;
     delete process.env.ADK_DISABLE_PROGRESSIVE_SSE_STREAMING;
