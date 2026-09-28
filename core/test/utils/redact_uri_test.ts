@@ -10,7 +10,10 @@ import {parseAuthorizationCode} from '../../src/auth/oauth2/oauth2_utils.js';
 import {getConnectionOptionsFromUri} from '../../src/sessions/db/operations.js';
 import {getSessionServiceFromUri} from '../../src/sessions/registry.js';
 import {logger} from '../../src/utils/logger.js';
-import {redactUriPassword} from '../../src/utils/redact_uri.js';
+import {
+  redactUriForLog,
+  redactUriPassword,
+} from '../../src/utils/redact_uri.js';
 
 describe('redactUriPassword', () => {
   it('masks the password while keeping the rest of the URI', () => {
@@ -145,5 +148,23 @@ describe('connection-URI errors do not leak the password', () => {
     expect(
       redactUriPassword(`https://app/callback?${param}=SECRET&state=xyz`),
     ).toBe(`https://app/callback?${param}=***&state=xyz`);
+  });
+});
+
+describe('redactUriForLog', () => {
+  it('drops the authority and the query of a signed url', () => {
+    expect(
+      redactUriForLog(
+        'https://storage.example.com/bucket/report.pdf?X-Signature=secret',
+      ),
+    ).toBe('https://<redacted>/report.pdf');
+  });
+
+  it('keeps only the scheme when there is no path segment', () => {
+    expect(redactUriForLog('https://example.com')).toBe('https://<redacted>');
+  });
+
+  it('reports an unparseable uri without echoing it', () => {
+    expect(redactUriForLog('bucket/report.pdf?token=secret')).toBe('<unknown>');
   });
 });
