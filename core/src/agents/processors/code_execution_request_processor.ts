@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Part} from '@google/genai';
+import {Content} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
 import {isBaseCodeExecutor} from '../../code_executors/base_code_executor.js';
@@ -409,24 +409,27 @@ function extractAndReplaceInlineFiles(
       continue;
     }
 
-    for (let j = 0; j < content.parts.length; j++) {
-      const part = content.parts[j] as Part;
-      const mimeType = part.inlineData?.mimeType;
+    const parts = content.parts;
 
-      // Skip if the inline data is not supported
-      if (!mimeType || !part.inlineData || !DATA_FILE_UTIL_MAP[mimeType]) {
+    for (let j = 0; j < parts.length; j++) {
+      const inlineData = parts[j].inlineData;
+      const mimeType = inlineData?.mimeType;
+      const data = inlineData?.data;
+
+      // Skip unsupported mime types and inline data with no bytes
+      if (data === undefined || !mimeType || !DATA_FILE_UTIL_MAP[mimeType]) {
         continue;
       }
 
       // Replace the inline data file with a file name placeholder
       const fileName = `data_${i + 1}_${j + 1}${DATA_FILE_UTIL_MAP[mimeType].extension}`;
 
-      part.text = `\nAvailable file: \`${fileName}\`\n`;
+      parts[j] = {text: `\nAvailable file: \`${fileName}\`\n`};
 
       // Add the inline data as input file to the code executor context
       const file: File = {
         name: fileName,
-        content: base64Decode(part.inlineData.data!),
+        content: base64Decode(data),
         mimeType,
       };
 
