@@ -156,8 +156,8 @@ function isCredentialFunctionCall(functionCall: {
   }
   // A request wraps the AuthConfig in an AuthToolArguments envelope, so the
   // shape has to be read one level down, under `authConfig`. Args are
-  // normalised with camelCaseKeys first: generateAuthEvent (the primary,
-  // in-tree producer) emits this envelope in snake_case
+  // normalised with camelCaseKeys first: a foreign client or an older stored
+  // session can carry the envelope in snake_case
   // (function_call_id/auth_config), and reading it raw would silently never
   // match that shape.
   const args = camelCaseKeys(functionCall.args);

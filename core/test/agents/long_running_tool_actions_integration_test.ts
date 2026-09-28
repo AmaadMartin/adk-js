@@ -114,6 +114,6 @@ describe('long running tool actions integration', () => {
       ),
     );
     expect(authCalls.length).toBe(1);
-    expect(authCalls[0].args!['function_call_id']).toBe('call_1');
+    expect(authCalls[0].args!['functionCallId']).toBe('call_1');
   });
 });

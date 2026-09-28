@@ -194,11 +194,10 @@ export function getPendingUserInputRequests(
 }
 
 /**
- * The two producers of an `adk_request_credential` call disagree on casing:
- * the agent/tool auth flow writes snake_case (`functions.ts` `generateAuthEvent`
- * -> `function_call_id`, `auth_config`) while the workflow auth gate writes
- * camelCase (`hitl_utils.ts` `createAuthRequestEvent`). Normalize that kind the
- * same way `auth_preprocessor` does, so both render.
+ * Both in-tree producers of an `adk_request_credential` call write the
+ * camelCase envelope, but a foreign client or an older stored session can
+ * carry the snake_case one (`function_call_id`, `auth_config`). Normalize that
+ * kind the same way `auth_preprocessor` does, so both render.
  *
  * Only credential args are rewritten: the other kinds carry a caller-supplied
  * `payload` whose own keys must survive untouched.
