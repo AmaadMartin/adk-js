@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, isAbortError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,50 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('isAbortError', () => {
+  it('detects a bare AbortError', () => {
+    expect(isAbortError(new DOMException('aborted', 'AbortError'))).toBe(true);
+  });
+
+  it('detects an InvocationAbortedError by name', () => {
+    const err = new Error('Invocation aborted.');
+    err.name = 'InvocationAbortedError';
+    expect(isAbortError(err)).toBe(true);
+  });
+
+  it('detects an AbortError two levels deep in the cause chain', () => {
+    const err = new Error('outer', {
+      cause: new Error('Failed to create MCP session: aborted', {
+        cause: new DOMException('aborted', 'AbortError'),
+      }),
+    });
+    expect(isAbortError(err)).toBe(true);
+  });
+
+  it('detects an AbortError inside AggregateError.errors', () => {
+    const err = new AggregateError([
+      new Error('plain'),
+      new DOMException('aborted', 'AbortError'),
+    ]);
+    expect(isAbortError(err)).toBe(true);
+  });
+
+  it('returns false for a plain error', () => {
+    expect(isAbortError(new Error('boom'))).toBe(false);
+  });
+
+  it('returns false for null, undefined and primitives', () => {
+    expect(isAbortError(null)).toBe(false);
+    expect(isAbortError(undefined)).toBe(false);
+    expect(isAbortError('AbortError')).toBe(false);
+  });
+
+  it('returns false for a cyclic cause graph without hanging', () => {
+    const err = new Error('cyclic');
+    err.cause = err;
+    expect(isAbortError(err)).toBe(false);
   });
 });
