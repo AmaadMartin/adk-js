@@ -102,38 +102,43 @@ export class FileArtifactService implements BaseArtifactService {
 
     let mimeType: string | undefined;
     let fileUri: string | undefined;
-    if (artifact.inlineData) {
-      const data = artifact.inlineData.data || '';
-      // GenAI SDK Part data is in Base64 format. See https://googleapis.github.io/js-genai/release_docs/interfaces/types.Part.html
-      await fs.writeFile(contentPath, Buffer.from(data, 'base64'));
-      mimeType = artifact.inlineData.mimeType || 'application/octet-stream';
-    } else if (artifact.text !== undefined) {
-      await fs.writeFile(contentPath, artifact.text, 'utf-8');
-    } else {
-      fileUri = artifact.fileData!.fileUri;
-      if (!fileUri) {
-        throw new Error('Artifact fileData must have a fileUri.');
+    try {
+      if (artifact.inlineData) {
+        const data = artifact.inlineData.data || '';
+        // GenAI SDK Part data is in Base64 format. See https://googleapis.github.io/js-genai/release_docs/interfaces/types.Part.html
+        await fs.writeFile(contentPath, Buffer.from(data, 'base64'));
+        mimeType = artifact.inlineData.mimeType || 'application/octet-stream';
+      } else if (artifact.text !== undefined) {
+        await fs.writeFile(contentPath, artifact.text, 'utf-8');
+      } else {
+        fileUri = artifact.fileData!.fileUri;
+        if (!fileUri) {
+          throw new Error('Artifact fileData must have a fileUri.');
+        }
+        mimeType = artifact.fileData!.mimeType;
       }
-      mimeType = artifact.fileData!.mimeType;
+
+      const canonicalUri = await getCanonicalUri(
+        this.rootDir,
+        userId,
+        sessionId,
+        filename,
+        nextVersion,
+      );
+      const metadata: FileArtifactVersion = {
+        fileName: filename,
+        mimeType,
+        fileUri,
+        version: nextVersion,
+        canonicalUri,
+        customMetadata,
+      };
+
+      await writeMetadata(path.join(versionDir, 'metadata.json'), metadata);
+    } catch (e: unknown) {
+      await discardVersion(artifactDir, nextVersion);
+      throw e;
     }
-
-    const canonicalUri = await getCanonicalUri(
-      this.rootDir,
-      userId,
-      sessionId,
-      filename,
-      nextVersion,
-    );
-    const metadata: FileArtifactVersion = {
-      fileName: filename,
-      mimeType,
-      fileUri,
-      version: nextVersion,
-      canonicalUri,
-      customMetadata,
-    };
-
-    await writeMetadata(path.join(versionDir, 'metadata.json'), metadata);
 
     return nextVersion;
   }
@@ -538,6 +543,39 @@ async function getArtifactVersionsFromDir(
       e,
     );
     return [];
+  }
+}
+
+/**
+ * Removes a version directory left behind by a save that did not complete.
+ *
+ * The enclosing directories are pruned with a non-recursive `rmdir`, which
+ * refuses a non-empty directory and so leaves earlier versions untouched.
+ *
+ * @param artifactDir The artifact directory.
+ * @param version The version to discard.
+ */
+async function discardVersion(
+  artifactDir: string,
+  version: number,
+): Promise<void> {
+  const versionsDir = getVersionsDir(artifactDir);
+  const versionDir = path.join(versionsDir, version.toString());
+  try {
+    await fs.rm(versionDir, {recursive: true, force: true});
+  } catch (e) {
+    logger.warn(
+      `[FileArtifactService] discardVersion: Failed to remove incomplete version directory ${versionDir}`,
+      e,
+    );
+    return;
+  }
+  for (const dir of [versionsDir, artifactDir]) {
+    try {
+      await fs.rmdir(dir);
+    } catch {
+      break;
+    }
   }
 }
 
