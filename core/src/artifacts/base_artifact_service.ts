@@ -144,3 +144,18 @@ export interface BaseArtifactService {
     request: LoadArtifactRequest,
   ): Promise<ArtifactVersion | undefined>;
 }
+
+/**
+ * Returns whether a part carries content an artifact service can store.
+ *
+ * Presence is tested against null and undefined rather than falsiness, because
+ * an empty string is valid text content and an empty inline payload is valid
+ * binary content.
+ */
+export function hasArtifactContent(artifact: Part): boolean {
+  return (
+    artifact.inlineData != null ||
+    artifact.text != null ||
+    artifact.fileData != null
+  );
+}
