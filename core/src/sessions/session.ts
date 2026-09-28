@@ -55,6 +55,19 @@ export interface Session {
 }
 
 /**
+ * Compares two session ids for the `listSessions` tie-break on an equal
+ * `lastUpdateTime`.
+ *
+ * Compares by UTF-16 code unit rather than by locale-aware (ICU) collation, so
+ * an in-process sort agrees with the `ORDER BY id` that a SQL-backed service
+ * pushes down to the database. ICU orders `['B', 'a', 'A', 'b']` as a, A, b, B;
+ * a binary collation orders it A, B, a, b.
+ */
+export function compareSessionIds(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
  * Creates a session from a partial session.
  *
  * @param params The partial session to create the session from.

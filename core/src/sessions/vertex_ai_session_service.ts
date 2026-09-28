@@ -43,7 +43,7 @@ import {
   ListSessionsResponse,
   trimTempState,
 } from './base_session_service.js';
-import {createSession, Session} from './session.js';
+import {compareSessionIds, createSession, Session} from './session.js';
 
 const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
@@ -361,12 +361,12 @@ export class VertexAiSessionService extends BaseSessionService {
     if (order === 'asc') {
       adkSessions.sort(
         (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id),
+          a.lastUpdateTime - b.lastUpdateTime || compareSessionIds(a.id, b.id),
       );
     } else if (order === 'desc') {
       adkSessions.sort(
         (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id),
+          b.lastUpdateTime - a.lastUpdateTime || compareSessionIds(a.id, b.id),
       );
     }
 
