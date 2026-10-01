@@ -57,9 +57,18 @@ function _getDefaultLabels(): string[] {
  * Runs the given callback within a context that has the specified client label.
  * All LLM calls made within this callback will include the client label in their tracking headers.
  *
+ * Context propagation comes from `node:async_hooks`, so under Node the label
+ * reaches an async callback across every `await`. A bundled browser build
+ * replaces that builtin with a synchronous stand-in that holds the label only
+ * for the synchronous extent of the callback. There the callback must be
+ * synchronous; an async callback throws rather than silently reporting the
+ * default labels.
+ *
  * @param clientLabel The custom client label to apply.
  * @param callback The callback function to execute.
  * @return The result of the callback.
+ * @throws If `clientLabel` is not a non-empty string.
+ * @throws In a bundled browser build only, if `callback` returns a promise.
  */
 export function runWithClientLabel<R>(
   clientLabel: string,
