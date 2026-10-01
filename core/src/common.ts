@@ -198,7 +198,15 @@ export {
   BaseExampleProvider,
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
-export type {Example} from './examples/example.js';
+export {VertexAiExampleStore} from './examples/example.js';
+export type {
+  Example,
+  ExampleStoreApiClient,
+  SearchExamplesRequest,
+  SearchExamplesResponse,
+  SearchExamplesResult,
+  StoredContentsExample,
+} from './examples/example.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
@@ -237,8 +245,8 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
-export {BasePlanner} from './planners/base_planner.js';
-export {BuiltInPlanner} from './planners/built_in_planner.js';
+export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
+export {BuiltInPlanner, isBuiltInPlanner} from './planners/built_in_planner.js';
 export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
 export {
   GLOBAL_SCOPE_KEY,
@@ -250,6 +258,11 @@ export {
   type ToolFailureResponse,
 } from './plugins/_reflect_retry_utils.js';
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
+export type {
+  DebugEntry,
+  DebugLoggingPluginOptions,
+  InvocationDebugState,
+} from './plugins/debug_logging_plugin.js';
 export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
@@ -361,6 +374,7 @@ export {
   isIntentMismatchError,
 } from './tools/tool_confirmation.js';
 export type {IntentMismatchReason} from './tools/tool_confirmation.js';
+export {CallbackContext, ToolContext} from './tools/tool_context.js';
 export {URL_CONTEXT, UrlContextTool} from './tools/url_context_tool.js';
 export {VertexAiSearchTool} from './tools/vertex_ai_search_tool.js';
 export type {
@@ -393,6 +407,7 @@ export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {
   LogLevel,
   getLogger,
+  logger,
   resetLogger,
   setLogLevel,
   setLogger,

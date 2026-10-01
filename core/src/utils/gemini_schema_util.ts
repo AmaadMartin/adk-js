@@ -6,13 +6,39 @@
 
 import {Schema, Type} from '@google/genai';
 import {toSnakeCaseName} from './case_utils.js';
+import {NUMERIC_STRING_KEYS} from './genai_schema_to_json.js';
 
-type MCPToolSchema = {
-  type: 'object';
-  properties?: Record<string, unknown>;
-  required?: string[];
-};
 type MCPTypeArrayItem = string | {type: string};
+
+/**
+ * `format` values the Gemini API accepts, keyed by the JSON Schema type that
+ * carries them.
+ *
+ * This is narrower than the set the genai `Schema.format` doc comment lists,
+ * because the backend rejects the rest. It mirrors
+ * `_sanitize_schema_formats_for_gemini` in adk-python's
+ * `tools/_gemini_schema_util.py`, including the two rows that read oddly: a
+ * `number` keeps `int32`/`int64` and loses `float`/`double`, and a node with no
+ * type keeps no format at all.
+ */
+const SUPPORTED_FORMATS: Readonly<Record<string, readonly string[]>> = {
+  integer: ['int32', 'int64'],
+  number: ['int32', 'int64'],
+  string: ['date-time', 'enum'],
+};
+
+function isSupportedFormat(type: unknown, format: unknown): format is string {
+  if (typeof type !== 'string' || typeof format !== 'string') {
+    return false;
+  }
+  return SUPPORTED_FORMATS[type]?.includes(format) ?? false;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
+}
 
 function toGeminiType(mcpType: string | undefined): Type {
   if (!mcpType) return Type.TYPE_UNSPECIFIED;
@@ -47,21 +73,42 @@ const getTypeFromArrayItem = (
   return mcpType?.type?.toLowerCase?.();
 };
 
-export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
+export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
   if (!mcpSchema) {
     return undefined;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function recursiveConvert(mcp: any): Schema {
+    // JSON Schema allows boolean schemas: `true` accepts any value and `false`
+    // rejects all values. Gemini has no equivalent for either, so both are
+    // approximated as an unconstrained object schema, matching adk-python.
+    if (typeof mcp === 'boolean') {
+      mcp = {type: 'object'};
+    }
+
     const sourceType = mcp.anyOf ?? mcp.type;
     let isNullable = false;
     let nonNullTypes;
     if (Array.isArray(sourceType)) {
-      nonNullTypes = sourceType.filter(
+      // JSON Schema allows a boolean where a schema is expected: `true` accepts
+      // any value and `false` accepts none. Gemini has no equivalent for
+      // either, so both become an unconstrained object, as adk-python does.
+      // `anyOf` holds schemas while `type` holds type names, hence the two
+      // replacement shapes.
+      const fromAnyOf = Boolean(mcp.anyOf);
+      const branches: MCPTypeArrayItem[] = sourceType.map(
+        (branch: MCPTypeArrayItem | boolean) => {
+          if (typeof branch !== 'boolean') return branch;
+          return fromAnyOf ? {type: 'object'} : 'object';
+        },
+      );
+      mcp = fromAnyOf ? {...mcp, anyOf: branches} : {...mcp, type: branches};
+
+      nonNullTypes = branches.filter(
         (t: MCPTypeArrayItem) => getTypeFromArrayItem(t) !== 'null',
       );
-      isNullable = sourceType.some(
+      isNullable = branches.some(
         (t: MCPTypeArrayItem) => getTypeFromArrayItem(t) === 'null',
       );
 
@@ -128,6 +175,39 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
       geminiSchema.description = mcp.description;
     }
 
+    // Evaluated after the nullable unwrap above, so `{type: ['string',
+    // 'null'], format: 'date-time'}` keeps its format. adk-python tests the
+    // raw type and drops it.
+    if (isSupportedFormat(mcp.type, mcp.format)) {
+      geminiSchema.format = mcp.format;
+    }
+
+    if (typeof mcp.pattern === 'string') {
+      geminiSchema.pattern = mcp.pattern;
+    }
+
+    if (typeof mcp.minimum === 'number') {
+      geminiSchema.minimum = mcp.minimum;
+    }
+
+    if (typeof mcp.maximum === 'number') {
+      geminiSchema.maximum = mcp.maximum;
+    }
+
+    for (const key of NUMERIC_STRING_KEYS) {
+      if (typeof mcp[key] === 'number') {
+        geminiSchema[key] = String(mcp[key]);
+      }
+    }
+
+    if (isStringArray(mcp.propertyOrdering)) {
+      geminiSchema.propertyOrdering = mcp.propertyOrdering;
+    }
+
+    if (mcp.default !== undefined) {
+      geminiSchema.default = mcp.default;
+    }
+
     if (mcp.enum) {
       // A null member carries nullability, not a value. Every member is
       // stringified below, so keeping it would offer the model 'null'.
@@ -153,7 +233,9 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
         geminiSchema.required = mcp.required;
       }
     } else if (geminiType === Type.ARRAY) {
-      if (mcp.items) {
+      // `items: false` is a schema node, so a bare truthiness test would drop
+      // it. Other falsy values are not schemas and stay skipped.
+      if (mcp.items || mcp.items === false) {
         geminiSchema.items = recursiveConvert(mcp.items);
       }
     }
@@ -193,14 +275,17 @@ const GEMINI_SCHEMA_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Fields the Gemini backend rejects even though `Schema` declares them. A
- * `format` of `date` on a STRING, for example, fails with "only 'enum' and
- * 'date-time' are supported for STRING type".
+ * Fields the Gemini backend rejects even though `Schema` declares them.
+ *
+ * `format` is not here. The backend accepts a narrow set of formats and rejects
+ * the rest, so a `format` is kept only when `isSupportedFormat` allows it, the
+ * same rule adk-python applies. A `format` of `date` on a STRING, for example,
+ * fails with "only 'enum' and 'date-time' are supported for STRING type" and is
+ * dropped, while `int64` on an INTEGER survives.
  */
 const GEMINI_REJECTED_SCHEMA_FIELDS: ReadonlySet<string> = new Set([
   'title',
   'default',
-  'format',
 ]);
 
 /**
@@ -292,6 +377,15 @@ export function openApiSchemaToGeminiSchema(
       !GEMINI_SCHEMA_FIELDS.has(field) ||
       GEMINI_REJECTED_SCHEMA_FIELDS.has(field)
     ) {
+      continue;
+    }
+    if (field === 'format') {
+      // The backend accepts a `format` only on certain types, so a rejected
+      // one is dropped rather than forwarded. The raw OpenAPI type carries the
+      // rule, so it is read before `convertSchemaField` maps it to the enum.
+      if (isSupportedFormat(source['type'], value)) {
+        converted[field] = value;
+      }
       continue;
     }
     converted[field] = convertSchemaField(field, value);
