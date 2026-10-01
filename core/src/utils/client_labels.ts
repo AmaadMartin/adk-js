@@ -54,22 +54,86 @@ function _getDefaultLabels(): string[] {
 }
 
 /**
+ * Returns true for an async generator, and false for a bare async iterable: the
+ * wrapper below calls `next`, `return` and `throw`, so all three must exist.
+ */
+function isAsyncGenerator(
+  value: unknown,
+): value is AsyncGenerator<unknown, unknown, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Symbol.asyncIterator in value &&
+    typeof value[Symbol.asyncIterator] === 'function' &&
+    'next' in value &&
+    typeof value.next === 'function' &&
+    'return' in value &&
+    typeof value.return === 'function' &&
+    'throw' in value &&
+    typeof value.throw === 'function'
+  );
+}
+
+/**
+ * Wraps an async generator so that every resumption of its body runs inside the
+ * client-label scope.
+ *
+ * A generator body does not start when the generator object is created; it
+ * starts on the first `next()`, after the scope that created the object has
+ * already exited. Binding each resumption is what carries the label into the
+ * body.
+ */
+function bindClientLabelToAsyncGenerator<T, TReturn, TNext>(
+  clientLabel: string,
+  generator: AsyncGenerator<T, TReturn, TNext>,
+): AsyncGenerator<T, TReturn, TNext> {
+  return {
+    next: (...args) =>
+      clientLabelLocalStorage.run(clientLabel, () => generator.next(...args)),
+    return: (value) =>
+      clientLabelLocalStorage.run(clientLabel, () => generator.return(value)),
+    throw: (error) =>
+      clientLabelLocalStorage.run(clientLabel, () => generator.throw(error)),
+    [Symbol.asyncIterator]() {
+      return bindClientLabelToAsyncGenerator(
+        clientLabel,
+        generator[Symbol.asyncIterator](),
+      );
+    },
+  };
+}
+
+/**
  * Runs the given callback within a context that has the specified client label.
- * All LLM calls made within this callback will include the client label in their tracking headers.
+ * Every LLM call the callback makes includes the client label in its tracking
+ * headers.
+ *
+ * A callback that returns an async generator gets the label re-applied on each
+ * resumption (`next`, `return` and `throw`), so a stream consumed after this
+ * function returns still carries the label. For any other async iterable, or a
+ * promise that resolves to one, consume the stream inside the callback.
  *
  * @param clientLabel The custom client label to apply.
  * @param callback The callback function to execute.
- * @return The result of the callback.
+ * @return The result of the callback. An async generator comes back as a
+ *   label-bound wrapper, which is not the object the callback returned.
  */
 export function runWithClientLabel<R>(
   clientLabel: string,
   callback: () => R,
-): R {
+): R;
+export function runWithClientLabel(
+  clientLabel: string,
+  callback: () => unknown,
+): unknown {
   if (typeof clientLabel !== 'string' || clientLabel.trim() === '') {
     throw new Error('Client label must be a non-empty string.');
   }
 
-  return clientLabelLocalStorage.run(clientLabel, callback);
+  const result = clientLabelLocalStorage.run(clientLabel, callback);
+  return isAsyncGenerator(result)
+    ? bindClientLabelToAsyncGenerator(clientLabel, result)
+    : result;
 }
 
 /**
