@@ -8,6 +8,36 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Artifacts
+
+Versioned binary and text storage (`Part` payloads) scoped to an individual session or shared across a user's sessions via the `user:` prefix.
+
+- [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
+
+### Events
+
+The record of everything that happens during an invocation, and the side effects attached to it.
+
+- [Event](events/event/index.md) - The `Event` and `EventActions` shapes, `isFinalResponse`, and the fields that diverge from adk-python.
+
+### Memory
+
+Cross-session memory ingestion (`addSessionToMemory`) and retrieval (`searchMemory`) across in-memory keyword stores, Vertex AI RAG Engine corpora, and Vertex AI Agent Engine Memory Bank.
+
+- [Memory](memory/index.md) - `BaseMemoryService`, `InMemoryMemoryService`, `VertexAiRagMemoryService`, `VertexAiMemoryBankService`, and the `LOAD_MEMORY` / `PRELOAD_MEMORY` tools.
+
+### Models
+
+The model an `LlmAgent` calls: the `BaseLlm` contract, the request and response shapes, and how a model name resolves to a class.
+
+- [Models](models/index.md) - `BaseLlm`, `LlmRequest`, `LlmResponse`, `LLMRegistry`, and `Gemini`.
+
+### Planners
+
+Planning for an `LlmAgent` through its `planner` option: the model's built-in thinking, or a Plan-ReAct instruction for a model without it.
+
+- [Planners](planners/index.md) - `BasePlanner`, `BuiltInPlanner`, `PlanReActPlanner`, and the `isBasePlanner` and `isBuiltInPlanner` type guards.
+
 ### Tools
 
 #### Retrieval
@@ -21,3 +51,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Telemetry
+
+- [Telemetry](telemetry/index.md) - The spans and attributes ADK writes, attaching exporters with `maybeSetOtelProviders`, and turning off message content in spans.
