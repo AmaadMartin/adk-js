@@ -8,6 +8,24 @@ import path from 'path';
 import {defineConfig} from 'vitest/config';
 
 /**
+ * Per-worker V8 old-space ceiling (MB) for the `forks` pool. The heaviest test
+ * file in the repository, `tests/integration/app_loader/app_loader_test.ts`,
+ * peaks at ~1 GB under `--coverage`; every other file stays under 105 MB. The
+ * ceiling also has to fit the smallest runner in the `run-tests` matrix:
+ * `macos-latest` is a 3 vCPU / 7 GB machine, and Vitest sizes the pool at
+ * `cores - 1`, so two workers plus the main process share 7 GB there.
+ */
+const WORKER_MAX_OLD_SPACE_MB = 2048;
+
+/**
+ * Test budget (ms) for the `unit:core` and `unit:dev` projects: Vitest's 5s
+ * default has been observed to expire when these share a worker pool with the
+ * install-heavy `integration` fixtures under `npm run test:coverage`. A project
+ * entry does not inherit the root `test` timeout, so it is set per project.
+ */
+const UNIT_TEST_TIMEOUT_MS = 30000;
+
+/**
  * Hook budget (ms) for the `integration` project: install-heavy `beforeAll`
  * hooks run `npm install` (and sometimes `npm run build`) per fixture, which
  * exceeds Vitest's 10s default on a slow or loaded machine.
@@ -38,6 +56,15 @@ const reporters = process.env.CI
     : ['dot']
   : ['default'];
 
+/**
+ * Compiled-agent bundles to keep out of Vite's SSR transform. `AgentLoader`
+ * (`dev/src/utils/agent_loader.ts`) esbuilds each agent into a
+ * `<tmpdir>/adk_agent_loader-<random>/` bundle, outside the root with no
+ * `node_modules` segment, so Vitest inlines and transforms ~6 MB per agent.
+ * Rename that `createTempDir` prefix and the suite silently goes slow again.
+ */
+const AGENT_LOADER_BUNDLE_PATTERN = /[\\/]adk_agent_loader/;
+
 export default defineConfig({
   test: {
     reporters,
@@ -45,10 +72,7 @@ export default defineConfig({
     silent: process.env.CI ? 'passed-only' : false,
     poolOptions: {
       forks: {
-        execArgv: ['--max-old-space-size=8192'],
-      },
-      threads: {
-        execArgv: ['--max-old-space-size=8192'],
+        execArgv: [`--max-old-space-size=${WORKER_MAX_OLD_SPACE_MB}`],
       },
     },
     projects: [
@@ -57,6 +81,7 @@ export default defineConfig({
           name: 'unit:core',
           environment: 'node',
           setupFiles: SETUP_FILES,
+          testTimeout: UNIT_TEST_TIMEOUT_MS,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -72,6 +97,7 @@ export default defineConfig({
           name: 'unit:dev',
           environment: 'node',
           setupFiles: SETUP_FILES,
+          testTimeout: UNIT_TEST_TIMEOUT_MS,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -104,6 +130,7 @@ export default defineConfig({
           setupFiles: SETUP_FILES,
           hookTimeout: INTEGRATION_HOOK_TIMEOUT_MS,
           testTimeout: INTEGRATION_TEST_TIMEOUT_MS,
+          server: {deps: {external: [AGENT_LOADER_BUNDLE_PATTERN]}},
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
