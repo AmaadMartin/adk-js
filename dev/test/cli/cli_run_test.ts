@@ -8,9 +8,14 @@ import {
   BaseAgent,
   BaseSessionService,
   InMemorySessionService,
+  INTERNAL_METADATA_PREFIX,
   isApp,
+  RESTORED_EVENT_KEY,
   Runner,
+  setLogger,
 } from '@google/adk';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
@@ -375,7 +380,7 @@ describe('cli_run', () => {
   });
 
   it('should handle missing input file', async () => {
-    (loadFileData as Mock).mockResolvedValue(null);
+    (loadFileData as Mock).mockResolvedValue(undefined);
     const mockSessionService = createMockSessionService();
 
     await runAgent({
@@ -385,6 +390,37 @@ describe('cli_run', () => {
     });
     expect(loadFileData).toHaveBeenCalled();
   });
+
+  it.each([
+    ['a missing state object', {queries: ['go']}],
+    ['a missing queries array', {state: {}}],
+    ['queries provided as a string', {state: {}, queries: 'hi'}],
+    ['a non-string query', {state: {}, queries: ['go', 1]}],
+    ['a non-object state', {state: [], queries: ['go']}],
+    ['a null JSON document', null],
+  ])(
+    'rejects replay input with %s before creating a session or running the agent',
+    async (_description, content) => {
+      (loadFileData as Mock).mockResolvedValue(content);
+      const mockSessionService = createMockSessionService();
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        inputFile: 'input.json',
+        sessionService: mockSessionService,
+      });
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('Invalid replay file'),
+        }),
+      );
+      expect(process.exitCode).toBe(1);
+      expect(mockSessionService.createSession).not.toHaveBeenCalled();
+      expect(AgentFile).not.toHaveBeenCalled();
+      expect(Runner).not.toHaveBeenCalled();
+    },
+  );
 
   it('honours an absolute --replay path instead of rebasing it on cwd', async () => {
     // `path.join(cwd, '/abs/input.json')` silently strips the leading
@@ -581,6 +617,61 @@ describe('cli_run', () => {
       path.join(process.cwd(), 'agents', 'my-session.session.json'),
       expect.anything(),
     );
+  });
+
+  it('strips ADK-internal metadata from resumed events and marks them restored', async () => {
+    (loadFileData as Mock).mockResolvedValue({
+      id: 'old-session',
+      appName: 'test-agent',
+      userId: 'test_user',
+      events: [
+        {
+          author: 'user',
+          content: {parts: [{text: 'Hi'}]},
+          customMetadata: {
+            keep: 1,
+            [`${INTERNAL_METADATA_PREFIX}planted`]: 'x',
+            [RESTORED_EVENT_KEY]: false,
+          },
+        },
+      ],
+    });
+    const mockSessionService = createMockSessionService();
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      savedSessionFile: 'session.json',
+      sessionService: mockSessionService,
+    });
+
+    const appended = (mockSessionService.appendEvent as Mock).mock.calls.map(
+      (call) => call[0].event.customMetadata,
+    );
+    expect(appended).toEqual([{keep: 1, [RESTORED_EVENT_KEY]: true}]);
+  });
+
+  it('saves the session without ADK-internal metadata', async () => {
+    const mockSessionService = createMockSessionService();
+    (mockSessionService.getSession as Mock).mockResolvedValue({
+      id: 'session-123',
+      appName: 'test-agent',
+      userId: 'test_user',
+      events: [
+        {author: 'user', customMetadata: {keep: 1, [RESTORED_EVENT_KEY]: true}},
+      ],
+    });
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      saveSession: true,
+      sessionId: 'my-session',
+      sessionService: mockSessionService,
+    });
+
+    const saved = (saveToFile as Mock).mock.calls[0][1];
+    expect(
+      saved.events.map((e: {customMetadata?: unknown}) => e.customMetadata),
+    ).toEqual([{keep: 1}]);
   });
 
   it('should prompt for session id if not provided when saving', async () => {
@@ -931,6 +1022,35 @@ describe('cli_run', () => {
       );
       expect(console.log).not.toHaveBeenCalledWith(expect.any(Error));
       expect(process.exitCode).toBe(1);
+    });
+  });
+
+  describe('environment and logging setup', () => {
+    it('loads .env from the agent directory and supports logToTmp', async () => {
+      const tempDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'adk-cli-run-env-'),
+      );
+      const agentFile = path.join(tempDir, 'agent.ts');
+      fs.writeFileSync(agentFile, '');
+      fs.writeFileSync(
+        path.join(tempDir, '.env'),
+        'ADK_CLI_RUN_DOTENV_TEST=loaded_from_env\n',
+      );
+
+      try {
+        await runAgent({
+          agentPath: agentFile,
+          logToTmp: true,
+          sessionService: createMockSessionService(),
+        });
+
+        expect(process.env['ADK_CLI_RUN_DOTENV_TEST']).toBe('loaded_from_env');
+        expect(AgentFile).toHaveBeenCalledWith(agentFile, undefined);
+      } finally {
+        setLogger(null);
+        delete process.env['ADK_CLI_RUN_DOTENV_TEST'];
+        fs.rmSync(tempDir, {recursive: true, force: true});
+      }
     });
   });
 });
