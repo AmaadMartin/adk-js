@@ -1,5 +1,49 @@
 # Changelog
 
+## [2.3.0](https://github.com/google/adk-js/compare/devtools-v2.2.0...devtools-v2.3.0) (2026-10-13)
+
+
+### Features
+
+* **cli:** bring cli to parity with adk-python v0.1.0 ([#1049](https://github.com/google/adk-js/issues/1049)) ([ecb6bd1](https://github.com/google/adk-js/commit/ecb6bd13d69ad9e442d1936e5c23da08cd0d398e))
+* **dev:** accept customMetadata on the API server run endpoints ([#964](https://github.com/google/adk-js/issues/964)) ([b3e3d2f](https://github.com/google/adk-js/commit/b3e3d2f668be6c69d7e642223a2647a2bbbb821c))
+* **events:** reserve __adk_internal_ customMetadata keys for ADK (adk-python parity) ([#977](https://github.com/google/adk-js/issues/977)) ([2dc6f47](https://github.com/google/adk-js/commit/2dc6f4755594f48df2e7ae260a561e33650b9022))
+
+
+### Bug Fixes
+
+* **core:** prefer explicit appName over app.name in Runner ([#1040](https://github.com/google/adk-js/issues/1040)) ([#1066](https://github.com/google/adk-js/issues/1066)) ([67ea8a6](https://github.com/google/adk-js/commit/67ea8a6e99ce7e79d6a567c2895734f30ce6025e))
+* **dev:** install the cli_create console spies per test ([#1028](https://github.com/google/adk-js/issues/1028)) ([14c9c3d](https://github.com/google/adk-js/commit/14c9c3d58b915dc834306f851bb25c71d3f243c5))
+* **dev:** match adk-python's agent-graph cluster label, outline and edge color ([#974](https://github.com/google/adk-js/issues/974)) ([937f2da](https://github.com/google/adk-js/commit/937f2dac9af6d313690c49ae2017283d0b60ec3f))
+* **dev:** validate replay input before running agent ([#954](https://github.com/google/adk-js/issues/954)) ([d5ab177](https://github.com/google/adk-js/commit/d5ab177d47c1920a529308b568af8cacadcb1d37))
+* **logger:** map numeric levels to Winston names ([#960](https://github.com/google/adk-js/issues/960)) ([e894d35](https://github.com/google/adk-js/commit/e894d35d76cca48b40a4f9d05823181bc466dd01))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @google/adk bumped from ^2.2.0 to ^2.3.0
+
+## [2.2.0](https://github.com/google/adk-js/compare/devtools-v2.1.0...devtools-v2.2.0) (2026-09-30)
+
+
+### Bug Fixes
+
+* **cli:** await the command promise in the adk entrypoint ([#929](https://github.com/google/adk-js/issues/929)) ([8162dbc](https://github.com/google/adk-js/commit/8162dbc2b7a24d95aa00ab70722f3afa103cf539))
+* **cli:** seed the interactive Vertex region prompt from --region in adk create ([#926](https://github.com/google/adk-js/issues/926)) ([cbd2f1c](https://github.com/google/adk-js/commit/cbd2f1c0c25c15175b2bb3690d978ac57daabae1))
+* **cli:** wire --staging_bucket into adk deploy agent_engine ([#893](https://github.com/google/adk-js/issues/893)) ([0194968](https://github.com/google/adk-js/commit/01949683be422aa99591310a539be88dc7f340f7))
+* **dev:** bump adk-web to v1.0.5 to preserve multiline output ([#925](https://github.com/google/adk-js/issues/925)) ([5bbaebe](https://github.com/google/adk-js/commit/5bbaebe4c69332a55977b0e3a586b776840abe4b)), closes [#738](https://github.com/google/adk-js/issues/738)
+* **dev:** make AdkApiServer.stop() safe to call twice ([#916](https://github.com/google/adk-js/issues/916)) ([270be5f](https://github.com/google/adk-js/commit/270be5f2dce9204968abecc060a88ff8a0b51480))
+* **security:** update adm-zip past vulnerable releases ([#923](https://github.com/google/adk-js/issues/923)) ([3c82d43](https://github.com/google/adk-js/commit/3c82d43d0d0c6681c281f404fcc4692aa5ff1103))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @google/adk bumped from ^2.1.0 to ^2.2.0
+
 ## [2.1.0](https://github.com/google/adk-js/compare/devtools-v2.0.0...devtools-v2.1.0) (2026-09-14)
 
 

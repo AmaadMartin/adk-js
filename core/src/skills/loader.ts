@@ -5,7 +5,7 @@
  */
 
 import AdmZip from 'adm-zip';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import {isUtf8} from 'node:buffer';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -250,6 +250,16 @@ export async function loadSkillFromDir(skillDir: string): Promise<Skill> {
 export async function validateSkillDir(skillDir: string): Promise<string[]> {
   const problems: string[] = [];
   const resolvedDir = path.resolve(skillDir);
+
+  try {
+    const stats = await fs.stat(resolvedDir);
+    if (!stats.isDirectory()) {
+      return [`'${resolvedDir}' is not a directory.`];
+    }
+  } catch {
+    // Any stat failure reports "does not exist", matching adk-python Path.exists().
+    return [`Directory '${resolvedDir}' does not exist.`];
+  }
 
   let skill;
   try {
