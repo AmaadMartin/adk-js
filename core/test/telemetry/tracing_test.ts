@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Type} from '@google/genai';
-import {trace} from '@opentelemetry/api';
+import {ApiError, Type} from '@google/genai';
+import {SpanStatusCode, trace} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -16,9 +16,12 @@ import {
   LlmRequest,
   LlmResponse,
   Session,
+  ToolErrorType,
+  ToolExecutionError,
   createEventActions,
 } from '@google/adk';
 import {
+  resolveErrorType,
   traceAgentInvocation,
   traceCallLlm,
   traceMergedToolCalls,
@@ -46,6 +49,8 @@ describe('Telemetry Tracing Functions', () => {
     mockSpan = {
       setAttributes: vi.fn(),
       setAttribute: vi.fn(),
+      setStatus: vi.fn(),
+      recordException: vi.fn(),
     };
 
     mockAgent = {
@@ -138,14 +143,17 @@ describe('Telemetry Tracing Functions', () => {
         tool: mockTool,
         args,
         functionResponseEvent: mockEvent,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert
       expect(mockSpan.setAttributes).toHaveBeenCalledWith({
         'gen_ai.operation.name': 'execute_tool',
+        'gen_ai.system': 'gcp.vertex.agent',
         'gen_ai.tool.description': 'A test tool',
         'gen_ai.tool.name': 'test-tool',
         'gen_ai.tool.type': 'FunctionTool',
+        'gcp.vertex.agent.invocation_id': 'test-invocation-id',
         'gcp.vertex.agent.llm_request': '{}',
         'gcp.vertex.agent.llm_response': '{}',
         'gcp.vertex.agent.tool_call_args': expect.stringContaining('param1'),
@@ -175,6 +183,7 @@ describe('Telemetry Tracing Functions', () => {
         tool: mockTool,
         args: {},
         functionResponseEvent: eventWithoutResponse,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert
@@ -184,6 +193,93 @@ describe('Telemetry Tracing Functions', () => {
         'gcp.vertex.agent.tool_response':
           expect.stringContaining('not specified'),
       });
+    });
+
+    it('records a thrown ADK error using its explicit error type', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const error = new ToolExecutionError(
+        'sensitive tool error details',
+        ToolErrorType.BAD_REQUEST,
+      );
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        error,
+        invocationContext: mockInvocationContext,
+      });
+
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'error.type',
+        ToolErrorType.BAD_REQUEST,
+      );
+      expect(mockSpan.recordException).toHaveBeenCalledWith(error);
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: ToolErrorType.BAD_REQUEST,
+      });
+      expect(mockSpan.setStatus).not.toHaveBeenCalledWith(
+        expect.objectContaining({message: error.message}),
+      );
+    });
+
+    it('records a GenAI API error using its HTTP status', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const error = new ApiError({status: 429, message: 'rate limited'});
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        error,
+        invocationContext: mockInvocationContext,
+      });
+
+      expect(resolveErrorType(error)).toBe('429');
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith('error.type', '429');
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: '429',
+      });
+    });
+
+    it('uses the error class name as the fallback error type', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const error = new TypeError('invalid tool arguments');
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        error,
+        invocationContext: mockInvocationContext,
+      });
+
+      expect(resolveErrorType(error)).toBe('TypeError');
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'error.type',
+        'TypeError',
+      );
+    });
+
+    it('marks a typed error response without recording an exception', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+        errorType: 'MCP_TOOL_ERROR',
+        invocationContext: mockInvocationContext,
+      });
+
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'error.type',
+        'MCP_TOOL_ERROR',
+      );
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: 'MCP_TOOL_ERROR',
+      });
+      expect(mockSpan.recordException).not.toHaveBeenCalled();
     });
   });
 
@@ -210,14 +306,17 @@ describe('Telemetry Tracing Functions', () => {
       traceMergedToolCalls({
         responseEventId: 'merged-event-id',
         functionResponseEvent: mockEventWithJson as unknown as Event,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert - setAttributes is called without tool_response
       expect(mockSpan.setAttributes).toHaveBeenCalledWith({
         'gen_ai.operation.name': 'execute_tool',
+        'gen_ai.system': 'gcp.vertex.agent',
         'gen_ai.tool.name': '(merged tools)',
         'gen_ai.tool.description': '(merged tools)',
         'gen_ai.tool.call.id': 'merged-event-id',
+        'gcp.vertex.agent.invocation_id': 'test-invocation-id',
         'gcp.vertex.agent.tool_call_args': 'N/A',
         'gcp.vertex.agent.event_id': 'merged-event-id',
         'gcp.vertex.agent.llm_request': '{}',
